@@ -1,27 +1,39 @@
 # Roadmap — Next Steps
 
-## Immediate Priorities
+## Documentation Phase (Complete)
 
-### 1. Define node ontology
-Specify the type system for query nodes: how concept, domain, lexical realization, inverse candidates, and morphological categories relate to each other. This is the foundation for the DSL and the pattern engine.
+- [x] Define node ontology → `docs/canonical/04_node-ontology.md`
+- [x] Define internal AST for the DSL → `docs/canonical/05_dsl-ast.md`
+- [x] Define capability validator contract → `docs/canonical/06_capability-validator.md`
+- [x] Define example query-to-AST transformations → `docs/canonical/07_query-to-ast-examples.md`
+- [x] Choose MVP corpus scope → `docs/canonical/08_mvp-corpus-scope.md`
+- [x] Sketch backend service boundaries → `docs/canonical/09_backend-service-boundaries.md`
 
-### 2. Define internal AST for the DSL
-Design the abstract syntax tree that the DSL compiles into. This is what the pattern engine actually executes against — the bridge between human-readable query syntax and deterministic search.
+## Implementation Phase (Next)
 
-### 3. Define capability validator contract
-Specify the interface and rules for the capability validator: what it checks, what outcomes it produces (full support, partial support, unsupported, developer-mode extension suggestion), and how it integrates with the NL-to-DSL pipeline.
+### 1. AST types and DSL parser
+Define Python types for the AST (QueryPlan, SequenceExpr, NodeRef, etc.) and implement a recursive descent parser that compiles DSL text into these types. See docs 05 and 07.
 
-### 4. Define example query-to-AST transformations
-Work through concrete examples showing how DSL queries map to AST structures. This validates the AST design and surfaces edge cases before implementation.
+### 2. Capability validator
+Implement the 12 validation rules and partial plan reduction. See doc 06.
 
-### 5. Choose MVP corpus scope
-Decide whether to start with Greek NT, Hebrew Bible, or a narrower slice. This affects data modeling, ingestion, and what queries are testable early.
+### 3. Corpus ingestion
+Download MorphGNT data, parse it, load into Postgres. Seed the concept registry. See doc 08.
 
-### 6. Sketch backend service boundaries
-Define the service topology: what runs where, what talks to what, and where the boundaries are between the pattern engine, retrieval pipeline, AI layer, and API surface.
+### 4. Pattern engine
+SQL-based sequence search: given a validated QueryPlan and a Postgres token table, find matching sequences. See doc 09.
+
+### 5. API layer
+FastAPI routes for NL query, DSL query, validation, capabilities, and concept registry. See doc 09.
+
+### 6. NL-to-DSL translation
+LLM-based translation with DSL grammar and capability registry as context.
+
+### 7. Result explanation
+Template-based and LLM-assisted explanation of search results.
 
 ## DSL Version Roadmap
 - **v0.1**: concepts, lemmas, ordered sequence, gaps, scope, polarity basics
-- **v0.2**: inverse search, expansion, alternate orders
+- **v0.2**: inverse search, expansion, alternate orders, root and domain nodes
 - **v0.3**: intertwined sequences, contrast pairs, structural templates
 - **v0.4**: parallelism, discourse roles, cross-lingual mediation
