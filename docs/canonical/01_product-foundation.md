@@ -6,6 +6,7 @@ Build an AI-assisted original-language hypothesis exploration platform for Judeo
 ## Core Product Thesis
 The core value is not a chatbot over scripture. The core value is a hypothesis exploration engine that combines deterministic symbolic search with AI-assisted query translation, explanation, and expansion. [CONV-001][CONV-002][DEC-002]
 
+<!-- REQ:01.job-to-be-done -->
 ## Primary Job To Be Done
 Given a user’s natural-language question about a word, concept, sequence, pattern, or inverse-pattern, the system should:
 1. translate the request into formal query syntax,
@@ -36,12 +37,15 @@ Detect passages where positive and negative sequence families are mixed, interru
 Eventually trace patterns across MT, LXX, and NT traditions, with explicit limitations when the engine does not yet support a requested level of alignment. [CONV-002][ASM-005]
 
 ## Non-Negotiable Product Behaviors
+<!-- REQ:01.nl-compiles-to-dsl -->
 ### Natural language compiles to DSL
 Natural language is the primary entry point, but the engine runs formal query syntax underneath. The AI must translate user requests into DSL rather than bypassing it. [CONV-004][DEC-003]
 
+<!-- REQ:01.capability-boundary -->
 ### Capability boundary must be explicit
 If a natural-language request exceeds current query-language or engine capability, the system must not improvise unsupported analysis. It must clearly say it cannot do that yet, or in developer mode propose a roadmap-aligned syntax extension. [CONV-004][DEC-006]
 
+<!-- REQ:01.transparent-evidence -->
 ### Transparent evidence over opaque magic
 The product should show the generated query, explain why results matched, and label exact, approximate, conceptual, extended, inverse, and intertwined matches distinctly. [CONV-001][CONV-002][DEC-007]
 

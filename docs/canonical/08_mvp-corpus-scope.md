@@ -26,6 +26,7 @@ Decide and document the corpus, text edition, annotation requirements, and data 
 - Aramaic portions of Daniel/Ezra (deferred with Hebrew)
 - Textual variant apparatus (future feature, not MVP)
 
+<!-- REQ:08.annotation-layers -->
 ## Required Annotation Layers
 
 Each token in the corpus must carry the following annotations:
@@ -69,6 +70,7 @@ This maps directly to our required annotation layers:
 
 MorphGNT is available on GitHub under the MorphGNT project. The data is derived from the SBLGNT.
 
+<!-- REQ:08.concept-registry -->
 ## Concept Registry — MVP Scope
 
 The concept registry maps concepts to lemmas. For MVP, we need a small but meaningful initial set that covers the flagship use cases.
@@ -106,6 +108,7 @@ This gives ~20 concepts with ~30 lemma mappings, enough to test sequence, polari
 - Each new mapping must be reviewed before it enters the registry (not auto-approved)
 - The registry is versioned alongside the DSL
 
+<!-- REQ:08.ingestion-pipeline -->
 ## Ingestion Pipeline — MVP
 
 ### Steps
@@ -116,6 +119,7 @@ This gives ~20 concepts with ~30 lemma mappings, enough to test sequence, polari
 5. Seed the concept registry from the table above
 6. Build lemma-to-concept index
 
+<!-- REQ:08.token-schema -->
 ### Database Schema (sketch)
 
 ```sql
@@ -134,6 +138,7 @@ CREATE TABLE tokens (
     language VARCHAR(5) DEFAULT 'grc'
 );
 
+<!-- REQ:08.concept-table -->
 -- Concept registry
 CREATE TABLE concepts (
     id SERIAL PRIMARY KEY,
@@ -142,6 +147,7 @@ CREATE TABLE concepts (
     description TEXT
 );
 
+<!-- REQ:08.concept-lemma-table -->
 -- Concept-to-lemma mappings
 CREATE TABLE concept_lemmas (
     concept_id INTEGER REFERENCES concepts(id),
@@ -151,6 +157,7 @@ CREATE TABLE concept_lemmas (
     PRIMARY KEY (concept_id, lemma, language)
 );
 
+<!-- REQ:08.concept-inverse-table -->
 -- Polarity inverse relationships
 CREATE TABLE concept_inverses (
     concept_id INTEGER REFERENCES concepts(id),

@@ -10,6 +10,7 @@ Create a readable but formal domain-specific language for expressing sequence hy
 - extensible through versioned roadmap growth
 - inspectable through visible generated queries and execution plans [CONV-002][CONV-004]
 
+<!-- REQ:02.core-model -->
 ## Core Model
 The DSL represents sequence graphs, not bag-of-words search. A query declares:
 - nodes
@@ -25,6 +26,7 @@ The DSL represents sequence graphs, not bag-of-words search. A query declares:
 ### Simple sequence
 `faith > hope > love`
 
+<!-- REQ:02.typed-nodes -->
 ### Typed nodes
 - `lemma:pistis`
 - `concept:faith`
@@ -32,6 +34,7 @@ The DSL represents sequence graphs, not bag-of-words search. A query declares:
 - `morph:NOUN`
 - `domain:trust`
 
+<!-- REQ:02.operators -->
 ### Operators
 - `>` ordered precedence
 - `>>` immediate adjacency or minimal gap
@@ -41,6 +44,7 @@ The DSL represents sequence graphs, not bag-of-words search. A query declares:
 - `!` exclusion
 - `()` grouping [CONV-002]
 
+<!-- REQ:02.constraints -->
 ### Constraints
 - `>{0,5}` gap constraints
 - `within:verse`
@@ -50,12 +54,14 @@ The DSL represents sequence graphs, not bag-of-words search. A query declares:
 - `book:1cor`
 - `mode:exact|variant|conceptual|hybrid` [CONV-002][DEC-010]
 
+<!-- REQ:02.polarity-syntax -->
 ### Polarity features
 - `+faith > +hope > +love`
 - `-faith > -hope > -love`
 - `inverse(faith > hope > love)`
 - `±faith > ±hope > ±love` [CONV-003][DEC-011]
 
+<!-- REQ:02.expansion-syntax -->
 ### Expansion features
 - `faith > hope > love => forward:2`
 - `faith > hope > love => backward:2`
@@ -65,6 +71,7 @@ The DSL represents sequence graphs, not bag-of-words search. A query declares:
 ## Natural Language Translation Requirement
 The AI should accept natural language and compile it into formal DSL. The generated DSL should be visible and editable. The engine should never silently exceed current DSL support. [CONV-004][DEC-003][DEC-006]
 
+<!-- REQ:02.validation-behavior -->
 ## Validation Behavior
 Every generated query must be checked by a capability validator against:
 - supported node types

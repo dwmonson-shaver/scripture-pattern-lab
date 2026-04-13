@@ -55,6 +55,7 @@ The backend is decomposed into logical components with clear boundaries, but the
 
 ## Component Specifications
 
+<!-- REQ:09.api-gateway -->
 ### 1. API Gateway
 **Location**: `src/app/`
 **Responsibility**: HTTP routing, request validation, authentication (future), rate limiting (future).
@@ -69,6 +70,7 @@ The backend is decomposed into logical components with clear boundaries, but the
 
 **Input/output format**: JSON. Requests and responses use typed schemas.
 
+<!-- REQ:09.nl-to-dsl -->
 ### 2. NL-to-DSL Service
 **Location**: `src/nlp/`
 **Responsibility**: Translate natural language queries into DSL syntax using an LLM.
@@ -92,6 +94,7 @@ class TranslationResult:
 
 **MVP implementation**: Single LLM call with a system prompt containing DSL grammar, capability registry, and concept registry. No fine-tuning, no multi-turn refinement.
 
+<!-- REQ:09.dsl-parser -->
 ### 3. DSL Parser
 **Location**: `src/engine/parser.py`
 **Responsibility**: Parse DSL text into a QueryPlan AST (as defined in `05_dsl-ast.md`).
@@ -105,6 +108,7 @@ def parse(dsl: str) -> QueryPlan
 
 **MVP implementation**: Hand-written recursive descent parser. The grammar is small enough that a parser generator is unnecessary overhead.
 
+<!-- REQ:09.capability-validator -->
 ### 4. Capability Validator
 **Location**: `src/validation/`
 **Responsibility**: Validate a QueryPlan against the current capability registry. Produce structured validation results. (Full contract in `06_capability-validator.md`.)
@@ -116,6 +120,7 @@ def validate(plan: QueryPlan, registry: CapabilityRegistry) -> ValidationResult
 
 **MVP implementation**: Sequential rule checks as specified in the validator contract. The capability registry is loaded from a versioned config file.
 
+<!-- REQ:09.pattern-engine -->
 ### 5. Pattern Engine
 **Location**: `src/engine/`
 **Responsibility**: Execute a validated QueryPlan against the corpus. This is the core deterministic search component.
@@ -135,6 +140,7 @@ class MatchCandidate:
 
 **Future**: For larger corpora, replace SQL scans with indexed sequence search (inverted index + position lists).
 
+<!-- REQ:09.retrieval-pipeline -->
 ### 6. Retrieval Pipeline
 **Location**: `src/retrieval/`
 **Responsibility**: Orchestrate multi-stage retrieval. In MVP, this is a thin wrapper around the pattern engine. In later versions, it coordinates symbolic, lexical, and semantic retrieval stages. [DEC-017]
@@ -150,6 +156,7 @@ class RetrievalResult:
 
 **MVP implementation**: Single-stage symbolic retrieval only (calls the pattern engine). The pipeline interface exists so that semantic retrieval can be added later without changing the API surface.
 
+<!-- REQ:09.scoring-ranking -->
 ### 7. Scoring & Ranking
 **Location**: `src/scoring/`
 **Responsibility**: Score and rank match candidates according to configurable weights. [DEC-019]
@@ -166,6 +173,7 @@ class ScoredMatch:
 
 **MVP implementation**: Simple weighted scoring with default weights. Factors: lexical alignment (do lemmas match exactly?), sequence fidelity (are positions in order with acceptable gaps?), scope precision (verse-level vs. cross-verse). More factors (morphology, semantic, polarity, rarity) added as retrieval stages expand.
 
+<!-- REQ:09.result-explainer -->
 ### 8. Result Builder & Explainer
 **Location**: `src/nlp/explainer.py`
 **Responsibility**: Transform scored matches into user-facing results with explanations. Uses an LLM to generate natural-language explanations of why each result matched and what its limitations are. [DEC-015]
@@ -221,6 +229,7 @@ When scale or team structure demands it, the natural extraction boundaries are:
 - **LLM API**: NL-to-DSL translation, result explanation (Claude or similar)
 - No other external services for MVP
 
+<!-- REQ:09.request-lifecycle -->
 ## Request Lifecycle — MVP
 
 ```

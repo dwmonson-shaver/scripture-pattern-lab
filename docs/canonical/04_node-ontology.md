@@ -12,6 +12,7 @@ Define the type system for query nodes in the Scripture Pattern Lab DSL. Every n
 
 ## Node Types
 
+<!-- REQ:04.node-lemma -->
 ### 1. Lemma
 A dictionary headword in a specific language.
 
@@ -21,6 +22,7 @@ A dictionary headword in a specific language.
 - **Granularity**: Exact lexical identity
 - **Example**: `lemma:pistis` matches every inflected form of πίστις in a Greek corpus
 
+<!-- REQ:04.node-root -->
 ### 2. Root
 A consonantal or morphological root underlying one or more lemmas.
 
@@ -29,6 +31,7 @@ A consonantal or morphological root underlying one or more lemmas.
 - **Scope**: Broader than lemma — a single root may underlie multiple lemmas
 - **Example**: `root:אמן` matches forms derived from the root א-מ-ן including אֱמוּנָה, אָמֵן, נֶאֱמָן
 
+<!-- REQ:04.node-concept -->
 ### 3. Concept
 A language-independent semantic concept that may be realized by multiple lemmas across languages.
 
@@ -37,6 +40,7 @@ A language-independent semantic concept that may be realized by multiple lemmas 
 - **Resolution**: Requires a maintained concept-to-lemma mapping table
 - **Example**: `concept:faith` might resolve to `lemma:pistis` (Greek), `lemma:אֱמוּנָה` (Hebrew), and others depending on the mapping
 
+<!-- REQ:04.node-domain -->
 ### 4. Domain
 A broader semantic field grouping multiple related concepts.
 
@@ -46,6 +50,7 @@ A broader semantic field grouping multiple related concepts.
 - **Scope**: Broader than concept — `domain:trust` might include concepts like faith, faithfulness, reliability, belief
 - **Example**: `domain:trust` expands to `{concept:faith, concept:faithfulness, concept:reliability, concept:belief, ...}`
 
+<!-- REQ:04.node-morph -->
 ### 5. Morphology
 A morphological feature or category.
 
@@ -54,6 +59,7 @@ A morphological feature or category.
 - **Combinable**: Can be combined with other node types as a filter (see Compound Nodes below)
 - **Example**: `morph:IMPERATIVE` matches all imperative verb forms in scope
 
+<!-- REQ:04.node-token -->
 ### 6. Token
 A specific surface form as it appears in the text.
 
@@ -62,6 +68,7 @@ A specific surface form as it appears in the text.
 - **Granularity**: Most specific — matches only the exact inflected/pointed form
 - **Use case**: When the user wants to search for a precise textual form rather than a lemma or concept
 
+<!-- REQ:04.node-wildcard -->
 ### 7. Wildcard
 A placeholder node that matches any single token position.
 
@@ -70,6 +77,7 @@ A placeholder node that matches any single token position.
 - **Use case**: Structural pattern matching where specific content at a position is unknown
 - **Example**: `faith > * > love` matches any three-token sequence where faith and love bookend an arbitrary middle token
 
+<!-- REQ:04.node-hierarchy -->
 ## Node Type Hierarchy
 
 The node types form a specificity hierarchy from narrow to broad:
@@ -92,6 +100,7 @@ wildcard        (structural placeholder)
 - `morph` is orthogonal: it constrains by grammatical feature, not by meaning
 - `wildcard` is maximally broad within structural constraints
 
+<!-- REQ:04.compound-nodes -->
 ## Compound Nodes
 
 Nodes can be combined to create intersection constraints:
@@ -101,6 +110,7 @@ Nodes can be combined to create intersection constraints:
 - **Semantics**: Compound nodes are conjunctions — all constraints must be satisfied simultaneously
 - **Restriction**: Compounds combine a content node (token, lemma, root, concept, domain) with one or more morph filters. Two content nodes in a compound is invalid (use alternatives `|` instead).
 
+<!-- REQ:04.polarity -->
 ## Polarity at the Node Level
 
 Each content node can carry a polarity marker: [DEC-005][DEC-011]
@@ -130,6 +140,7 @@ When the query contains `±concept:faith`, the engine matches both `concept:fait
 ### Polarity and Domains
 Domains inherit polarity behavior from their constituent concepts. `+domain:trust` matches all positive-pole concepts in the trust domain. `-domain:trust` matches all negative-pole concepts.
 
+<!-- REQ:04.matching-rules -->
 ## Node Matching Rules
 
 | Node Type | Corpus Field Matched | Resolution Layer |

@@ -16,6 +16,7 @@ Define the interface, rules, and behavior of the capability validator — a firs
 A `QueryPlan` as defined in `05_dsl-ast.md`.
 
 ### Output
+<!-- REQ:06.validation-result -->
 A `ValidationResult`:
 
 ```
@@ -27,6 +28,7 @@ ValidationResult
 └── suggestion: ExtensionSuggestion | null # Developer-mode only
 ```
 
+<!-- REQ:06.validation-finding -->
 ### ValidationFinding
 Each finding describes one specific capability gap or concern.
 
@@ -68,6 +70,7 @@ ExtensionSuggestion
 ├── description: string                    # Human-readable explanation of the gap
 ```
 
+<!-- REQ:06.capability-registry -->
 ## Capability Registry
 
 The validator checks the QueryPlan against a `CapabilityRegistry` — a declarative manifest of what the engine currently supports.
@@ -112,64 +115,77 @@ CapabilityRegistry
 
 The validator applies the following checks in order:
 
+<!-- REQ:06.rule-1 -->
 ### 1. Version compatibility
 Check that `QueryPlan.version` is compatible with the engine version.
 
+<!-- REQ:06.rule-2 -->
 ### 2. Node type support
 For each `NodeRef` in the plan, verify `NodeRef.type` is in `CapabilityRegistry.nodeTypes`.
 
 **Finding code**: `UNSUPPORTED_NODE_TYPE`
 
+<!-- REQ:06.rule-3 -->
 ### 3. Operator support
 For each `OrderOperator`, verify `OrderOperator.type` is in `CapabilityRegistry.operators`.
 
 **Finding code**: `UNSUPPORTED_OPERATOR`
 
+<!-- REQ:06.rule-4 -->
 ### 4. Gap constraint support
 If any operator has a `GapConstraint`, verify gap constraints are supported and within `maxGap`.
 
 **Finding code**: `UNSUPPORTED_GAP_CONSTRAINT`, `GAP_EXCEEDS_MAX`
 
+<!-- REQ:06.rule-5 -->
 ### 5. Polarity support
 If any `NodeRef` has a non-null polarity, verify `polaritySupport` is true.
 
 **Finding code**: `UNSUPPORTED_POLARITY`
 
+<!-- REQ:06.rule-6 -->
 ### 6. Inverse support
 If the plan contains an `InverseExpr`, verify `inverseSupport` is true.
 
 **Finding code**: `UNSUPPORTED_INVERSE`
 
+<!-- REQ:06.rule-7 -->
 ### 7. Expansion support
 If the plan has an `ExpansionDirective`, verify `expansionSupport` is true.
 
 **Finding code**: `UNSUPPORTED_EXPANSION`
 
+<!-- REQ:06.rule-8 -->
 ### 8. Compound node support
 If any `NodeRef` has `morphFilters`, verify `compoundNodeSupport` is true.
 
 **Finding code**: `UNSUPPORTED_COMPOUND_NODE`
 
+<!-- REQ:06.rule-9 -->
 ### 9. Match mode support
 Verify `QueryPlan.mode` is in `CapabilityRegistry.matchModes`.
 
 **Finding code**: `UNSUPPORTED_MATCH_MODE`
 
+<!-- REQ:06.rule-10 -->
 ### 10. Scope validation
 Verify each scope field is supported. Verify corpus and language values exist in the registry.
 
 **Finding codes**: `UNSUPPORTED_SCOPE_FIELD`, `UNKNOWN_CORPUS`, `UNKNOWN_LANGUAGE`
 
+<!-- REQ:06.rule-11 -->
 ### 11. Sequence length
 Verify the sequence length does not exceed `maxSequenceLength`.
 
 **Finding code**: `SEQUENCE_TOO_LONG`
 
+<!-- REQ:06.rule-12 -->
 ### 12. Structural validation
 Verify the AST is well-formed: no empty sequences, no orphaned operators, no invalid compound combinations.
 
 **Finding codes**: `EMPTY_SEQUENCE`, `MALFORMED_AST`, `INVALID_COMPOUND`
 
+<!-- REQ:06.partial-reduction -->
 ## Partial Plan Reduction
 
 When the status is `partial`, the validator must produce a reduced `executablePlan`. Reduction rules:

@@ -12,6 +12,7 @@ Define the internal representation that DSL query strings compile into. The AST 
 
 ## Top-Level Structure
 
+<!-- REQ:05.query-plan -->
 Every compiled query produces a `QueryPlan`:
 
 ```
@@ -28,6 +29,7 @@ QueryPlan
 
 ## Expression Nodes
 
+<!-- REQ:05.sequence-expr -->
 ### SequenceExpr
 An ordered list of steps with order operators between them.
 
@@ -37,6 +39,7 @@ SequenceExpr
 └── operators: OrderOperator[]   # Operators between adjacent steps (length = steps.length - 1)
 ```
 
+<!-- REQ:05.step-expr -->
 ### StepExpr
 A single position in the sequence. One of:
 
@@ -45,6 +48,7 @@ A single position in the sequence. One of:
 - **AlternativeExpr** — a choice between options
 - **OptionalExpr** — an optional step
 
+<!-- REQ:05.node-ref -->
 ### NodeRef
 A reference to a node in the ontology, optionally with polarity and morph filters.
 
@@ -57,6 +61,7 @@ NodeRef
 └── negated: boolean             # True if preceded by ! (exclusion)
 ```
 
+<!-- REQ:05.group-expr -->
 ### GroupExpr
 A parenthesized sub-sequence, treated as a single step.
 
@@ -66,6 +71,7 @@ GroupExpr
 └── negated: boolean
 ```
 
+<!-- REQ:05.alternative-expr -->
 ### AlternativeExpr
 A choice between two or more options at a single step position.
 
@@ -75,6 +81,7 @@ AlternativeExpr
 └── negated: boolean
 ```
 
+<!-- REQ:05.optional-expr -->
 ### OptionalExpr
 A step that may or may not be present in a match.
 
@@ -85,6 +92,7 @@ OptionalExpr
 
 ## Operators
 
+<!-- REQ:05.order-operator -->
 ### OrderOperator
 Defines the relationship between adjacent steps.
 
@@ -99,6 +107,7 @@ Mapping from DSL surface syntax:
 - `>>` → `adjacency` (immediate or minimal gap)
 - `~` → `cooccurrence` (unordered nearby)
 
+<!-- REQ:05.gap-constraint -->
 ### GapConstraint
 Limits the distance between two steps.
 
@@ -112,6 +121,7 @@ DSL syntax `>{0,5}` compiles to `GapConstraint { min: 0, max: 5 }`.
 
 ## Scope
 
+<!-- REQ:05.scope-constraint -->
 ### ScopeConstraint
 Defines the search boundaries.
 
@@ -125,6 +135,7 @@ ScopeConstraint
 
 ## Match Mode
 
+<!-- REQ:05.match-mode -->
 ```
 MatchMode: "exact" | "variant" | "conceptual" | "hybrid"
 ```
@@ -136,6 +147,7 @@ MatchMode: "exact" | "variant" | "conceptual" | "hybrid"
 
 ## Expansion
 
+<!-- REQ:05.expansion-directive -->
 ### ExpansionDirective
 Instructs the engine to explore beyond the stated sequence.
 
@@ -151,6 +163,7 @@ DSL syntax mapping:
 
 ## Ranking
 
+<!-- REQ:05.ranking-prefs -->
 ### RankingPrefs
 Optional user-specified ranking preferences.
 
@@ -171,6 +184,7 @@ Default weights are engine-defined when RankingPrefs is null.
 
 ## Polarity in the AST
 
+<!-- REQ:05.inverse-expr -->
 ### InverseExpr
 The `inverse()` function in the DSL compiles to a wrapper that instructs the engine to resolve all nodes to their inverse-pole equivalents.
 
@@ -279,6 +293,7 @@ QueryPlan {
 
 The capability validator receives a `QueryPlan` and checks each node against the current engine capabilities. The AST makes this straightforward because every feature is explicitly represented as a typed structure rather than embedded in free text. See `06_capability-validator.md` for the full contract.
 
+<!-- REQ:05.serialization -->
 ## Serialization
 
 The AST must be serializable to JSON for:
