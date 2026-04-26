@@ -47,6 +47,27 @@ For any feature or non-trivial change:
 
 4. **Implement** — Follow the structure outline phase by phase. Commit after each phase. Run tests between phases. Stop and realign if something diverges from the design.
 
+5. **Close out** — At the end of every step AND between phases, run `/close-step`. Do not skip. (See "Phase Discipline" below.)
+
+### Phase Discipline (Context Hygiene)
+
+Each of `/research`, `/design`, `/structure`, `/implement` is meant to run with
+a clean context. The artifacts on disk (`design-*.md`, `structure-*.md`,
+governance files, `project_status.md` memory) are the handoff between phases —
+not chat history.
+
+- Before a new phase: the assistant runs `/close-step` for the current phase, then recommends `/clear` and names the next command. The user triggers `/clear`.
+- `/research` is goal-blind by rule. That only works if prior design conversation is not in context.
+- Within one phase, keep context until the phase is done.
+- The assistant drives this without being asked. The user should never have to re-explain the methodology.
+
+### Resume Behavior
+
+When the user opens a session and asks "what's next?":
+1. Read `project_status.md` memory for the resume cue.
+2. Verify it against current code state (memory can be stale).
+3. Present the next step/phase + the exact command to run.
+
 ### Command Quick Reference
 
 | Command | Purpose |
@@ -58,6 +79,7 @@ For any feature or non-trivial change:
 | `/commit` | Stage and commit changes |
 | `/review` | Extract decisions, check spec divergence, update governance |
 | `/coverage` | Audit spec-to-code-to-test coverage against REQ markers |
+| `/close-step` | Close out a step/phase: confirm clean state, update memory, prep for `/clear` |
 
 ## Commit Conventions
 - Commit after each implementation phase, not at the end
