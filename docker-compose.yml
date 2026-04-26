@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: spl-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spl_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-scripture_pattern_lab}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - spl_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spl} -d ${POSTGRES_DB:-scripture_pattern_lab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  spl_pgdata:
