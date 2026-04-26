@@ -86,3 +86,14 @@
 ## DEC-020 — MVP should be narrow but rigorous
 - Status: Accepted
 - Sources: CONV-002
+
+## DEC-021 — Apply Postgres schemas explicitly, not via initdb auto-load
+- Status: Accepted
+- Question: How should database schemas be applied to the dev container?
+- Decision: Apply schemas via `psql` or a migration tool. Do not mount schema files into `/docker-entrypoint-initdb.d/`.
+- Rationale: initdb scripts only run when the data dir is empty. After first boot, schema edits silently no-op — exactly the kind of drift the project's "no slop" rule is meant to prevent. Explicit application keeps schema changes visible during the dev loop.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 99a2477
+- Files: docker-compose.yml, data/schemas/README.md
+- Spec refs: REQ:08.token-schema (related — mechanism, not schema content)
