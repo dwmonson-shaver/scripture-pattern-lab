@@ -20,6 +20,10 @@ venv/
 # Working artifacts (governance files in docs/ are the permanent record)
 thoughts/
 
+# Raw corpus data — fetched on demand, not committed (separate license, large, reproducible)
+data/raw/*
+!data/raw/README.md
+
 # OS
 .DS_Store
 Thumbs.db
