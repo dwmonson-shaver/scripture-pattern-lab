@@ -5,6 +5,7 @@ description = "AI-assisted original-language hypothesis exploration platform for
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "psycopg[binary]>=3",
     "pydantic>=2.0",
     "sqlalchemy>=2.0",
     "uvicorn>=0.30",
@@ -34,3 +35,7 @@ select = ["E", "F", "I", "N", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests that require a live Postgres (DATABASE_URL); excluded by default",
+]
+addopts = "-m 'not integration'"
