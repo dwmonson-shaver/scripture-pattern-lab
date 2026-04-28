@@ -66,7 +66,12 @@ not chat history.
 When the user opens a session and asks "what's next?":
 1. Read `project_status.md` memory for the resume cue.
 2. Verify it against current code state (memory can be stale).
-3. Present the next step/phase + the exact command to run.
+3. Present the **full close-out summary**, not just the next command:
+   - **Last completed:** step/phase title + the relevant commit SHAs.
+   - **What got saved:** decision-log entries, spec-coverage updates, canonical-doc edits, memory files written during the previous session's close-out.
+   - **Next step/phase:** title + the exact command to run.
+   - **Carry-over context:** non-obvious items from `project_status.md`'s Carry-over section (numbering conflicts, environment gaps, ordering recommendations).
+   - **Cross-cutting recommendations:** anything from outside this phase that should land first or alongside (e.g., epistemic-discipline backlog items).
 
 ### Command Quick Reference
 
