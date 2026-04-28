@@ -8,6 +8,7 @@ An AI-assisted original-language hypothesis exploration platform for Judeo-Chris
 - The system must say when it cannot do something yet
 - Symbolic retrieval is the core engine; embeddings are supporting
 - Results must distinguish match types (exact, conceptual, inverse, expanded, intertwined)
+- The corpus is ground truth; user hypotheses and registry entries are priors. The system's job is to test priors, not confirm them.
 - No slop. Read and own every line of code generated.
 
 ## Quality Gates
