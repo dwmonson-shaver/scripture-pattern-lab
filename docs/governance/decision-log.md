@@ -97,3 +97,25 @@
 - Commit: 99a2477
 - Files: docker-compose.yml, data/schemas/README.md
 - Spec refs: REQ:08.token-schema (related — mechanism, not schema content)
+
+## DEC-022 — Fail loud when no schema files match in apply_schemas.sh
+- Status: Accepted
+- Question: What should `scripts/db/apply_schemas.sh` do if the `data/schemas/*.sql` glob is empty?
+- Decision: Exit non-zero with a clear "No schema files found" message. Do not silently succeed.
+- Rationale: Same spirit as DEC-021 — silent no-ops are exactly the failure mode this project commits to avoiding. An empty schema directory means something is misconfigured, and the user should hear about it on the first run, not three steps later when a query fails for a missing table.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 5ba8aae
+- Files: scripts/db/apply_schemas.sh
+- Spec refs: REQ:08.ingestion-pipeline (related — mechanism for step 4)
+
+## DEC-023 — Use `psql -v ON_ERROR_STOP=1` in apply_schemas.sh
+- Status: Accepted
+- Question: Should `apply_schemas.sh` continue running statements within a schema file after one fails, or abort on the first error?
+- Decision: Pass `-v ON_ERROR_STOP=1` to `psql` so each schema file aborts on the first error.
+- Rationale: Atomic-per-file is the predictable behavior. Half-applied schemas (some indexes created, others skipped) are worse than no schema — a `\d tokens` SELECT cannot distinguish a missing index from one whose creation silently failed mid-script. Failing loud preserves the ability to diagnose.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 5ba8aae
+- Files: scripts/db/apply_schemas.sh
+- Spec refs: REQ:08.ingestion-pipeline (related — mechanism for step 4)
