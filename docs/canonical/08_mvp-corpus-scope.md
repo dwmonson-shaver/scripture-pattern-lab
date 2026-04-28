@@ -42,6 +42,13 @@ Each token in the corpus must carry the following annotations:
 | Verse | Text structure | 13 |
 | Token position | Sequential index | 1-based within verse |
 
+<!-- REQ:08.apparatus-marks -->
+### Editorial apparatus marks
+
+SBLGNT preserves critical-apparatus marks (`⸀ ⸂ ⸃`) on tokens that carry editorial decisions about the underlying text. The ingestion pipeline retains these marks in `surface_form` (for citation fidelity) and removes them from `normalized_form` (the canonical match key). Queries that need to match real tokens should target `normalized_form` or `lemma`; matching against `surface_form` will silently miss any token carrying apparatus marks.
+
+No `surface_form` index is created for this reason — indexing it would invite the silent-miss failure mode.
+
 ### Nice-to-have for MVP (if available without significant effort)
 - Clause boundaries (from OpenText or similar)
 - Sentence boundaries
@@ -112,7 +119,7 @@ This gives ~20 concepts with ~30 lemma mappings, enough to test sequence, polari
 ## Ingestion Pipeline — MVP
 
 ### Steps
-1. Download MorphGNT data (TSV per book)
+1. Download MorphGNT data (one file per book; rows are single-ASCII-space delimited, 7 columns each)
 2. Parse each row into a structured token record
 3. Assign sequential token IDs (global and per-verse)
 4. Load into Postgres with appropriate indexes
@@ -129,13 +136,15 @@ CREATE TABLE tokens (
     book VARCHAR(10) NOT NULL,
     chapter INTEGER NOT NULL,
     verse INTEGER NOT NULL,
-    position INTEGER NOT NULL,       -- 1-based position within verse
+    position INTEGER NOT NULL,        -- 1-based position within verse
     global_position INTEGER NOT NULL, -- 1-based position within corpus
-    surface_form TEXT NOT NULL,
+    surface_form TEXT NOT NULL,       -- raw token, apparatus marks preserved
+    normalized_form TEXT NOT NULL,    -- canonical match key, apparatus marks removed
     lemma TEXT NOT NULL,
     morph_code VARCHAR(20) NOT NULL,
     pos VARCHAR(10) NOT NULL,
-    language VARCHAR(5) DEFAULT 'grc'
+    language VARCHAR(5) DEFAULT 'grc',
+    corpus_id VARCHAR(10) DEFAULT 'nt' -- forward-compat for non-NT corpora
 );
 
 <!-- REQ:08.concept-table -->

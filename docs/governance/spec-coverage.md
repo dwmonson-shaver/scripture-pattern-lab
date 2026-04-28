@@ -18,6 +18,7 @@ Last updated: 2026-04-28 (partial — phase 1 of corpus parser; full table pendi
 | REQ:08.token-schema | Database schema for the corpus token table | `data/schemas/01_tokens.sql` | — | DEC-021 |
 | REQ:08.ingestion-pipeline | Steps for ingesting MorphGNT data into Postgres | `scripts/db/apply_schemas.sh` (step 4 only; steps 1–3, 5–6 pending) | — | DEC-021, DEC-022, DEC-023 |
 | REQ:08.annotation-layers | Per-token surface form, lemma, morph, POS, book, chapter, verse, position | `data/schemas/01_tokens.sql` (column structure only; ingestion code pending phases 3–4) | — | — |
+| REQ:08.apparatus-marks | Apparatus marks preserved in `surface_form`, removed from `normalized_form`; queries target `normalized_form` or `lemma` | `data/schemas/01_tokens.sql` (no `surface_form` index, per the policy; parser implementation pending phase 3) | — | — |
 
 _Run `/coverage` to populate this table from `<!-- REQ:... -->` markers in `docs/canonical/`._
 
@@ -30,3 +31,4 @@ _None tracked yet — pending `/coverage` run for full audit._
 - `REQ:08.token-schema` — schema applies, but no tests exercise it (integration test arrives in phase 4).
 - `REQ:08.ingestion-pipeline` step 4 — apply script verified manually (idempotency check via container psql); no automated test covers it.
 - `REQ:08.annotation-layers` — column structure is in place, no rows yet, no tests.
+- `REQ:08.apparatus-marks` — schema honors the policy (no `surface_form` index); apparatus-mark handling in the parser arrives in phase 3 with its own unit test.
