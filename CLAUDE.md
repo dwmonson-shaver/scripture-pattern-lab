@@ -31,6 +31,7 @@ An AI-assisted original-language hypothesis exploration platform for Judeo-Chris
 ## Architecture Boundaries
 - `src/app/` — FastAPI routes and request/response schemas only
 - `src/engine/` — DSL parser and pattern engine (no HTTP, no AI)
+- `src/ingestion/` — corpus loaders (file IO + DB bulk insert)
 - `src/nlp/` — NL-to-DSL translation and result explanation (AI layer)
 - `src/ontology/` — Concept and domain registry access
 - `src/retrieval/` — Multi-stage retrieval orchestration
