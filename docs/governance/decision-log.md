@@ -165,3 +165,37 @@
 - Commit: 1f4cf77
 - Files: src/ingestion/corpus_parser.py
 - Spec refs: REQ:08.ingestion-pipeline (step 3 — sequential token IDs, per-verse and global)
+
+## DEC-028 — Use `TRUNCATE … RESTART IDENTITY` (not subprocess re-apply) for integration-test reset
+- Status: Accepted
+- Question: The integration test needs a clean `tokens` table at start. `thoughts/design-corpus-parser-2026-04-26.md` left the choice open between `subprocess.run(['bash', 'scripts/db/apply_schemas.sh'])` and `TRUNCATE tokens`. Which is the right reset strategy?
+- Decision: A module-scoped fixture issues `TRUNCATE TABLE tokens RESTART IDENTITY` once at session start; the schema is assumed already applied (`apply_schemas.sh` is run as a one-time prereq, not from the test harness). A separate one-off check that `apply_schemas.sh` is idempotent on a fresh schema-less DB is owed and tracked under `/coverage` follow-up.
+- Rationale: Sub-millisecond reset vs. spawning psql via subprocess on every run; no shell-out coupling between Python tests and bash scripts; schema is canonical from Phase 1's apply (preserved across container restarts in the `spl_pgdata` volume) and the Phase 4 drift trap (DEC-030) catches mirror divergence directly without needing the apply script in the test path. `RESTART IDENTITY` makes the SERIAL `id` counter predictable across test runs.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 381117e
+- Files: tests/integration/test_corpus_ingest.py
+- Spec refs: REQ:08.ingestion-pipeline (step 4 — load into Postgres)
+- Cross-refs: DEC-021 (apply schemas explicitly), DEC-030 (drift trap that compensates for not re-running the apply script)
+
+## DEC-029 — `get_engine()` normalizes `postgresql://` URLs to `postgresql+psycopg://`
+- Status: Accepted
+- Question: SQLAlchemy 2.0 defaults a bare `postgresql://` URL to the `psycopg2` DBAPI, but the project's only Postgres driver is `psycopg[binary]>=3` (psycopg3). `.env.example` (and operator muscle memory) uses the bare form. How should `get_engine()` reconcile this?
+- Decision: Inside `get_engine()`, rewrite a leading `postgresql://` to `postgresql+psycopg://` before handing the URL to `create_engine`. URLs already carrying an explicit dialect prefix (`postgresql+psycopg://`, `postgresql+asyncpg://`, etc.) pass through unchanged. The fail-loud `RuntimeError` for unset `DATABASE_URL` precedes the rewrite.
+- Rationale: Without normalization, the integration test fails with `ModuleNotFoundError: No module named 'psycopg2'` — a confusing, indirect error pointing at a dependency that isn't part of this project. Normalizing in code keeps the documented `.env.example` form working and means new developers don't need to memorize the SQLAlchemy dialect-prefix convention. Three lines, well-commented. The trade-off is a minor "implicit" wart vs. operator friction; chose minimal friction since psycopg3 is the only driver this project will ever ship.
+- Confidence: Medium — defensive shim. Reconsider if/when a second Postgres driver (e.g. `asyncpg` for async routes) enters scope; at that point an explicit `.env` prefix may become preferable.
+- Made-by: human-approved
+- Commit: 381117e
+- Files: src/ingestion/db.py
+- Spec refs: — (cross-cuts design decision #9 on driver choice in `thoughts/design-corpus-parser-2026-04-26.md`)
+
+## DEC-030 — Three-way schema-drift assertion (live SQL ↔ Core mirror ↔ `CorpusToken`)
+- Status: Accepted
+- Question: The project's `tokens` schema lives in three places: the canonical `data/schemas/01_tokens.sql`, the SQLAlchemy Core `tokens_table` mirror in `src/ingestion/db.py`, and the `CorpusToken` Pydantic model in `src/ingestion/corpus_parser.py`. The carry-over note from Phase 3 specified a two-way drift check (reflected SQL ↔ `CorpusToken`). Should the integration suite also check the Core mirror?
+- Decision: A single integration test (`test_schema_three_way_consistency`) reflects the live `tokens` table into a fresh `MetaData`, then asserts: (a) reflected columns equal `tokens_table.columns.keys()` exactly, and (b) reflected columns minus `{"id"}` equal `CorpusToken.model_fields.keys()`. Failure messages name the only-in-X and only-in-Y sets so divergences read at a glance.
+- Rationale: Pair (a) catches Core-mirror drift directly at test time (otherwise the failure surfaces as a low-level driver error during `insert(tokens_table)`); pair (b) catches Pydantic drift. Together they guarantee all three sources stay in lock-step, which matters because future query code (e.g. the pattern engine) is expected to use `tokens_table.c.X` selectors. One extra line of code, covers a third drift path, and gives a clear name to a previously implicit failure mode.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 381117e
+- Files: tests/integration/test_corpus_ingest.py
+- Spec refs: REQ:08.token-schema
