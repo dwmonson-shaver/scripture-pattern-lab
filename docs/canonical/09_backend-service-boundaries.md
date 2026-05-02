@@ -198,6 +198,23 @@ class ExplainedResult:
 
 **MVP implementation**: Template-based explanation for exact/variant matches. LLM explanation for conceptual matches or when results need qualification.
 
+<!-- REQ:09.ingestion -->
+### 9. Corpus Ingestion (non-request-path)
+**Location**: `src/ingestion/`
+**Responsibility**: Parse corpus source files (MorphGNT today, future corpora later), bulk-load tokens into Postgres, manage schema apply. Invoked from scripts or workers — never from a query route. [DEC-025]
+
+**Interface**:
+```python
+def parse_corpus_file(path: Path, *, start_global_position: int = 1) -> Iterator[CorpusToken]
+def parse_corpus_directory(directory: Path) -> Iterator[CorpusToken]
+def load_tokens(engine: Engine, tokens: Iterable[CorpusToken]) -> int
+def get_engine() -> Engine
+```
+
+**Dependency direction**: Query-side packages (`src/app/`, `src/engine/`, `src/nlp/`, `src/ontology/`, `src/retrieval/`, `src/scoring/`, `src/validation/`) **must not import** `src/ingestion/`. They consume persisted corpus and registry data through stable read interfaces (the `tokens` table; future read-only ontology helpers). Ingestion is the only component that issues bulk writes to corpus tables and applies schema files.
+
+**MVP implementation**: SQLAlchemy 2.0 Core, 1000-row batches in a single transaction. Schema apply is a shell entrypoint (`scripts/db/apply_schemas.sh`), not a Python migration tool. [DEC-021] [DEC-028]
+
 ## Communication Model
 
 ### MVP: In-Process
@@ -215,6 +232,8 @@ FastAPI process
 ├── explainer (src/nlp/explainer.py)
 └── Postgres connection pool
 ```
+
+`src/ingestion/` is in the codebase but runs outside this process — invoked via a script or worker (see component §9). Query-side modules above must not import from it.
 
 ### Future: Extraction Points
 When scale or team structure demands it, the natural extraction boundaries are:
@@ -277,6 +296,10 @@ src/
 │   ├── parser.py             # DSL parser → QueryPlan
 │   ├── executor.py           # Pattern engine
 │   └── models.py             # AST node types (QueryPlan, SequenceExpr, etc.)
+├── ingestion/                 # Non-request-path; not imported by query-side packages
+│   ├── corpus_parser.py      # MorphGNT parser → CorpusToken iterator
+│   ├── db.py                  # SQLAlchemy 2.0 Core engine + tokens_table mirror
+│   └── loader.py              # Bulk loader (1000-row batches, single transaction)
 ├── nlp/
 │   ├── translator.py         # NL-to-DSL translation
 │   └── explainer.py          # Result explanation
@@ -302,6 +325,6 @@ src/
 - Volatility: Medium (component boundaries are stable; implementation details will evolve)
 
 ## References
-- Decisions: DEC-003, DEC-006, DEC-012, DEC-014, DEC-015, DEC-017, DEC-019, DEC-020
+- Decisions: DEC-003, DEC-006, DEC-012, DEC-014, DEC-015, DEC-017, DEC-019, DEC-020, DEC-021, DEC-025, DEC-028
 - Assumptions: ASM-003
 - Prior docs: 05_dsl-ast.md, 06_capability-validator.md, 08_mvp-corpus-scope.md
