@@ -161,6 +161,13 @@ class TestTokenize:
         words = [t.value for t in tokens if t.kind == TokenKind.WORD]
         assert words == ["book", "rom", "1cor", "2cor"]
 
+    def test_wildcard_star(self) -> None:
+        tokens = tokenize("*")
+        non_eof = [t for t in tokens if t.kind != TokenKind.EOF]
+        assert len(non_eof) == 1
+        assert non_eof[0].kind == TokenKind.WORD
+        assert non_eof[0].value == "*"
+
 
 # ---------------------------------------------------------------------------
 # Phase 2: Core parser — sequences, steps, operators
@@ -202,6 +209,13 @@ class TestParseNodeRef:
         node = p.parse_node_ref()
         assert node.polarity == "±"
 
+    def test_wildcard(self) -> None:
+        p = _make_parser("*")
+        node = p.parse_node_ref()
+        assert isinstance(node, NodeRef)
+        assert node.type == NodeType.WILDCARD
+        assert node.value == "*"
+
 
 class TestParseSequence:
     def test_simple_three_step(self) -> None:
@@ -229,6 +243,16 @@ class TestParseSequence:
         p = _make_parser("faith ~ hope")
         seq = p.parse_sequence()
         assert seq.operators[0].type == OperatorType.COOCCURRENCE
+
+    def test_wildcard_in_sequence(self) -> None:
+        p = _make_parser("* > concept:faith")
+        seq = p.parse_sequence()
+        assert len(seq.steps) == 2
+        assert isinstance(seq.steps[0], NodeRef)
+        assert seq.steps[0].type == NodeType.WILDCARD
+        assert isinstance(seq.steps[1], NodeRef)
+        assert seq.steps[1].type == NodeType.CONCEPT
+        assert seq.steps[1].value == "faith"
 
 
 class TestParseAlternative:

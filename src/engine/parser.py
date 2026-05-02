@@ -138,6 +138,13 @@ def tokenize(source: str) -> list[Token]:
             i += 1
             continue
 
+        # Wildcard — emitted as WORD so _parse_typed_value's `word_tok.value == "*"`
+        # branch is reachable (NodeType.WILDCARD is part of the v0.1 spec).
+        if ch == "*":
+            tokens.append(Token(kind=TokenKind.WORD, value="*", pos=i))
+            i += 1
+            continue
+
         # Words: letters, digits, underscores, dots, Unicode (for Hebrew/Greek)
         if _is_word_char(ch):
             start = i
