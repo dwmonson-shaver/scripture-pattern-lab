@@ -37,10 +37,12 @@ Each token in the corpus must carry the following annotations:
 | Lemma | MorphGNT | πίστις |
 | Morphological parse | MorphGNT | N-NSF (noun, nominative, singular, feminine) |
 | Part of speech | Derived from morph parse | NOUN |
-| Book | Text structure | 1cor |
+| Book | Text structure | 07 |
 | Chapter | Text structure | 13 |
 | Verse | Text structure | 13 |
 | Token position | Sequential index | 1-based within verse |
+
+Book values are stored as 2-digit `BB` codes from MorphGNT's `BBCCVV` row prefix (e.g. `07` for 1 Corinthians, `25` for 3 John). See DEC-026.
 
 <!-- REQ:08.apparatus-marks -->
 ### Editorial apparatus marks
