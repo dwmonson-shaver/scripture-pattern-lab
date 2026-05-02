@@ -189,6 +189,29 @@ _NODE_TYPE_PREFIXES = {"lemma", "concept", "root", "morph", "domain", "token"}
 _DIRECTIVE_KEYWORDS = {"within", "lang", "corpus", "book", "mode"}
 
 
+def _distribute_polarity(step: "StepExpr", polarity: str) -> "StepExpr":
+    """Apply polarity to each NodeRef inside a group/alternative.
+
+    Per docs/canonical/05_dsl-ast.md:252-271, `+(concept:hope | concept:expectation)`
+    expands to an AlternativeExpr where each NodeRef option carries polarity '+'.
+    Recurses into nested groups/alternatives so polarity on `+((a | b) | c)` reaches
+    every leaf NodeRef.
+    """
+    from src.engine.models import AlternativeExpr, GroupExpr, NodeRef
+
+    if isinstance(step, NodeRef):
+        return step.model_copy(update={"polarity": polarity})
+    if isinstance(step, AlternativeExpr):
+        return step.model_copy(
+            update={"options": [_distribute_polarity(opt, polarity) for opt in step.options]}
+        )
+    if isinstance(step, GroupExpr):
+        new_steps = [_distribute_polarity(s, polarity) for s in step.sequence.steps]
+        new_seq = step.sequence.model_copy(update={"steps": new_steps})
+        return step.model_copy(update={"sequence": new_seq})
+    return step
+
+
 class _Parser:
     """Recursive descent parser consuming a token list."""
 
@@ -269,6 +292,18 @@ class _Parser:
     # --- Step parsing ---
 
     def parse_step(self) -> "StepExpr":
+        # Polarity prefix on a parenthesized alternative/group:
+        # `+(concept:hope | concept:expectation)` distributes polarity to each
+        # NodeRef option per docs/canonical/05_dsl-ast.md:252-271.
+        if (
+            self.peek().kind in (TokenKind.PLUS, TokenKind.MINUS, TokenKind.PLUSMINUS)
+            and self.pos + 1 < len(self.tokens)
+            and self.tokens[self.pos + 1].kind == TokenKind.LPAREN
+        ):
+            polarity = self._parse_polarity()
+            assert polarity is not None
+            return _distribute_polarity(self.parse_group_or_alternative(), polarity)
+
         # Optional: [step]
         if self.at(TokenKind.LBRACKET):
             return self.parse_optional()

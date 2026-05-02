@@ -270,6 +270,36 @@ class TestParseAlternative:
         assert isinstance(step, AlternativeExpr)
         assert len(step.options) == 3
 
+    def test_polarity_distributes_to_alternative_options(self) -> None:
+        # Per docs/canonical/05_dsl-ast.md:252-271, `+(...)` distributes polarity
+        # to every NodeRef option.
+        p = _make_parser("+(concept:hope | concept:expectation)")
+        step = p.parse_step()
+        assert isinstance(step, AlternativeExpr)
+        assert len(step.options) == 2
+        assert all(isinstance(opt, NodeRef) for opt in step.options)
+        assert step.options[0].polarity == "+"
+        assert step.options[1].polarity == "+"
+        assert step.options[0].value == "hope"
+        assert step.options[1].value == "expectation"
+
+    def test_minus_polarity_before_alternative(self) -> None:
+        p = _make_parser("-(concept:doubt | concept:fear)")
+        step = p.parse_step()
+        assert isinstance(step, AlternativeExpr)
+        assert step.options[0].polarity == "-"
+        assert step.options[1].polarity == "-"
+
+    def test_canonical_05_polarity_alternatives_sequence(self) -> None:
+        # The exact DSL on docs/canonical/05_dsl-ast.md:252.
+        p = _make_parser("+concept:faith > +(concept:hope | concept:expectation) > +concept:love")
+        seq = p.parse_sequence()
+        assert len(seq.steps) == 3
+        assert isinstance(seq.steps[0], NodeRef) and seq.steps[0].polarity == "+"
+        assert isinstance(seq.steps[1], AlternativeExpr)
+        assert all(opt.polarity == "+" for opt in seq.steps[1].options)
+        assert isinstance(seq.steps[2], NodeRef) and seq.steps[2].polarity == "+"
+
 
 class TestParseOptional:
     def test_optional_node(self) -> None:
