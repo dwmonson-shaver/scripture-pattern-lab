@@ -350,6 +350,44 @@ class TestPartialReduction:
         assert result.executable_plan.expansion is None
         assert len(result.executable_plan.sequence.steps) == 2
 
+    def test_unsupported_node_inside_alternative_collapses(self) -> None:
+        # `root` is not in the MVP node_types registry. The alternative should
+        # drop the unsupported option; with one survivor it collapses to a NodeRef.
+        plan = parse("(root:foo | concept:faith) > concept:hope")
+        result = validate(plan, _mvp())
+        assert result.status == "partial"
+        assert result.executable_plan is not None
+        steps = result.executable_plan.sequence.steps
+        assert len(steps) == 2
+        assert isinstance(steps[0], NodeRef)
+        assert steps[0].type == NodeType.CONCEPT
+        assert steps[0].value == "faith"
+        assert isinstance(steps[1], NodeRef)
+        assert steps[1].value == "hope"
+
+    def test_alternative_dropped_when_all_options_unsupported(self) -> None:
+        # Both alternative options use `root` (unsupported). The whole alternative
+        # step is dropped, leaving the surrounding sequence to collapse to 2 steps.
+        plan = parse("concept:faith > (root:a | root:b) > concept:hope")
+        result = validate(plan, _mvp())
+        assert result.status == "partial"
+        assert result.executable_plan is not None
+        steps = result.executable_plan.sequence.steps
+        assert len(steps) == 2
+        assert all(isinstance(s, NodeRef) and s.type == NodeType.CONCEPT for s in steps)
+        assert [s.value for s in steps] == ["faith", "hope"]
+
+    def test_unsupported_inside_optional_dropped(self) -> None:
+        # `[root:foo]` should be dropped because its inner NodeRef is unsupported;
+        # the surrounding sequence reduces to two concept nodes.
+        plan = parse("concept:faith > [root:foo] > concept:hope")
+        result = validate(plan, _mvp())
+        assert result.status == "partial"
+        assert result.executable_plan is not None
+        steps = result.executable_plan.sequence.steps
+        assert len(steps) == 2
+        assert all(isinstance(s, NodeRef) and s.type == NodeType.CONCEPT for s in steps)
+
 
 # ---------------------------------------------------------------------------
 # Phase 4: Doc 07 integration tests

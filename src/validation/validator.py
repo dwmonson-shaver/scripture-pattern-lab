@@ -408,40 +408,80 @@ def _rule_12_structural(
 # ---------------------------------------------------------------------------
 
 
-def _reduce_plan(plan: QueryPlan, registry: CapabilityRegistry) -> QueryPlan | None:
-    """Build a reduced QueryPlan by stripping unsupported features.
+def _reduce_step(step, registry: CapabilityRegistry):
+    """Reduce one step. Returns None if the step is fully unsupported.
 
-    Returns None if the plan cannot be meaningfully reduced.
+    Recurses into composite steps (AlternativeExpr, GroupExpr, OptionalExpr) so
+    unsupported NodeRefs nested inside them are dropped instead of surviving in
+    the executable plan.
     """
-    # Strip inverse wrapper
-    sequence = plan.sequence
-    if isinstance(sequence, InverseExpr):
-        return None  # Can't meaningfully reduce an inverse query
+    if isinstance(step, NodeRef):
+        if step.type.value not in registry.node_types:
+            return None
+        return step
+    if isinstance(step, AlternativeExpr):
+        new_options = [
+            reduced
+            for opt in step.options
+            if (reduced := _reduce_step(opt, registry)) is not None
+        ]
+        if not new_options:
+            return None
+        if len(new_options) == 1:
+            return new_options[0]  # single survivor — collapse the alternative
+        return step.model_copy(update={"options": new_options})
+    if isinstance(step, GroupExpr):
+        reduced_seq = _reduce_sequence(step.sequence, registry)
+        if reduced_seq is None:
+            return None
+        return step.model_copy(update={"sequence": reduced_seq})
+    if isinstance(step, OptionalExpr):
+        reduced_inner = _reduce_step(step.inner, registry)
+        if reduced_inner is None:
+            return None
+        return step.model_copy(update={"inner": reduced_inner})
+    return step
 
-    # Strip unsupported node steps
-    new_steps = []
-    new_operators = []
+
+def _reduce_sequence(sequence: SequenceExpr, registry: CapabilityRegistry) -> SequenceExpr | None:
+    """Drop unsupported steps + downgrade unsupported operators inside a sequence.
+
+    Used by both the top-level plan reducer and GroupExpr's nested sequence.
+    Returns None if the result has fewer than 2 steps.
+    """
+    new_steps: list = []
+    new_operators: list = []
     for i, step in enumerate(sequence.steps):
-        if isinstance(step, NodeRef) and step.type.value not in registry.node_types:
-            continue  # drop unsupported node
-        new_steps.append(step)
+        reduced = _reduce_step(step, registry)
+        if reduced is None:
+            continue
+        new_steps.append(reduced)
         if i > 0 and len(new_operators) < len(new_steps) - 1:
-            # Add the operator before this step if we kept the step
             op_idx = i - 1
             if op_idx < len(sequence.operators):
                 op = sequence.operators[op_idx]
-                # Downgrade unsupported operators
                 if op.type.value not in registry.operators:
                     op = OrderOperator(type=OperatorType.PRECEDENCE, gap=op.gap)
                 new_operators.append(op)
 
     if len(new_steps) < 2:
-        return None  # Can't run a meaningful sequence with <2 steps
+        return None
 
-    # Ensure operator count matches
     new_operators = new_operators[: len(new_steps) - 1]
+    return SequenceExpr(steps=new_steps, operators=new_operators)
 
-    new_sequence = SequenceExpr(steps=new_steps, operators=new_operators)
+
+def _reduce_plan(plan: QueryPlan, registry: CapabilityRegistry) -> QueryPlan | None:
+    """Build a reduced QueryPlan by stripping unsupported features.
+
+    Returns None if the plan cannot be meaningfully reduced.
+    """
+    if isinstance(plan.sequence, InverseExpr):
+        return None  # Can't meaningfully reduce an inverse query
+
+    new_sequence = _reduce_sequence(plan.sequence, registry)
+    if new_sequence is None:
+        return None
 
     return QueryPlan(
         version=plan.version,
