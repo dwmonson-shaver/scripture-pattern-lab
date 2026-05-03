@@ -7,12 +7,14 @@ import pytest
 from src.ingestion.corpus_parser import (
     CorpusParseError,
     CorpusToken,
+    parse_corpus_directory,
     parse_corpus_file,
     parse_corpus_line,
 )
 
 FIXTURE_PATH = Path("tests/fixtures/morphgnt/3jn-sample.txt")
 REAL_3JN_PATH = Path("data/raw/morphgnt-sblgnt/85-3Jn-morphgnt.txt")
+MULTI_FIXTURE_DIR = Path("tests/fixtures/morphgnt/multi")
 
 
 # ---------------------------------------------------------------------------
@@ -156,3 +158,79 @@ class TestRealCorpusSmoke:
         assert tokens[2].chapter == 1
         assert tokens[2].verse == 1
         assert tokens[2].position == 3
+
+
+# ---------------------------------------------------------------------------
+# parse_corpus_directory — multi-file iteration, BB ordering, boundary stitching
+# ---------------------------------------------------------------------------
+
+
+class TestParseCorpusDirectory:
+    """Multi-file iteration. The fixture under tests/fixtures/morphgnt/multi/
+    holds two real-format files (Mt rows 5–10 → 6 tokens straddling 1:1→1:2;
+    Mk rows 3–8 → 6 tokens straddling 1:1→1:2). _BOOK_NUMBER_BY_FILENAME is
+    monkeypatched down to those two filenames so parse_corpus_directory does
+    not try to open the other 25 production files.
+    """
+
+    @pytest.fixture
+    def multi_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Path:
+        for name in ("61-Mt-morphgnt.txt", "62-Mk-morphgnt.txt"):
+            (tmp_path / name).write_bytes((MULTI_FIXTURE_DIR / name).read_bytes())
+        monkeypatch.setattr(
+            "src.ingestion.corpus_parser._BOOK_NUMBER_BY_FILENAME",
+            {"61-Mt-morphgnt.txt": "01", "62-Mk-morphgnt.txt": "02"},
+        )
+        return tmp_path
+
+    def test_iterates_in_bb_order_regardless_of_filename(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Flip the BB mapping so Mk's filename gets BB "01" and Mt's gets BB "02".
+        # Alphabetical order would still put 61-Mt first; BB-key sort must put
+        # 62-Mk first. Token book codes (read from the row's BBCCVV) are
+        # unaffected by the map flip — they remain "01" for Mt rows, "02" for Mk.
+        for name in ("61-Mt-morphgnt.txt", "62-Mk-morphgnt.txt"):
+            (tmp_path / name).write_bytes((MULTI_FIXTURE_DIR / name).read_bytes())
+        monkeypatch.setattr(
+            "src.ingestion.corpus_parser._BOOK_NUMBER_BY_FILENAME",
+            {"61-Mt-morphgnt.txt": "02", "62-Mk-morphgnt.txt": "01"},
+        )
+        tokens = list(parse_corpus_directory(tmp_path))
+        # First 6 yielded come from the file mapped to BB "01" (Mk file → book "02"
+        # rows), then 6 from the file mapped to BB "02" (Mt file → book "01" rows).
+        assert [t.book for t in tokens] == ["02"] * 6 + ["01"] * 6
+
+    def test_global_position_continuous_across_file_boundary(
+        self, multi_dir: Path
+    ) -> None:
+        tokens = list(parse_corpus_directory(multi_dir))
+        # Mt fixture has 6 tokens (indices 0..5); first Mk token is at index 6.
+        last_mt = tokens[5]
+        first_mk = tokens[6]
+        assert last_mt.book == "01"
+        assert first_mk.book == "02"
+        assert first_mk.global_position == last_mt.global_position + 1
+        # Whole sequence is a contiguous 1..12.
+        assert [t.global_position for t in tokens] == list(range(1, 13))
+
+    def test_position_resets_at_first_token_of_second_file(
+        self, multi_dir: Path
+    ) -> None:
+        tokens = list(parse_corpus_directory(multi_dir))
+        first_mk = tokens[6]
+        assert first_mk.book == "02"
+        assert first_mk.position == 1
+        # Mt's last token is at verse 1:2 position 2 — proves the reset is
+        # non-trivial (would have been position 3 without a boundary).
+        assert tokens[5].position == 2
+
+    def test_total_token_count_matches_sum_of_files(self, multi_dir: Path) -> None:
+        mt_count = sum(1 for _ in parse_corpus_file(multi_dir / "61-Mt-morphgnt.txt"))
+        mk_count = sum(1 for _ in parse_corpus_file(multi_dir / "62-Mk-morphgnt.txt"))
+        total = sum(1 for _ in parse_corpus_directory(multi_dir))
+        assert mt_count == 6
+        assert mk_count == 6
+        assert total == mt_count + mk_count
