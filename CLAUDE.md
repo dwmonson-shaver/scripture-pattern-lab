@@ -66,6 +66,19 @@ not chat history.
 - Within one phase, keep context until the phase is done.
 - The assistant drives this without being asked. The user should never have to re-explain the methodology.
 
+### Slice Boundaries (Bucket Triage)
+
+Independent reviews surface findings; some get fixed inline, others get
+deferred to **named buckets** with a stated trigger condition (see
+`docs/governance/reviews-log.md`). To prevent buckets from drifting indefinitely,
+both ends of a slice get an explicit triage step:
+
+- **At slice close** (Workflow step 6): every finding from the slice's review pass gets one of three dispositions — *fixed* (with SHA), *deferred to a tracked bucket* (with trigger AND written rationale), or *rejected* (with reason). "Filed and forgotten" is not allowed.
+- **At slice start** (before invoking `/research` for the new slice): the assistant scans `reviews-log.md` for buckets whose trigger fires on this slice. Each matching bucket is dispositionalized: *scoped in* (folded into this slice's `/research` and `/design`, with the bucket's closure column updated), *re-deferred* (with a new specific trigger AND new rationale — stale "eventually" deferrals are not allowed), or *rejected* (the original finding no longer applies). Triggers must be specific enough that a future-you can recognize the matching slice without re-reading the original finding.
+- The assistant drives this without being asked. The user should not have to remember which bucket fires when.
+
+This is the mechanism that turns "we wrote it down" into "we're going to do it or explicitly decide not to."
+
 ### Resume Behavior
 
 When the user opens a session and asks "what's next?":
