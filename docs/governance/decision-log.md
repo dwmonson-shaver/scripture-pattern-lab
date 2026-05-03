@@ -287,3 +287,81 @@
 - Commit: 83685a4
 - Files: tests/unit/test_corpus_parser.py (`TestParseCorpusDirectory.multi_dir` fixture; all four test methods)
 - Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+
+## DEC-038 — `truncate_tokens` lives in `src/ingestion/db.py` and does not self-gate
+- Status: Accepted
+- Question: Where should the destructive `TRUNCATE tokens RESTART IDENTITY` helper live, and should the helper itself enforce a confirmation check before issuing the SQL, or should it trust callers to gate?
+- Decision: Add `truncate_tokens(engine: Engine) -> None` to `src/ingestion/db.py` alongside `get_engine` and `tokens_table`. The helper wraps a single short-lived `engine.begin()` block around `TRUNCATE TABLE tokens RESTART IDENTITY` and is intentionally **not self-gating** — no env-var check, no flag check, no prompt. The caller is responsible for confirming intent before invoking; the helper just executes.
+- Rationale: Same module as `get_engine` (other ingestion callers already import that module), so all `tokens`-table SQL surface lives behind one boundary. No-self-gate keeps the helper testable without env monkeypatching, and forces the destructive-op gate to live one layer up at the call site (where CLI flags, env state, and operator intent are visible). A self-gating helper would have to either re-read env vars (coupling library code to env) or accept a `confirm: bool` parameter (which adds nothing over the caller just deciding before calling).
+- Alternatives considered: (a) Put `truncate_tokens` in `scripts/db/ingest_corpus.py` as a private helper — rejected; future tests / future entrypoints (workers) will want the same primitive, and `src/ingestion/db.py` is the natural home for `tokens`-table SQL. (b) Make `truncate_tokens` self-gating on `SPL_INGEST_CONFIRM_TRUNCATE=1` — rejected; couples library code to env-var contract, and re-reading env vars deep inside helpers makes the destructive-op semantics hard to reason about at the call site. (c) Use SQLAlchemy Core `tokens_table.delete()` instead of `TRUNCATE` — rejected; would not reset the SERIAL identity counter and would be slower at scale.
+- Confidence: High
+- Made-by: human-approved
+- Commit: c85081a
+- Files: src/ingestion/db.py
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+- Cross-refs: DEC-021 (apply schemas explicitly), DEC-028 (TRUNCATE for tests), DEC-039 (the script's two-factor gate)
+
+## DEC-039 — `scripts/db/ingest_corpus.py` is the production entrypoint with a two-factor destructive-op gate
+- Status: Accepted
+- Question: How should the CLI for full-corpus ingestion be packaged, and what gate prevents accidental wipes against a populated DB? The design discussion (Decision #3) promised "fail-loud + two independent confirmations" but the exact CLI surface was structure-time territory.
+- Decision: New executable Python file at `scripts/db/ingest_corpus.py` (sits next to `apply_schemas.sh`; not under `src/app/`, not a `src/__main__`). Argparse surface: `--truncate` (flag), `--corpus-dir DIR` (defaults to `data/raw/morphgnt-sblgnt`). Behavior contract: (1) refuses `--truncate` unless `SPL_INGEST_CONFIRM_TRUNCATE=1` (two independent confirmations); (2) refuses to load when `tokens` is non-empty and `--truncate` is not given; (3) `apply_schemas.sh` is NOT re-run by the script — schema apply remains a distinct step. Validation order in `main()`: env-confirm → corpus-dir → URL print → engine + non-empty check → truncate-or-fail → load (cheapest checks first).
+- Rationale: Two independent confirmations (CLI flag + env var) make accidental destructive runs hard. Mirrors `get_engine()`'s fail-loud-on-missing-env style. Keeping the CLI under `scripts/` preserves the DEC-025 (`src/ingestion/` library boundary) and follows the Slice-A `apply_schemas.sh` precedent. Schema apply staying separate keeps the destructive surface minimal — re-applying schema would silently fix a missing `tokens` table, which is exactly the kind of "is your DB the one you think it is" check we want loud.
+- Alternatives considered: (a) Single confirmation (just `--truncate`) — rejected; one accidental flag is too cheap. (b) Bundle schema apply into the script — rejected; widens the destructive surface and couples a now-stable schema-apply step to the still-evolving load step. (c) Single-stage prompt (`y/N`) instead of env var — rejected; env var is scriptable for CI and unambiguous in audit logs.
+- Confidence: High
+- Made-by: human-approved
+- Commit: c85081a
+- Files: scripts/db/ingest_corpus.py; src/ingestion/db.py (`truncate_tokens` caller)
+- Spec refs: REQ:08.ingestion-pipeline (step 4 — bulk-load); REQ:09.ingestion (real entrypoint promised by canonical-09)
+- Cross-refs: DEC-021 (apply schemas explicitly), DEC-025 (`src/ingestion/` library boundary), DEC-038 (`truncate_tokens` placement)
+
+## DEC-040 — `ingest_corpus.py` exit-code taxonomy: 0 / 1 / 2 / 3
+- Status: Accepted
+- Question: What process exit codes should the ingest CLI use, and what should each map to? Shell wrappers and CI scripts will branch on these.
+- Decision: `0` = success; `1` = uncaught exception (traceback printed to stderr); `2` = user error (refused destructive op without `--truncate`, or `--truncate` without `SPL_INGEST_CONFIRM_TRUNCATE=1`, or non-empty `tokens` without `--truncate`); `3` = corpus-dir filename-map drift (default-path missing/extra files; `--corpus-dir` extras or empty mapped subset). Exit-code constants are named at the top of the script (`EXIT_OK`, `EXIT_UNCAUGHT`, `EXIT_USER_ERROR`, `EXIT_CORPUS_DRIFT`) and listed in the module docstring.
+- Rationale: `1` vs `2` separation lets a wrapper / CI distinguish "the script crashed" from "the script refused on purpose." `3` is its own code so a wrapper can branch specifically on filename drift (e.g. alert differently when MorphGNT renames a file vs. when the operator forgot the env confirm). Conventional Unix CLI practice — argparse itself uses `2` for arg errors, so keeping `2` for user-error preserves consistency with the framework.
+- Alternatives considered: (a) Use only 0/1 — rejected; loses the "refused on purpose" signal that CI specifically wants. (b) Use richer codes (4, 5, …) for finer-grained errors — rejected; YAGNI for Slice B's gate set. (c) Reuse `1` for filename drift — rejected; conflates expected-failure with crash.
+- Confidence: Medium — 0/1/2/3 mapping is conventional; the specific 3-for-corpus-drift assignment is project-local and may need a wrapper-script handshake when CI wires this up.
+- Made-by: human-approved
+- Commit: c85081a
+- Files: scripts/db/ingest_corpus.py (`EXIT_*` constants and all `return EXIT_*` sites)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+- Cross-refs: DEC-039 (the gate that uses these exit codes)
+
+## DEC-041 — `--corpus-dir` relaxes the strict 27-file guard (Decision A from `/structure`)
+- Status: Accepted
+- Question: When the script runs against a non-default corpus directory (e.g. the 2-book multi fixture for tests), should the strict 27-file guard apply? `parse_corpus_directory` iterates ALL 27 mapped filenames and would `FileNotFoundError` on any subset, so the script must either bypass the guard or build its own iterator.
+- Decision: Default path (no `--corpus-dir`, or path equal to `DEFAULT_CORPUS_DIR`) keeps the strict `_assert_27_files_present` check (exactly the 27 mapped filenames, no missing, no extras). When `--corpus-dir DIR` is supplied with any non-default path, the guard relaxes to: every present file must be a `_BOOK_NUMBER_BY_FILENAME` key (extras still rejected), and at least one mapped file must be present. Implementation requires two additional private helpers in the script (beyond the four named in the structure outline): `_present_filenames_in_bb_order(directory) -> list[str]` (relaxed sort + extras-check) and `_stream_files(directory, filenames) -> Iterator[CorpusToken]` (BB-ordered iteration over an explicit subset, threading `global_position` exactly the way `parse_corpus_directory` does for the full set). `parse_corpus_directory` itself is untouched.
+- Rationale: Lets Phase 3 negative-path tests exercise the script against the 2-book multi fixture without bypassing the production guard for production runs. Modifying `parse_corpus_directory` to skip absent files would weaken its fail-loud contract for a test-ergonomics reason — the same anti-pattern DEC-037 rejected for the unit tests. The two extra helpers keep `parse_corpus_directory`'s contract intact (still "all 27 books, fail-loud on a missing file") and isolate the relaxation to the script's CLI surface, where it can be reasoned about per-invocation.
+- Alternatives considered: (a) Modify `parse_corpus_directory` to skip missing files — rejected; weakens the fail-loud production contract for a test reason (DEC-037 territory). (b) Force tests to assemble all 27 fixture files — rejected; couples test setup to map cardinality, copies 25 unrelated MorphGNT books for no test value. (c) Keep one helper and inline the relaxed iteration in `main()` — rejected; would duplicate `parse_corpus_directory`'s `global_position` threading logic, which is the kind of duplication a small helper exists to prevent. (d) Add a `filenames=` parameter to `parse_corpus_directory` — possible but premature; would add a public API surface used only by the CLI. Revisit if a third caller needs subset iteration.
+- Confidence: Medium — relaxed semantics is right for the script's job; the two-helpers-vs-flag-on-`parse_corpus_directory` tradeoff could be revisited if ingestion grows more callers (e.g. workers that load a single book on demand).
+- Made-by: human-approved
+- Commit: c85081a
+- Files: scripts/db/ingest_corpus.py (`main()`, `_assert_27_files_present`, `_present_filenames_in_bb_order`, `_stream_files`)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+- Cross-refs: DEC-037 (parallel "don't soften production behavior for test ergonomics" decision on the unit-test side)
+
+## DEC-042 — `sys.path` bootstrap pattern for CLI scripts under `scripts/`
+- Status: Accepted
+- Question: How should a Python script under `scripts/` import from `src/` when invoked directly (`uv run scripts/db/ingest_corpus.py`)? Pytest adds repo root via `pyproject.toml`'s `pythonpath = ["."]`, but standalone CLI invocation does not, so a bare `from src.ingestion.* import ...` fails with `ModuleNotFoundError`.
+- Decision: At the top of CLI scripts that need to import from `src/`, add a 4-line idempotent bootstrap: compute repo root from `Path(__file__).resolve().parents[2]`, insert into `sys.path` if not already present. Post-bootstrap imports use `# noqa: E402` to silence ruff's import-position rule. `scripts/` is intentionally NOT made a Python package — no `__init__.py` files, no relative imports. Tests that need to import the script's helpers go through `importlib.util.spec_from_file_location` (see `tests/integration/test_corpus_ingest.py::_import_ingest_module`), preserving the "scripts/ is not a package" boundary.
+- Rationale: `scripts/` is for CLI tooling, not library code. Making it a package would invite `from scripts.db.ingest_corpus import x` from production code (e.g. an FastAPI route reaching across), blurring the DEC-025 boundary. The bootstrap is purely an invocation-time concern and is idempotent so re-import (e.g. importlib loader paths) is safe. The `# noqa: E402` markers document the deliberate departure from PEP-8 import ordering.
+- Alternatives considered: (a) Make `scripts/` a Python package with `__init__.py` — rejected; pollutes the import surface and weakens `scripts/`-vs-`src/` separation. (b) Require `PYTHONPATH=. uv run scripts/db/...` from callers — rejected; couples invocation to env state and breaks the "the script just works" precedent set by `apply_schemas.sh`. (c) Declare a `[project.scripts]` entry point in `pyproject.toml` — possible but premature; the script is not a published binary and the rebuild step would slow iteration. Revisit when we have a stable CLI surface and want `spl-ingest` as a real command.
+- Confidence: Medium — bootstrap is conventional and works today; a future move to packaged entry points would replace it. The pattern should be applied consistently if more `scripts/*.py` files emerge that import from `src/`.
+- Made-by: human-approved
+- Commit: c85081a
+- Files: scripts/db/ingest_corpus.py (lines 26–30: bootstrap; lines 32–40: post-bootstrap imports with `# noqa: E402`); tests/integration/test_corpus_ingest.py (`_import_ingest_module` for the `scripts/`-is-not-a-package import path)
+- Spec refs: REQ:09.ingestion
+- Cross-refs: DEC-025 (`src/ingestion/` library boundary that the no-package rule preserves)
+
+## DEC-043 — `_redact_database_url` algorithm (no `urllib.parse`, manual rsplit-on-`@`)
+- Status: Accepted
+- Question: How should the script blot out the password segment of `DATABASE_URL` when printing it to stderr at startup, given that passwords can legally contain `@`, `:`, and other URL-reserved characters?
+- Decision: Pure-Python helper `_redact_database_url(url: str) -> str` that performs *no* URL parsing. Algorithm: split scheme on `://`; if absent, return input unchanged. `rsplit('@', 1)` on the rest to find the host boundary; if no `@`, return input unchanged. Split userinfo on the FIRST `:` to separate username from password; if no `:` in userinfo, return input unchanged. Replace the password with the literal string `***`. The helper is intentionally narrow — it redacts only; it does not validate the URL.
+- Rationale: `urllib.parse.urlparse` does NOT handle `@` inside passwords reliably — `urlparse('postgresql://u:p@ssw@h/db').hostname` returns `'p@ssw@h'` (or worse, depending on Python version), so it cannot be used as the host extractor. `rsplit('@', 1)` is correct because the LAST `@` always separates userinfo from host (any `@` inside a password must, by URL grammar, come before that). First-`:`-split on userinfo is correct because usernames cannot contain unencoded `:`. Returning input unchanged on missing-`://` / missing-`@` / missing-`:` keeps the helper a pure best-effort redactor — never raises, never throws on weird input — which is the right shape for a stderr-printing helper that must never break the script.
+- Alternatives considered: (a) Use `urllib.parse.urlparse` — rejected; password-with-`@` produces wrong hostname. (b) Use a regex like `:[^@:/]+@` — rejected; doesn't handle passwords with `:` (which are valid percent-decoded), and regex on URLs is famously brittle. (c) Use SQLAlchemy's `make_url(...).render_as_string(hide_password=True)` — possible but adds a SQLAlchemy import to the redaction path and binds the helper to a specific URL grammar (Postgres-via-SQLAlchemy). Keep the helper string-shape-agnostic. (d) Print only the host:port — rejected; loses the scheme + username + db, all of which are useful in a "did I just truncate the right DB?" check.
+- Confidence: High — directly tested with `test_script_redacts_password_in_database_url_print` covering full userinfo, missing userinfo, missing password, and the pathological `p@ssw0rd` case (literal `@` inside the password).
+- Made-by: human-approved
+- Commit: c85081a
+- Files: scripts/db/ingest_corpus.py (`_redact_database_url`); tests/integration/test_corpus_ingest.py (`test_script_redacts_password_in_database_url_print`)
+- Spec refs: REQ:09.ingestion (entrypoint observability surface)
+- Cross-refs: DEC-039 (the gate that calls this helper before truncating)
