@@ -207,13 +207,21 @@ class ExplainedResult:
 ```python
 def parse_corpus_file(path: Path, *, start_global_position: int = 1) -> Iterator[CorpusToken]
 def parse_corpus_directory(directory: Path) -> Iterator[CorpusToken]
-def load_tokens(engine: Engine, tokens: Iterable[CorpusToken]) -> int
+def load_tokens(
+    engine: Engine,
+    tokens: Iterable[CorpusToken],
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> int
+def truncate_tokens(engine: Engine) -> None
 def get_engine() -> Engine
 ```
 
+`progress_callback` is an opt-in observability hook (DEC-034) — `load_tokens` stays I/O-pure and emits `ProgressEvent`s on batch flush, file boundary, and post-commit `done`; no internal logger. The script wires the callback to a stderr printer; library callers (e.g. tests) leave it as `None` and behavior is unchanged. `truncate_tokens` (DEC-038) is the destructive primitive used by the script's `--truncate` gate; it does not self-gate.
+
 **Dependency direction**: Query-side packages (`src/app/`, `src/engine/`, `src/nlp/`, `src/ontology/`, `src/retrieval/`, `src/scoring/`, `src/validation/`) **must not import** `src/ingestion/`. They consume persisted corpus and registry data through stable read interfaces (the `tokens` table; future read-only ontology helpers). Ingestion is the only component that issues bulk writes to corpus tables and applies schema files.
 
-**MVP implementation**: SQLAlchemy 2.0 Core, 1000-row batches in a single transaction. Schema apply is a shell entrypoint (`scripts/db/apply_schemas.sh`), not a Python migration tool. [DEC-021] [DEC-028]
+**MVP implementation**: SQLAlchemy 2.0 Core, 1000-row batches in a single global `engine.begin()` transaction (DEC-044). Schema apply is a shell entrypoint (`scripts/db/apply_schemas.sh`), not a Python migration tool. Corpus load is a Python CLI entrypoint (`scripts/db/ingest_corpus.py`) — see DEC-039 for the two-factor `--truncate` + `SPL_INGEST_CONFIRM_TRUNCATE=1` destructive-op gate, DEC-040 for the 0/1/2/3 exit-code taxonomy, DEC-042 for the `sys.path` bootstrap pattern that keeps `scripts/` non-package, DEC-048 for the "extras tolerated on default path" filename-guard semantics. [DEC-021] [DEC-028]
 
 ## Communication Model
 

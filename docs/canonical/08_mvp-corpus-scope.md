@@ -7,7 +7,7 @@ Decide and document the corpus, text edition, annotation requirements, and data 
 
 ### Why Greek NT
 - Richest available open annotation data (morphology, lemmas, syntax)
-- Manageable size (~138,000 tokens across 27 books)
+- Manageable size (137,554 tokens across 27 books — pinned via the slice exit-gate test `tests/integration/test_corpus_ingest.py::test_full_corpus_smoke`; see DEC-047)
 - Contains the flagship use case (faith > hope > love in 1 Corinthians 13:13)
 - Pauline corpus alone provides dense ground for sequence hypothesis testing
 - Community of scholars and students most likely to engage early
@@ -127,6 +127,23 @@ This gives ~20 concepts with ~30 lemma mappings, enough to test sequence, polari
 4. Load into Postgres with appropriate indexes
 5. Seed the concept registry from the table above
 6. Build lemma-to-concept index
+
+### Production entrypoint
+
+Step 4 (load) is realized by `scripts/db/ingest_corpus.py` — the production CLI. See DEC-039. The whole 27-book load runs inside a single `engine.begin()` transaction (DEC-044) so the `tokens` table is never observed in a partial-load state.
+
+**Re-run idempotency.** The script never auto-resets the `tokens` table. To re-run an ingestion, pass `--truncate` AND set `SPL_INGEST_CONFIRM_TRUNCATE=1` (two-factor destructive-op gate). Without both, the script refuses if `tokens` is non-empty (exit code 2). The truncate primitive is `src/ingestion/db.py::truncate_tokens` (DEC-038): a short-lived transaction running `TRUNCATE TABLE tokens RESTART IDENTITY`. The primitive does not gate on its own — the caller (the script's `main()`) owns the gate.
+
+**Filename-drift guard.** The default-path guard (`_assert_27_files_present`) asserts every one of the 27 mapped MorphGNT filenames is present in `data/raw/morphgnt-sblgnt/`; extras like the upstream-vendored `README.md` are tolerated (DEC-048). The relaxed `--corpus-dir` path (used by tests against the 2-book `tests/fixtures/morphgnt/multi/`) still rejects extras (DEC-041).
+
+**Exit-code taxonomy** (DEC-040):
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success — `inserted N tokens` printed to stderr |
+| 1 | Uncaught exception — traceback printed to stderr |
+| 2 | User error — refused destructive op (`--truncate` without env confirm, or non-empty table without `--truncate`) |
+| 3 | Corpus-dir filename drift — a mapped MorphGNT book is missing |
 
 <!-- REQ:08.token-schema -->
 ### Database Schema (sketch)

@@ -365,3 +365,65 @@
 - Files: scripts/db/ingest_corpus.py (`_redact_database_url`); tests/integration/test_corpus_ingest.py (`test_script_redacts_password_in_database_url_print`)
 - Spec refs: REQ:09.ingestion (entrypoint observability surface)
 - Cross-refs: DEC-039 (the gate that calls this helper before truncating)
+
+## DEC-044 — Single global `engine.begin()` transaction wraps the whole 27-book load
+- Status: Accepted
+- Question: Should ingestion commit per-file (138 incremental commits, weaker atomicity, observable progress in the DB mid-load) or in one global transaction (strong atomicity — table is never in a partial state, but no observable mid-load progress)?
+- Decision: Single `engine.begin()` wraps all 138 batches across all 27 books. A failure mid-load rolls back the entire ingestion; the `tokens` table is never observed in a partial-load state by any concurrent reader.
+- Rationale: 137,554 rows in 138 batches loads in ~4 s on local Postgres — well under any threshold where incremental commits would buy operational value. Atomicity is the load-bearing property: a partial-state table would silently degrade pattern-engine queries that assume corpus completeness, and the failure mode would be hard to diagnose ("why is 1 Corinthians missing tokens?"). Observability of mid-load progress is delivered by the `progress_callback` (DEC-034) and printed to stderr by the script — DB-side observability of partial state is not needed.
+- Alternatives considered: (a) Per-file transactions (27 commits) — rejected; partial-state risk outweighs the negligible perf upside at 4 s total. (b) Per-batch transactions (138 commits) — rejected; same problem, more commits. (c) Single transaction with savepoints per file — possible but premature optimization; revisit only if a real "retry just this book" requirement emerges (e.g., remote DB, multi-minute load, transient network failures).
+- Confidence: High — atomicity-over-progress is the right call at 137K rows; this would be revisited only if the load becomes long enough that "had to start over" is a meaningful operational cost.
+- Made-by: human-approved (design Decision #2 from `thoughts/design-corpus-slice-b-scaling-2026-05-02.md`, ratified at slice-close)
+- Commit: code from Slice A (`381117e`); DEC recorded at slice-close (`d622447`)
+- Files: src/ingestion/loader.py (`load_tokens` — single `with engine.begin() as conn:` block wraps the whole batch loop)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+- Cross-refs: DEC-034 (`progress_callback` is how mid-load observability is delivered without giving up atomicity)
+
+## DEC-045 — Retain Slice-A `test_load_tokens_returns_219` alongside `test_full_corpus_smoke`
+- Status: Accepted
+- Question: With `test_full_corpus_smoke` now asserting count, monotonicity, and deduplication across all 27 books, is the Slice-A 3-John-only assertion (`inserted == 219`) redundant?
+- Decision: Keep `test_load_tokens_returns_219`. It is a fast, narrow regression alarm specifically for 3 John (book `25`, 219 tokens). It does not duplicate `test_full_corpus_smoke`'s assertions: a parser regression that affects only 3 John might still pass the full-corpus count check (drift in other books could compensate by coincidence) but will fail this test immediately and name the offending book.
+- Rationale: Cost to keep is near zero (one assertion, shares the existing `loaded_engine` module-scope fixture). Different jobs: smoke is end-to-end + cross-book invariants; this is a per-book alarm with a known good count. A failure here points the eye directly at 3 John, whereas a smoke failure on the aggregate count is harder to localize.
+- Alternatives considered: (a) Delete `test_load_tokens_returns_219` — rejected; loses the per-book alarm. (b) Replace it with a parametrized per-book smoke test for all 27 books — possible but premature; would require pinning 27 counts and would couple test scope to corpus cardinality. Revisit if more per-book alarms are wanted.
+- Confidence: Medium — the case for keeping is solid today, but a future parametrized per-book test could subsume this one cleanly.
+- Made-by: human-approved (Decision B from `thoughts/structure-corpus-slice-b-scaling-2026-05-02.md`)
+- Commit: d622447
+- Files: tests/integration/test_corpus_ingest.py (`test_load_tokens_returns_219`); coexists with `test_full_corpus_smoke` in the same file
+- Spec refs: REQ:08.ingestion-pipeline
+
+## DEC-046 — `test_full_corpus_smoke` owns its own truncate boundary; does not share `loaded_engine`
+- Status: Accepted
+- Question: The existing `loaded_engine` module-scope fixture loads 3 John once and yields `(engine, inserted_count)` for several read-only assertions. Should `test_full_corpus_smoke` reuse this fixture, or set up its own DB state?
+- Decision: The smoke test does NOT use `loaded_engine`. The script's own `--truncate` (with `SPL_INGEST_CONFIRM_TRUNCATE=1` set on the parent process via `monkeypatch.setenv` and inherited by the subprocess through default env-inheritance) is the function-scoped reset. The smoke test does NOT pre-truncate either — `--truncate` is what's being exercised. The smoke test is placed last in `tests/integration/test_corpus_ingest.py` so that all `loaded_engine`-dependent tests (which assert `count == 219`) run first against the 3-John state, before the smoke wipes and reloads the table to ~138K rows.
+- Rationale: Sharing the module-scope `loaded_engine` fixture would either (a) require the smoke to truncate twice (fixture's pre-load + script's `--truncate`) or (b) leave the smoke unable to control the post-load state of its dependents. Function-scoped ownership of the truncate boundary is the cleanest fit. Test ordering by declaration is a stable pytest contract; the comment on the smoke test names the placement intent so a future contributor doesn't reorder it.
+- Alternatives considered: (a) Share `loaded_engine` and have the smoke truncate inside its own body — rejected; ugly double-truncate, plus the smoke would still need to bypass the fixture's yielded state. (b) Move `test_full_corpus_smoke` into its own module — possible; cleanly isolates scopes but fragments the integration suite. Two-file split is heavier than one comment. (c) Use a separate function-scoped fixture for the smoke — possible but adds a layer for one consumer; inlining `monkeypatch.setenv` + `_run_ingest_script` is sharper.
+- Confidence: High — the placement-comment + monkeypatch.setenv pattern is robust under pytest's default execution-by-declaration order.
+- Made-by: human-approved (Decision C from `thoughts/structure-corpus-slice-b-scaling-2026-05-02.md`)
+- Commit: d622447
+- Files: tests/integration/test_corpus_ingest.py (`test_full_corpus_smoke` placed last, owns its own truncate via `--truncate` + `monkeypatch.setenv`)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+
+## DEC-047 — `EXPECTED_TOKEN_COUNT = 137_554` pinned; regression-alarm contract on the corpus-and-parser pair
+- Status: Accepted
+- Question: What integer should `test_full_corpus_smoke` pin as the expected row count, and what is the contract when the integer changes?
+- Decision: Pin `EXPECTED_TOKEN_COUNT = 137_554`, observed via the manual ship-gate run on 2026-05-03 (`SPL_INGEST_CONFIRM_TRUNCATE=1 uv run --env-file .env scripts/db/ingest_corpus.py --truncate`) against the SBLGNT edition currently checked into `data/raw/morphgnt-sblgnt/`. Contract: if this integer changes in a subsequent run, either the corpus drifted (MorphGNT released a revised SBLGNT edition) OR the parser drifted (a tokenization regression). The smoke test fails loudly; the dup-detector and per-book aggregate help localize which.
+- Rationale: Phase 4 was observe-first-then-pin per the structure outline — the canonical doc said "~138K" and the project_status hint said `137_554`, but the authoritative integer comes from the actual run. Pinning (rather than computing dynamically) IS the regression alarm: a "whatever the corpus produces" assertion would silently absorb both kinds of drift. Re-pinning is cheap (one integer constant + one DEC entry) and explicit.
+- Alternatives considered: (a) Compute count dynamically from corpus files — rejected; defeats the regression alarm. (b) Pin a tolerance window (e.g. 137_500 ± 100) — rejected; obscures small drifts which are the most diagnostic. (c) Pin in a separate "expected-counts" config file — possible but premature; one constant in one test does not need its own home yet.
+- Confidence: High — the integer is reproducible and the contract is unambiguous.
+- Made-by: human-approved
+- Commit: d622447
+- Files: tests/integration/test_corpus_ingest.py (`EXPECTED_TOKEN_COUNT` constant + module docstring + `test_full_corpus_smoke` assertions)
+- Spec refs: REQ:08.ingestion-pipeline
+
+## DEC-048 — Default-path filename guard tolerates extras (e.g. upstream `README.md`); default path derives filenames from `_BOOK_NUMBER_BY_FILENAME` directly. Amends DEC-041.
+- Status: Accepted
+- Question: Slice B Phase 4's manual ship-gate exposed that `data/raw/morphgnt-sblgnt/` contains a `README.md` alongside the 27 mapped MorphGNT books, and `_assert_27_files_present` rejected the run with `unexpected=['README.md']` (exit 3). Should the strict default-path guard police what else upstream ships in the corpus directory, or only assert that all 27 mapped books are present?
+- Decision: Option A. Relax `_assert_27_files_present` from "exactly the 27 mapped filenames, no missing, no extras" to "all 27 mapped filenames present; extras tolerated." On the default path, the script additionally derives its BB-ordered filename list directly from `_BOOK_NUMBER_BY_FILENAME` (no second directory scan), so the relaxed `_present_filenames_in_bb_order` (which still rejects extras for `--corpus-dir` test fixtures) only runs on the `--corpus-dir` path. DEC-041's "extras forbidden on `--corpus-dir`" semantics are preserved unchanged.
+- Rationale: The strict guard's load-bearing job is to catch a *missing* book — i.e., a MorphGNT rename that would silently skip a canonical text. It is not the strict guard's job to police upstream housekeeping (`README.md`, `LICENSE`, `.gitignore`, etc.). The vendored MorphGNT repo includes its own README and `.git`; both arrived in commit `78a59ca` and have been there throughout Slice A (which loaded via `parse_corpus_file` directly and never exercised the directory-level guard). Phase 4's ship-gate is the first time the strict guard met the real production directory, exposing the over-strict design.
+- Alternatives considered: (a) Filter the strict guard to `*-morphgnt.txt` glob — narrower than option A but no obvious upside; would still need to handle "MorphGNT renamed a book to a non-conforming name" as a missing-book case. (b) Move/delete `README.md` outside the corpus dir — brittle; `git pull` on the vendored repo restores it, and the same fight repeats on every upstream sync. (c) Allowlist `README.md` + `.gitignore` explicitly inside the script — hardcodes upstream's housekeeping inventory into our code; high maintenance cost as upstream evolves.
+- Confidence: High — the guard's purpose is clearly "rename detection," and option A makes that purpose explicit. The two-path filename-source split (default = canonical map; `--corpus-dir` = directory scan) cleanly separates production vs. test-fixture concerns.
+- Made-by: human-approved
+- Commit: d622447
+- Files: scripts/db/ingest_corpus.py (`_assert_27_files_present` body + docstring; `main()` default-path filename derivation)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+- Cross-refs: DEC-041 (amends — `--corpus-dir` extras-forbidden semantics unchanged; default-path "no extras" semantics replaced with "extras tolerated")
