@@ -94,24 +94,18 @@ def _redact_database_url(url: str) -> str:
 def _assert_27_files_present(directory: Path) -> None:
     """Strict guard for the production corpus directory.
 
-    Raises RuntimeError if ``directory`` does not contain *exactly* the 27
-    filenames in ``_BOOK_NUMBER_BY_FILENAME`` — neither missing nor extra.
-    Catches MorphGNT renames and stray files in one pre-flight check before
-    any DB work begins.
+    Raises RuntimeError if any of the 27 filenames in
+    ``_BOOK_NUMBER_BY_FILENAME`` is absent from ``directory``. Extra files
+    (e.g. upstream housekeeping like ``README.md``) are tolerated — the guard
+    exists to catch MorphGNT *renames* (a missing book), not to police what
+    else the upstream repo ships alongside the corpus.
     """
     found = {p.name for p in directory.iterdir() if p.is_file()}
-    expected = set(_BOOK_NUMBER_BY_FILENAME)
-    if found == expected:
+    missing = sorted(set(_BOOK_NUMBER_BY_FILENAME) - found)
+    if not missing:
         return
-    missing = sorted(expected - found)
-    extras = sorted(found - expected)
-    parts: list[str] = []
-    if missing:
-        parts.append(f"missing={missing}")
-    if extras:
-        parts.append(f"unexpected={extras}")
     raise RuntimeError(
-        f"corpus directory {directory} filename drift: {'; '.join(parts)}"
+        f"corpus directory {directory} filename drift: missing={missing}"
     )
 
 
@@ -194,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if is_default:
             _assert_27_files_present(corpus_dir)
-        filenames = _present_filenames_in_bb_order(corpus_dir)
+            filenames = sorted(
+                _BOOK_NUMBER_BY_FILENAME, key=_BOOK_NUMBER_BY_FILENAME.__getitem__
+            )
+        else:
+            filenames = _present_filenames_in_bb_order(corpus_dir)
     except (RuntimeError, FileNotFoundError, NotADirectoryError) as exc:
         print(f"corpus-dir guard failed: {exc}", file=sys.stderr)
         return EXIT_CORPUS_DRIFT

@@ -26,6 +26,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INGEST_SCRIPT = REPO_ROOT / "scripts" / "db" / "ingest_corpus.py"
 MULTI_FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "morphgnt" / "multi"
 
+# Pinned by the Slice-B Phase-4 manual ship-gate run on 2026-05-03 against the
+# SBLGNT edition currently checked into ``data/raw/morphgnt-sblgnt/``. If this
+# integer changes, either the corpus or the parser drifted — the test is a
+# regression alarm on that pair, not a moving target. Re-pin via the manual
+# ship-gate documented in the Slice-B structure outline (Phase 4 checkpoint).
+EXPECTED_TOKEN_COUNT: int = 137_554
+
 
 pytestmark = pytest.mark.integration
 
@@ -200,3 +207,73 @@ def test_script_redacts_password_in_database_url_print() -> None:
     at_in_password = "postgresql://alice:p@ssw0rd@db.example.com/spl"
     assert redact(at_in_password) == "postgresql://alice:***@db.example.com/spl"
     assert "p@ssw0rd" not in redact(at_in_password)
+
+
+def test_full_corpus_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Slice-B exit gate: real script TRUNCATEs and loads all 27 books.
+
+    Owns its own truncate boundary (Decision C from the Slice-B structure
+    outline) — does NOT use ``loaded_engine``. The script's ``--truncate``
+    is itself the function-scoped reset; the test does not pre-truncate.
+    Invokes the script via ``subprocess.run`` so the real CLI binary is
+    exercised, mirroring ``test_apply_schemas.py:42``'s pattern.
+
+    ``SPL_INGEST_CONFIRM_TRUNCATE`` is set on this process via
+    ``monkeypatch.setenv`` and inherited by the subprocess through the
+    default ``subprocess.run`` env-inheritance (no explicit ``env=``).
+
+    The duplicate-detector assertion
+    (``COUNT(DISTINCT (book,chapter,verse,position)) == COUNT(*)``) is the
+    runtime stand-in for a UNIQUE constraint that ``tokens`` deliberately
+    does not have — it catches a parser regression that would emit two
+    tokens at the same canonical address.
+
+    Placed last in the file so the module-scope ``loaded_engine`` fixture's
+    219-row 3-John state is not wiped before the tests that depend on it.
+    """
+    monkeypatch.setenv("SPL_INGEST_CONFIRM_TRUNCATE", "1")
+    result = _run_ingest_script(["--truncate"])
+
+    assert result.returncode == 0, (
+        f"expected exit 0, got {result.returncode}; "
+        f"stderr tail={result.stderr.splitlines()[-20:]!r}"
+    )
+
+    file_boundary_lines = [
+        line
+        for line in result.stderr.splitlines()
+        if line.startswith("file_boundary book=")
+    ]
+    assert len(file_boundary_lines) == 27, (
+        f"expected 27 file_boundary lines, got {len(file_boundary_lines)}; "
+        f"lines={file_boundary_lines!r}"
+    )
+
+    engine = get_engine()
+    with engine.connect() as connection:
+        count = connection.execute(text("SELECT count(*) FROM tokens")).scalar_one()
+        max_global_position = connection.execute(
+            text("SELECT max(global_position) FROM tokens")
+        ).scalar_one()
+        distinct_addresses = connection.execute(
+            text(
+                "SELECT count(*) FROM "
+                "(SELECT DISTINCT book, chapter, verse, position FROM tokens) t"
+            )
+        ).scalar_one()
+        distinct_books = connection.execute(
+            text("SELECT count(DISTINCT book) FROM tokens")
+        ).scalar_one()
+
+    assert count == EXPECTED_TOKEN_COUNT, (
+        f"row count drifted: got {count}, pinned {EXPECTED_TOKEN_COUNT}"
+    )
+    assert max_global_position == count, (
+        f"global_position monotonicity broken: "
+        f"max(global_position)={max_global_position}, count={count}"
+    )
+    assert distinct_addresses == count, (
+        f"duplicate (book,chapter,verse,position) tuples present: "
+        f"distinct={distinct_addresses}, count={count}"
+    )
+    assert distinct_books == 27, f"expected 27 distinct books, got {distinct_books}"
