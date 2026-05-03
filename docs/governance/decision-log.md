@@ -235,3 +235,43 @@
 - Commit: 9f39f25
 - Files: src/engine/parser.py; tests/unit/test_parser.py
 - Spec refs: REQ:05.dsl-ast (wildcard NodeType at canonical-05:57 and :308)
+
+## DEC-034 — `progress_callback` hook on `load_tokens`; loader stays I/O-pure
+- Status: Accepted
+- Question: How should `load_tokens` expose progress to a CLI script (and any future worker / UI subscriber) without owning a logger or stderr inside `src/ingestion/`?
+- Decision: Add `progress_callback: ProgressCallback | None = None` as a keyword-only parameter on `load_tokens`. `ProgressCallback` is a module-level alias `Callable[[ProgressEvent], None]`. The loader emits events; observability output (prints, logs, metrics) is owned entirely by the caller. The default `None` is a behavioral no-op so existing call sites are unchanged. The loader does not import `logging`, does not call `print`, and writes nothing to stderr.
+- Rationale: Keeps `loader.py` testable without log capture, matches the function-style discipline already in `corpus_parser.py`, and gives the upcoming `scripts/db/ingest_corpus.py` (Slice B Phase 3) a typed subscription point. A typed callback also lets future workers or UIs subscribe without parsing strings — pertinent because canonical-09's ingestion boundary (REQ:09.ingestion) explicitly anticipates non-CLI invocation paths (workers).
+- Alternatives considered: (a) Add a logger inside `loader.py` — rejected because it forces tests to capture log output to make assertions, and embeds a stdlib choice into a library that callers may want to wire through their own observability stack. (b) Yield events from `load_tokens` as a generator instead of a callback — rejected because `load_tokens` already returns the inserted-row count; mixing a generator return with a count would force callers to either drive the generator and lose the count or wrap it in a sentinel-bearing protocol. A callback keeps the return-shape simple. (c) Pass an event queue object — rejected as over-engineered for synchronous, single-process ingestion.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 5cadd8c
+- Files: src/ingestion/loader.py; tests/unit/test_loader.py
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
+
+## DEC-035 — `ProgressEvent` is a single frozen Pydantic model with a `kind` literal
+- Status: Accepted
+- Question: Should the loader's progress events be a single Pydantic model with `kind: Literal["batch","file_boundary","done"]`, or three separate event classes (`BatchEvent` / `FileBoundaryEvent` / `DoneEvent`)?
+- Decision: Single model. `ProgressEvent(kind: Literal["batch","file_boundary","done"], book: str | None, tokens_loaded: int)`, `model_config = ConfigDict(frozen=True)`. The `book` field is populated only on `kind="file_boundary"` (otherwise `None`); `tokens_loaded` is populated for all kinds.
+- Rationale: Matches the project's Pydantic-everywhere convention (CLAUDE.md "Pydantic models for all data crossing boundaries"). A `kind` literal is sufficient discrimination at MVP scale — there are three event kinds and they share two of three fields. The frozen flag mirrors `CorpusToken` and the AST models, so events can be safely buffered, compared, and cached. Splitting into per-kind classes is a pure cost at this scale (more imports, more types for callers to handle, no payload divergence to model).
+- Alternatives considered: (a) Separate `BatchEvent` / `FileBoundaryEvent` / `DoneEvent` classes — rejected as premature; revisit if a future event kind grows kind-specific fields that don't generalize. (b) A `dataclass` instead of Pydantic — rejected for consistency with the rest of `src/ingestion/` and `src/engine/`, all of which use frozen Pydantic v2.
+- Confidence: Medium (not High because future event kinds could plausibly diverge enough to warrant a split; the cost of migrating later is bounded — one find/replace plus a Union type).
+- Made-by: human-approved
+- Commit: 5cadd8c
+- Files: src/ingestion/loader.py; tests/unit/test_loader.py
+- Spec refs: REQ:08.ingestion-pipeline
+
+## DEC-036 — `ProgressEvent` emission semantics: committed count, post-commit done, ceil-batch, first-token boundary
+- Status: Accepted
+- Question: `/design` and `/structure` defined the event surface but left several runtime semantics implicit. (a) What does `tokens_loaded` count? (b) Does the first token of the iterator fire a `file_boundary`? (c) Does the trailing partial batch fire its own `batch` event? (d) Does `done` fire inside or outside the transaction's `with` block?
+- Decision: Pin all four:
+  1. `tokens_loaded` = the **committed** `inserted` counter at the moment of emission. File-boundary events therefore report the count *before* the new book's tokens are committed; batch events report the count *after* the just-flushed batch.
+  2. Yes — the first token's book always differs from `last_book = None`, so a `file_boundary` event fires for it. This makes the production line-count "27 file_boundary events" rather than "26 transitions".
+  3. Yes — the trailing partial batch fires a `batch` event. Total batch events = `ceil(N / BATCH_SIZE)` (e.g. 137,554 / 1000 → 137 full + 1 partial = 138).
+  4. `done` fires **after** the `with engine.begin()` block exits, so it represents truly-committed state, not a pre-commit "done iterating" signal.
+- Rationale: "Loaded N" should mean "committed N" because rollback can erase uncommitted progress; reporting an in-flight count that may later vanish would mislead a watcher. Firing on the first token keeps the script's first stderr line non-empty and gives every book equal observability weight. Counting partial batches keeps the script's batch tally honest at non-multiple-of-1000 corpus sizes. Post-commit `done` lets a watcher / wrapper script trust it as a success signal — receiving `done` guarantees the data is in the table.
+- Alternatives considered: (a) `tokens_loaded` = "tokens seen so far" (per-token counter incremented before flush) — rejected because it would over-report during partial batches and mislead in failure cases. (b) Skip the first-token boundary and emit only on actual transitions — rejected because the script's stderr would start mid-load with a `batch` event and make the per-book progress narrative harder to read. (c) Skip the partial-batch event and let `done` cover the residual — rejected because callers tracking "throughput per batch" would see a phantom larger-than-BATCH_SIZE final increment from `done`. (d) Fire `done` inside the `with` block (pre-commit) — rejected; `done` would then be unreliable as a success signal.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 5cadd8c
+- Files: src/ingestion/loader.py; tests/unit/test_loader.py (`TestProgressCallback::test_callback_fires_per_batch`, `::test_callback_fires_at_file_boundary`, `::test_callback_emits_done_with_final_count`)
+- Spec refs: REQ:08.ingestion-pipeline
