@@ -209,14 +209,17 @@ def test_script_redacts_password_in_database_url_print() -> None:
     assert "p@ssw0rd" not in redact(at_in_password)
 
 
-def test_full_corpus_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_full_corpus_smoke(
+    loaded_engine: tuple[Engine, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Slice-B exit gate: real script TRUNCATEs and loads all 27 books.
 
     Owns its own truncate boundary (Decision C from the Slice-B structure
-    outline) — does NOT use ``loaded_engine``. The script's ``--truncate``
-    is itself the function-scoped reset; the test does not pre-truncate.
-    Invokes the script via ``subprocess.run`` so the real CLI binary is
-    exercised, mirroring ``test_apply_schemas.py:42``'s pattern.
+    outline) — the script's ``--truncate`` is itself the function-scoped
+    reset; the test does not pre-truncate. Invokes the script via
+    ``subprocess.run`` so the real CLI binary is exercised, mirroring
+    ``test_apply_schemas.py:42``'s pattern.
 
     ``SPL_INGEST_CONFIRM_TRUNCATE`` is set on this process via
     ``monkeypatch.setenv`` and inherited by the subprocess through the
@@ -228,9 +231,15 @@ def test_full_corpus_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     does not have — it catches a parser regression that would emit two
     tokens at the same canonical address.
 
-    Placed last in the file so the module-scope ``loaded_engine`` fixture's
-    219-row 3-John state is not wiped before the tests that depend on it.
+    The unused ``loaded_engine`` parameter declares a pytest fixture-graph
+    edge that forces the module-scope ``loaded_engine`` fixture to set up
+    its 3-John 219-row state before this test runs (parallel to
+    ``test_script_fails_loud_when_tokens_nonempty_without_truncate``).
+    Combined with the test's placement last in the file (so all
+    ``loaded_engine``-dependent tests' bodies run before this one wipes
+    the table), both default-order and shuffle-tolerant ordering hold.
     """
+    _ = loaded_engine
     monkeypatch.setenv("SPL_INGEST_CONFIRM_TRUNCATE", "1")
     result = _run_ingest_script(["--truncate"])
 

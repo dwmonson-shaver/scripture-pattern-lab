@@ -52,14 +52,26 @@ class _FakeConnection:
 
 
 class _FakeEngine:
-    """Minimal Engine stand-in: ``begin()`` yields a recording no-op connection."""
+    """Minimal Engine stand-in: ``begin()`` yields a recording no-op connection.
+
+    Tracks ``in_transaction`` so callback semantics can be asserted against
+    DEC-036's "post-commit done" contract — a callback inspecting this flag
+    sees ``True`` while inside the ``begin()`` block and ``False`` after the
+    block exits, allowing tests to verify the ``done`` event is emitted
+    outside the transaction without needing a real DB.
+    """
 
     def __init__(self) -> None:
         self.connection = _FakeConnection()
+        self.in_transaction: bool = False
 
     @contextmanager
     def begin(self) -> Iterator[_FakeConnection]:
-        yield self.connection
+        self.in_transaction = True
+        try:
+            yield self.connection
+        finally:
+            self.in_transaction = False
 
 
 @pytest.fixture
@@ -132,8 +144,21 @@ class TestProgressCallback:
         fake_engine: _FakeEngine,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """DEC-036: ``done`` is emitted post-commit (outside ``engine.begin()``).
+
+        Captures ``fake_engine.in_transaction`` at each callback invocation so
+        the test catches a regression that would move the ``done`` emission
+        inside the transaction context — a real-DB equivalent would silently
+        change durability semantics for callers acting on the count.
+        """
         monkeypatch.setattr(loader_module, "BATCH_SIZE", 2)
         events: list[ProgressEvent] = []
+        in_transaction_at_emission: list[bool] = []
+
+        def capturing_callback(event: ProgressEvent) -> None:
+            events.append(event)
+            in_transaction_at_emission.append(fake_engine.in_transaction)
+
         tokens = [
             _make_token("01", position=i + 1, global_position=i + 1) for i in range(5)
         ]
@@ -141,7 +166,11 @@ class TestProgressCallback:
         load_tokens(
             fake_engine,  # type: ignore[arg-type]
             tokens,
-            progress_callback=events.append,
+            progress_callback=capturing_callback,
         )
 
         assert events[-1] == ProgressEvent(kind="done", book=None, tokens_loaded=5)
+        assert in_transaction_at_emission[-1] is False, (
+            "done event must fire AFTER engine.begin() exits "
+            "(DEC-036 post-commit contract)"
+        )
