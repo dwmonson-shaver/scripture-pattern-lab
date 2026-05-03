@@ -17,6 +17,7 @@ An AI-assisted original-language hypothesis exploration platform for Judeo-Chris
 - Build vertically (mock → wire → test → next slice), never horizontally (all DB, then all services, then all API)
 - Each implementation phase must be testable independently
 - No code is complete until tests pass and the developer has read every line
+- Independent code review at slice-close (typically Codex via `/codex:rescue`) before declaring closure — artifact in `docs/reviews/`, indexed and triaged in `docs/governance/reviews-log.md`. P0/P1/P2 findings (or design `high` findings) must close before the slice closes
 
 ## Coding Conventions
 - Language: Python 3.12+
@@ -49,7 +50,9 @@ For any feature or non-trivial change:
 
 4. **Implement** — Follow the structure outline phase by phase. Commit after each phase. Run tests between phases. Stop and realign if something diverges from the design.
 
-5. **Close out** — At the end of every step AND between phases, run `/close-step`. Do not skip. (See "Phase Discipline" below.)
+5. **Close out (per phase)** — At the end of every step AND between phases, run `/close-step`. Do not skip. (See "Phase Discipline" below.)
+
+6. **Slice close (independent review)** — At the end of a complete slice (multiple phases together), run an independent code review (typically Codex via `/codex:rescue` or by spawning the `codex:codex-rescue` subagent) on the cumulative slice diff. Save the artifact to `docs/reviews/review-codex-{flavor}-{slice-id}-{YYYY-MM-DD}.md`, add a row to `docs/governance/reviews-log.md` recording verdict + findings + closure SHAs, and ensure P0/P1/P2 (or design `high`) findings have closed. P3 / info findings either land inline or join a named bucket tracked in `project_status.md`. See `docs/governance/reviews-log.md` for the full process and severity language.
 
 ### Phase Discipline (Context Hygiene)
 
