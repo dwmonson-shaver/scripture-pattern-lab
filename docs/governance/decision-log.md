@@ -199,3 +199,39 @@
 - Commit: 381117e
 - Files: tests/integration/test_corpus_ingest.py
 - Spec refs: REQ:08.token-schema
+
+## DEC-031 — Polarity on parenthesized alternatives/groups distributes to NodeRef leaves
+- Status: Accepted
+- Question: How should polarity be represented when applied to a parenthesized alternative or group, e.g. `+(concept:hope | concept:expectation)`? Polarity is a NodeRef-only attribute today; the form has multiple options.
+- Decision: At parse time, detect polarity-then-LPAREN in `parse_step`, consume the polarity, dispatch to `parse_group_or_alternative`, then walk the result via a new module-level `_distribute_polarity` helper that stamps polarity on every NodeRef leaf inside AlternativeExpr/GroupExpr (recursive). Polarity remains a NodeRef-only field; `AlternativeExpr` and `GroupExpr` do **not** gain a `polarity` attribute. NodeRefs are frozen Pydantic models; updates use `model_copy(update={"polarity": ...})`.
+- Rationale: Matches `docs/canonical/05_dsl-ast.md:252-271` exactly — the canonical example shows the compiled AST as an AlternativeExpr where each NodeRef option carries `polarity: "+"`. Distributing at parse time means the validator and pattern engine only handle polarity in one place (the leaf), avoiding two-place semantics that would otherwise sprout from a composite-level field.
+- Alternatives considered: (a) Add `polarity` to AlternativeExpr/GroupExpr — rejected because it bifurcates polarity logic, makes the canonical example diverge from the AST, and forces every downstream consumer (validator rules, executor, scoring) to look in two places. (b) Reject the syntax until the canonical doc adds a composite-level polarity rule — rejected because the canonical example already specifies the distributed form.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 9aa900a
+- Files: src/engine/parser.py; tests/unit/test_parser.py
+- Spec refs: REQ:05.dsl-ast (canonical-05:252-271 polarity-with-alternatives example)
+
+## DEC-032 — Composite-step partial-reduction semantics
+- Status: Accepted
+- Question: When `_reduce_step` recurses into composite step types during partial-plan reduction, how should each composite degrade as its children are dropped?
+- Decision: AlternativeExpr — drop unsupported options recursively; if 0 survive return None (drop the alternative entirely); if exactly 1 survives, **collapse** to that single option (not an AlternativeExpr wrapper); if 2+ survive, keep the AlternativeExpr with the reduced options list. GroupExpr — reduce its inner SequenceExpr via `_reduce_sequence`; if the result has fewer than 2 steps, drop the group entirely (return None). OptionalExpr — reduce its inner step; if None, drop the optional entirely.
+- Rationale: Mirrors the existing top-level "drop or downgrade" discipline already in `_reduce_plan`, applied recursively. Single-survivor alternative collapse avoids leaving structurally redundant `AlternativeExpr(options=[X])` wrappers downstream — a one-option alternative is semantically just that option, and the engine would otherwise need a special case. The <2-step rule for GroupExpr reuses the same minimum-viable-sequence threshold the top-level `_reduce_sequence` enforces, since GroupExpr's inner is itself a SequenceExpr. OptionalExpr's drop rule is symmetric with NodeRef's — both are single-slot wrappers, both vanish when their content is unsupported.
+- Alternatives considered: (a) Keep single-option AlternativeExpr wrappers — rejected because every downstream consumer would need to know `Alternative(options=[X])` is equivalent to `X`, an extra rule for no benefit. (b) Allow GroupExpr to collapse to a 1-step inner — rejected because a 1-step "sequence" has 0 operators and isn't a meaningful sequence; cleaner to drop the wrapper and let surrounding reduction decide. (c) Promote OptionalExpr's inner up if it survived — out of scope; an OptionalExpr already represents "may or may not appear," so dropping it when its inner is unsupported is the conservative choice.
+- Confidence: High
+- Made-by: human-approved
+- Commit: 6d6af2a
+- Files: src/validation/validator.py; tests/unit/test_validator.py
+- Spec refs: REQ:06.partial-reduction (capability-validator partial-plan reduction contract)
+
+## DEC-033 — Wildcard `*` tokenized as a WORD token (no dedicated TokenKind)
+- Status: Accepted
+- Question: The DSL wildcard `*` (canonical-05 v0.1 NodeType.WILDCARD) needs to flow from tokenizer to parser. Add a dedicated `TokenKind.STAR` and update the parser, or emit `*` as a `WORD` token and reuse the existing `word_tok.value == "*"` branch in `_parse_typed_value`?
+- Decision: Emit `*` as `Token(kind=WORD, value="*")`. Tokenizer change is a single special-case branch immediately after the single-character map; parser is unchanged.
+- Rationale: `_parse_typed_value` already had a `word_tok.value == "*"` branch that was unreachable because the tokenizer never produced `*`. The minimal fix makes that branch reachable, no parser changes needed. The v0.1 DSL spec does not use `*` in any compound context (no `*+morph:X`, no `**` operator), so distinguishing wildcard from words at the token-kind level provides no expressive benefit.
+- Alternatives considered: Add `TokenKind.STAR` and a STAR-handling branch in `_parse_typed_value` — rejected because it touches both tokenizer and parser, doubling the change footprint, with no v0.1 expressive benefit. Revisit if/when wildcard syntax extends (e.g., `*{N}` for "N consecutive wildcards" or `**` for "any subsequence").
+- Confidence: Medium-High
+- Made-by: human-approved
+- Commit: 9f39f25
+- Files: src/engine/parser.py; tests/unit/test_parser.py
+- Spec refs: REQ:05.dsl-ast (wildcard NodeType at canonical-05:57 and :308)
