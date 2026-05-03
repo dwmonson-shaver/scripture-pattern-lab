@@ -275,3 +275,15 @@
 - Commit: 5cadd8c
 - Files: src/ingestion/loader.py; tests/unit/test_loader.py (`TestProgressCallback::test_callback_fires_per_batch`, `::test_callback_fires_at_file_boundary`, `::test_callback_emits_done_with_final_count`)
 - Spec refs: REQ:08.ingestion-pipeline
+
+## DEC-037 — Unit-test isolation for `parse_corpus_directory` via monkeypatching `_BOOK_NUMBER_BY_FILENAME`
+- Status: Accepted
+- Question: How should a unit test exercise `parse_corpus_directory` without writing 27 real corpus files into `tmp_path`? The function iterates the module-level `_BOOK_NUMBER_BY_FILENAME` map (all 27 BB-keyed entries) and opens every named file from the supplied directory; pointing it at a 2-file fixture directly raises `FileNotFoundError` on the third book.
+- Decision: Use `pytest.MonkeyPatch.setattr("src.ingestion.corpus_parser._BOOK_NUMBER_BY_FILENAME", {<2-entry dict>})` for the duration of each test, and copy the two real-format fixture files into `tmp_path`. The map is module-level config (data, not behavior); replacing it in a test is the correct scope-narrowing technique. Production behavior is untouched — production runs continue to see the full 27-entry map and continue to raise on a missing file.
+- Rationale: Establishes a pattern for unit tests that target functions iterating hard-coded config tables in `src/ingestion/`. The test stays a pure unit (no real-file dependencies in `tests/fixtures/morphgnt/multi/` beyond the two it needs), preserves fail-loud production semantics (DEC-021's spirit), and keeps the function's contract intact (the docstring still says "all 27 MorphGNT files in canonical book order"). The `multi_dir` fixture in `tests/unit/test_corpus_parser.py` is the canonical example; future similar tests should follow the same shape.
+- Alternatives considered: (a) Create 27 placeholder files in `tmp_path`, with 25 empty stubs — rejected as noisy and as coupling the test to the production map's cardinality (any new BB added to `_BOOK_NUMBER_BY_FILENAME` would require touching the test's setup). (b) Soften `parse_corpus_directory` to skip missing files — rejected; that is a production-behavior change that weakens the fail-loud contract for an unrelated reason (test ergonomics). (c) Point the test at the natural fixture dir `tests/fixtures/morphgnt/multi/` — rejected; the function would try to open `63-Lk-morphgnt.txt` etc. and raise.
+- Confidence: Medium — establishes the pattern; revisit if a future ingestion iterator iterates a non-config-driven structure (e.g. directory listing) where monkeypatching is not the natural choice.
+- Made-by: human-approved
+- Commit: 83685a4
+- Files: tests/unit/test_corpus_parser.py (`TestParseCorpusDirectory.multi_dir` fixture; all four test methods)
+- Spec refs: REQ:08.ingestion-pipeline; REQ:09.ingestion
