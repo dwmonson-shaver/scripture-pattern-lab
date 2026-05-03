@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import Column, Engine, Integer, MetaData, String, Table, Text, create_engine
+from sqlalchemy import Column, Engine, Integer, MetaData, String, Table, Text, create_engine, text
 
 metadata: MetaData = MetaData()
 
@@ -49,3 +49,15 @@ def get_engine() -> Engine:
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url[len("postgresql://") :]
     return create_engine(url)
+
+
+def truncate_tokens(engine: Engine) -> None:
+    """Wipe the ``tokens`` table and reset its identity counter.
+
+    Issues ``TRUNCATE TABLE tokens RESTART IDENTITY`` inside a short-lived
+    transaction. This is destructive and irreversible; the caller is
+    responsible for confirming intent (e.g. CLI flag + env var) before
+    invoking. The function does not gate on its own.
+    """
+    with engine.begin() as connection:
+        connection.execute(text("TRUNCATE TABLE tokens RESTART IDENTITY"))

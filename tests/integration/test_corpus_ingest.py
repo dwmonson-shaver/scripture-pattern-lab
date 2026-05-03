@@ -7,8 +7,12 @@ Gated by ``@pytest.mark.integration``; excluded from the default suite.
 
 from __future__ import annotations
 
+import importlib.util
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from sqlalchemy import Engine, MetaData, Table, select, text
@@ -18,6 +22,9 @@ from src.ingestion.db import get_engine, tokens_table
 from src.ingestion.loader import load_tokens
 
 REAL_3JN_PATH = Path("data/raw/morphgnt-sblgnt/85-3Jn-morphgnt.txt")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INGEST_SCRIPT = REPO_ROOT / "scripts" / "db" / "ingest_corpus.py"
+MULTI_FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "morphgnt" / "multi"
 
 
 pytestmark = pytest.mark.integration
@@ -100,3 +107,96 @@ def test_get_engine_raises_when_database_url_unset(
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
         get_engine()
+
+
+def _run_ingest_script(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Invoke ``scripts/db/ingest_corpus.py`` from repo root with parent env.
+
+    Mirrors ``tests/integration/test_apply_schemas.py:42``'s subprocess style
+    so the script is exercised as a real binary, not as an in-process call.
+    """
+    return subprocess.run(
+        [sys.executable, str(INGEST_SCRIPT), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _import_ingest_module() -> ModuleType:
+    """Load ``scripts/db/ingest_corpus.py`` as a module for in-process helper tests.
+
+    ``scripts/`` is intentionally not a Python package (it holds CLI tools, not
+    importable library code), so we go through ``importlib.util`` rather than
+    a top-level import. The module's ``__main__`` guard prevents ``main()``
+    from running on import.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "_ingest_corpus_under_test", INGEST_SCRIPT
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_script_fails_loud_when_tokens_nonempty_without_truncate(
+    loaded_engine: tuple[Engine, int],
+) -> None:
+    """Script must refuse to load when ``tokens`` is non-empty and no --truncate.
+
+    The ``loaded_engine`` module-scope fixture has already inserted 219 rows
+    of 3 John, so the table is guaranteed non-empty here. Use --corpus-dir to
+    point at the 2-book multi fixture so the corpus-dir guard passes (it does
+    not enforce count==27 when --corpus-dir is supplied; see Decision A).
+    """
+    _ = loaded_engine  # ensure the table is populated before the script runs
+    result = _run_ingest_script(["--corpus-dir", str(MULTI_FIXTURE_DIR)])
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    assert "tokens" in result.stderr.lower()
+    assert "--truncate" in result.stderr
+
+
+def test_script_truncate_requires_env_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--truncate alone is not enough; SPL_INGEST_CONFIRM_TRUNCATE=1 is also required.
+
+    The env-confirm check runs before any DB or filesystem access, so this
+    test does not need ``loaded_engine`` or a valid corpus dir.
+    """
+    monkeypatch.delenv("SPL_INGEST_CONFIRM_TRUNCATE", raising=False)
+    result = _run_ingest_script(["--truncate"])
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    assert "SPL_INGEST_CONFIRM_TRUNCATE" in result.stderr
+
+
+def test_script_redacts_password_in_database_url_print() -> None:
+    """``_redact_database_url`` must blot out the password segment of any
+    URL the script would print to stderr at startup.
+
+    Tests the helper directly with synthetic URLs so the assertion does not
+    depend on the real DATABASE_URL or on running the script. Covers the
+    common shapes: full userinfo, missing userinfo, missing password.
+    """
+    module = _import_ingest_module()
+    redact = module._redact_database_url
+
+    full = "postgresql+psycopg://alice:s3cret@db.example.com:5432/spl"
+    assert redact(full) == "postgresql+psycopg://alice:***@db.example.com:5432/spl"
+    assert "s3cret" not in redact(full)
+
+    no_userinfo = "postgresql://db.example.com/spl"
+    assert redact(no_userinfo) == no_userinfo
+
+    no_password = "postgresql://alice@db.example.com/spl"
+    assert redact(no_password) == no_password
+
+    at_in_password = "postgresql://alice:p@ssw0rd@db.example.com/spl"
+    assert redact(at_in_password) == "postgresql://alice:***@db.example.com/spl"
+    assert "p@ssw0rd" not in redact(at_in_password)
