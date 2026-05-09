@@ -11,8 +11,9 @@ Exit codes:
     1   uncaught exception — traceback printed to stderr
     2   user error — ParseError, validator returned ``unsupported``, or the
         executor refused the plan shape
-    3   registry not seeded — a concept node was used but the registry has
-        no lemma mapping for it
+    3   registry not seeded OR concept not mapped — a concept node was used
+        but either no registry was supplied or the registry has no lemma
+        rows for the named concept (e.g. unknown / unseeded concept)
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.engine.executor import execute  # noqa: E402
 from src.engine.models import (  # noqa: E402
+    ConceptNotMapped,
     MatchCandidate,
     NodeType,
     RegistryRequired,
@@ -178,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"registry not seeded: concept {exc.concept_name!r} has no "
             "lemma mapping. Run scripts/db/seed_registry.py first.",
+            file=sys.stderr,
+        )
+        return EXIT_REGISTRY_EMPTY
+    except ConceptNotMapped as exc:
+        print(
+            f"concept not mapped: {exc.concept_name!r} is not present in the "
+            "concept registry (no lemma rows). Add it via "
+            "scripts/db/seed_registry.py or correct the query.",
             file=sys.stderr,
         )
         return EXIT_REGISTRY_EMPTY

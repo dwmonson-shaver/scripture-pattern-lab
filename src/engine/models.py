@@ -354,3 +354,23 @@ class RegistryRequired(Exception):  # noqa: N818 — name spec'd in design decis
             f"concept registry is required to resolve concept node "
             f"{concept_name!r} but none was supplied"
         )
+
+
+class ConceptNotMapped(Exception):  # noqa: N818 — name parallels RegistryRequired
+    """Raised when a concept node resolves to zero lemmas in the registry.
+
+    Distinct from :class:`RegistryRequired` (which fires when the registry
+    handle itself is ``None``). ``ConceptNotMapped`` fires when the registry
+    is connected but has no ``concept_lemmas`` rows for the named concept —
+    i.e. the concept is unknown or not yet seeded. The CLI maps this to
+    exit code 3 so users can distinguish "concept not in registry" from
+    "concept in registry but no corpus matches".
+
+    ``concept_name`` carries the offending concept for error rendering.
+    """
+
+    def __init__(self, concept_name: str) -> None:
+        self.concept_name: str = concept_name
+        super().__init__(
+            f"concept {concept_name!r} has no lemma mapping in the registry"
+        )

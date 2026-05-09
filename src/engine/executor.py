@@ -14,21 +14,33 @@ MVP contract (decision #4 in the design):
   those columns. Resolution per design OQ #1: with only NT loaded today
   this is functionally equivalent to ``corpus='nt'``; revisit when OT or
   LXX corpus lands so users know whether unspecified means "any" or "NT".
+- ``NodeRef.negated=True`` is rejected — exclusion semantics are not yet
+  designed. ``NodeRef.morph_filters`` (any non-empty list) is rejected for
+  the same reason.
+- ``len(sequence.operators)`` must equal ``len(sequence.steps) - 1`` —
+  the second wall against malformed plans that slipped past the validator.
 
-Algorithm (decision #10): iterative per-step, in Python. Step 0 issues one
-SELECT for the lemma set; each step N issues one SELECT per step-(N-1)
-candidate, scoped to the same verse + position window. Verse-grouped
-``MatchCandidate``s are assembled in Python at the end. Canonical-09 §5
-explicitly endorses this shape for the 138K-token MVP corpus.
+Algorithm (decision #10): iterative per-step with **batched** SELECTs.
+Step 0 issues one SELECT for the lemma set. Each later step N issues ONE
+SELECT scoped to the union of surviving step-(N-1) verses, then groups
+result rows by (book, chapter, verse) in Python and pairs each row with
+each surviving step-(N-1) candidate that has ``prev.position < this.position``
+(and honors the gap constraint). Per-candidate fan-out (one SELECT per
+chain) was eliminated in C-CLOSE-004; this trades N×M SELECTs for one
+SELECT plus an in-memory join. Verse-grouped ``MatchCandidate``s are
+assembled at the end. Canonical-09 §5 explicitly endorses this shape for
+the 138K-token MVP corpus.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, tuple_
 
+from src.engine._schema import tokens_table
 from src.engine.models import (
+    ConceptNotMapped,
     GapConstraint,
     InverseExpr,
     MatchCandidate,
@@ -45,7 +57,6 @@ from src.engine.models import (
     StepMatch,
     UnsupportedPlanShape,
 )
-from src.ingestion.db import tokens_table
 from src.ontology.book_codes import bb_to_display, book_abbrev_to_bb
 
 if TYPE_CHECKING:
@@ -68,6 +79,8 @@ def execute(
     contract documented in this module's docstring.
     Raises :class:`RegistryRequired` if the plan contains a concept node
     but no ``concept_registry`` is supplied.
+    Raises :class:`ConceptNotMapped` if a concept node resolves to no
+    lemmas in the registry (concept absent or not seeded).
     """
     sequence = _validate_plan_shape(plan, scope)
 
@@ -80,7 +93,7 @@ def execute(
     ]
 
     # Validate book abbreviations up front so we fail loudly before any SQL.
-    base_where, base_params = _build_scope_where(scope)
+    base_where = _build_scope_where(scope)
 
     has_concept_step = any(step.type == NodeType.CONCEPT for step in steps)
     match_type: Literal["exact", "conceptual"] = (
@@ -91,27 +104,19 @@ def execute(
         # Step 0: seed with all candidates whose lemma is in the resolved set.
         step0_lemmas = resolved_lemmas[0]
         if not step0_lemmas:
+            # Defensive: _resolve_step_lemmas raises ConceptNotMapped on
+            # empty CONCEPT resolution and a LEMMA step always returns one
+            # element, so this branch is only reachable if a future caller
+            # mutates resolved_lemmas. Keep the early-return for safety.
             return []
 
-        step0_stmt = (
-            select(
-                tokens_table.c.id,
-                tokens_table.c.book,
-                tokens_table.c.chapter,
-                tokens_table.c.verse,
-                tokens_table.c.position,
-                tokens_table.c.global_position,
-                tokens_table.c.surface_form,
-                tokens_table.c.normalized_form,
-                tokens_table.c.lemma,
-                tokens_table.c.pos,
-            )
-            .where(tokens_table.c.lemma.in_(step0_lemmas))
+        step0_stmt = select(*_token_columns()).where(
+            tokens_table.c.lemma.in_(step0_lemmas)
         )
         for clause in base_where:
             step0_stmt = step0_stmt.where(clause)
 
-        step0_rows = connection.execute(step0_stmt, base_params).all()
+        step0_rows = connection.execute(step0_stmt).all()
 
         # ``chains`` accumulates a list of partial step-token lists. We extend
         # one step at a time. After step N, each chain has N+1 tokens.
@@ -120,23 +125,20 @@ def execute(
         ]
 
         for step_index in range(1, len(steps)):
+            if not chains:
+                return []
             gap = sequence.operators[step_index - 1].gap
             next_lemmas = resolved_lemmas[step_index]
             if not next_lemmas:
                 return []
 
-            extended: list[list[MatchedToken]] = []
-            for chain in chains:
-                prev_token = chain[-1]
-                rows = _match_step_in_verse(
-                    connection,
-                    prev_token=prev_token,
-                    lemmas=next_lemmas,
-                    gap=gap,
-                )
-                for row in rows:
-                    extended.append([*chain, _row_to_matched_token(row)])
-            chains = extended
+            chains = _extend_chains_one_step(
+                connection,
+                chains=chains,
+                lemmas=next_lemmas,
+                gap=gap,
+                base_where=base_where,
+            )
             if not chains:
                 return []
 
@@ -186,6 +188,22 @@ def execute(
 # ---------------------------------------------------------------------------
 
 
+def _token_columns() -> list:
+    """Return the column list used by every executor SELECT (stable shape)."""
+    return [
+        tokens_table.c.id,
+        tokens_table.c.book,
+        tokens_table.c.chapter,
+        tokens_table.c.verse,
+        tokens_table.c.position,
+        tokens_table.c.global_position,
+        tokens_table.c.surface_form,
+        tokens_table.c.normalized_form,
+        tokens_table.c.lemma,
+        tokens_table.c.pos,
+    ]
+
+
 def _validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExpr:
     """Enforce the MVP contract; return the validated SequenceExpr.
 
@@ -213,6 +231,17 @@ def _validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExp
             path="$.sequence.steps",
         )
 
+    # C-CLOSE-002: the operator count must match the step count exactly.
+    # Too few would index off the end inside the per-step loop; too many
+    # would silently drop operators. Either way, the plan is malformed.
+    expected_operators = len(sequence.steps) - 1
+    if len(sequence.operators) != expected_operators:
+        raise UnsupportedPlanShape(
+            f"operator count {len(sequence.operators)} does not match "
+            f"steps-1 count {expected_operators}",
+            path="$.sequence.operators",
+        )
+
     for index, step in enumerate(sequence.steps):
         path = f"$.sequence.steps[{index}]"
         if not isinstance(step, NodeRef):
@@ -226,6 +255,20 @@ def _validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExp
             raise UnsupportedPlanShape(
                 f"node type {step.type.value!r} is not supported by the "
                 "MVP executor (only LEMMA and CONCEPT)",
+                path=path,
+            )
+        # C-CLOSE-001: exclusion semantics are not yet designed; a negated
+        # node must not silently flow through to a positive resolution.
+        if step.negated:
+            raise UnsupportedPlanShape(
+                "negated NodeRef not supported in MVP",
+                path=path,
+            )
+        # C-CLOSE-002: morph filters are ignored by the resolution path
+        # today, so accepting them would silently broaden the match.
+        if step.morph_filters:
+            raise UnsupportedPlanShape(
+                "NodeRef.morph_filters not supported in MVP",
                 path=path,
             )
 
@@ -279,32 +322,36 @@ def _resolve_step_lemmas(
     CONCEPT node: ``concept_registry.get_lemmas_for_concept(step.value, language)``.
     Raises :class:`RegistryRequired` if a CONCEPT node is encountered but
     no registry is supplied.
+    Raises :class:`ConceptNotMapped` if the concept resolves to ``[]``
+    (the registry has no lemma rows for the named concept).
     """
     if step.type == NodeType.LEMMA:
         return [step.value]
     if step.type == NodeType.CONCEPT:
         if concept_registry is None:
             raise RegistryRequired(step.value)
-        return concept_registry.get_lemmas_for_concept(step.value, language)
+        lemmas = concept_registry.get_lemmas_for_concept(step.value, language)
+        if not lemmas:
+            raise ConceptNotMapped(step.value)
+        return lemmas
     # Unreachable — _validate_plan_shape rejects other node types.
     raise UnsupportedPlanShape(  # pragma: no cover
         f"unexpected node type in resolution: {step.type.value!r}"
     )
 
 
-def _build_scope_where(scope: ScopeConstraint) -> tuple[list, dict]:
-    """Build the base WHERE clauses + params dict for the given scope.
+def _build_scope_where(scope: ScopeConstraint) -> list:
+    """Build the base WHERE clauses for the given scope.
 
-    Returns ``(where_clauses, params_dict)``. ``params_dict`` is currently
-    always empty (we use SQLAlchemy expression-binding rather than named
-    params); the second element exists to keep the return shape stable for
-    callers that may switch to text-binding in future.
+    Returns a list of SQLAlchemy ColumnElement clauses that callers ``.where()``
+    onto step queries. Every step query MUST receive these clauses (C-CLOSE-003);
+    otherwise later-step matches can silently leak across corpora or languages
+    that share structural verse keys.
 
     ``corpus=None`` and ``language=None`` produce no filter on those
     columns (design OQ #1 resolution, OQ for language predates it).
     """
     where_clauses: list = []
-    params: dict = {}
     if scope.books is not None:
         bb_codes = [book_abbrev_to_bb(b) for b in scope.books]
         where_clauses.append(tokens_table.c.book.in_(bb_codes))
@@ -312,57 +359,93 @@ def _build_scope_where(scope: ScopeConstraint) -> tuple[list, dict]:
         where_clauses.append(tokens_table.c.corpus_id == scope.corpus)
     if scope.language is not None:
         where_clauses.append(tokens_table.c.language == scope.language)
-    return where_clauses, params
+    return where_clauses
 
 
-def _match_step_in_verse(
+def _extend_chains_one_step(
     connection,
     *,
-    prev_token: MatchedToken,
+    chains: list[list[MatchedToken]],
     lemmas: list[str],
     gap: GapConstraint | None,
-) -> list:
-    """Return token rows matching ``lemmas`` after ``prev_token`` in-verse.
+    base_where: list,
+) -> list[list[MatchedToken]]:
+    """Extend each chain by one matching token. ONE SELECT, in-memory join.
 
-    Same verse as ``prev_token`` (book, chapter, verse). Position strictly
-    greater than ``prev_token.position``; honors ``gap.min`` (minimum
-    distance from prev) and ``gap.max`` (maximum distance) when present.
+    Replaces the prior per-candidate fan-out (one SELECT per surviving chain
+    per step). For each step k ≥ 1 we now issue exactly one SELECT scoped to
+    the union of surviving step-(k-1) verses, then group rows in Python and
+    pair each result row with every chain whose last token shares the same
+    ``(book, chapter, verse)`` and satisfies the position + gap constraints.
+    Honors C-CLOSE-003 by carrying ``base_where`` (corpus/language/books)
+    into every step query.
     """
-    stmt = (
-        select(
-            tokens_table.c.id,
+    # Collect the unique verses the surviving chains terminate in. We use a
+    # tuple-IN filter so the DB can index-scan the verse keys rather than
+    # OR-of-equalities scaling with the chain count.
+    verse_keys: set[tuple[str, int, int]] = {
+        (chain[-1].book, chain[-1].chapter, chain[-1].verse) for chain in chains
+    }
+
+    stmt = select(*_token_columns()).where(tokens_table.c.lemma.in_(lemmas))
+    for clause in base_where:
+        stmt = stmt.where(clause)
+    stmt = stmt.where(
+        tuple_(
             tokens_table.c.book,
             tokens_table.c.chapter,
             tokens_table.c.verse,
-            tokens_table.c.position,
-            tokens_table.c.global_position,
-            tokens_table.c.surface_form,
-            tokens_table.c.normalized_form,
-            tokens_table.c.lemma,
-            tokens_table.c.pos,
-        )
-        .where(tokens_table.c.book == prev_token.book)
-        .where(tokens_table.c.chapter == prev_token.chapter)
-        .where(tokens_table.c.verse == prev_token.verse)
-        .where(tokens_table.c.lemma.in_(lemmas))
+        ).in_([tuple(key) for key in verse_keys])
     )
-    # gap.min == 0 means "any distance > 0" (the next token can be the
-    # immediate successor). gap.min == k means at least k tokens between.
+
+    rows = connection.execute(stmt).all()
+
+    # Group rows by their verse key for O(1) lookup per chain. Each value is a
+    # list of MatchedToken (preserving DB row order) so the in-memory join
+    # below remains stable.
+    rows_by_verse: dict[tuple[str, int, int], list[MatchedToken]] = {}
+    for row in rows:
+        token = _row_to_matched_token(row)
+        rows_by_verse.setdefault(
+            (token.book, token.chapter, token.verse), []
+        ).append(token)
+
+    extended: list[list[MatchedToken]] = []
+    for chain in chains:
+        prev = chain[-1]
+        verse_rows = rows_by_verse.get((prev.book, prev.chapter, prev.verse))
+        if not verse_rows:
+            continue
+        for next_token in verse_rows:
+            if not _gap_satisfied(prev.position, next_token.position, gap):
+                continue
+            extended.append([*chain, next_token])
+    return extended
+
+
+def _gap_satisfied(
+    prev_position: int, next_position: int, gap: GapConstraint | None
+) -> bool:
+    """Return True iff ``next_position`` follows ``prev_position`` in-window.
+
+    Mirrors the inequality the prior per-candidate SELECT encoded in SQL:
+    next must be strictly after prev (position-wise), at least
+    ``prev + gap.min + 1`` when ``gap.min > 0`` (i.e. ``gap.min`` tokens
+    BETWEEN prev and next), and at most ``prev + gap.max + 1`` when
+    ``gap.max`` is set. ``gap`` is None on adjacency-style operators or
+    operators with no gap window.
+    """
     min_gap = gap.min if gap is not None else 0
-    # Distance is (position - prev.position). gap.min is the count of
-    # intervening tokens; the canonical reading per canonical-05 is
-    # min/max apply to the gap *between* the two matched tokens, so
-    # position must be > prev.position + min_gap when min_gap > 0, and
-    # > prev.position when min_gap == 0.
     if min_gap > 0:
-        stmt = stmt.where(tokens_table.c.position > prev_token.position + min_gap)
+        if next_position <= prev_position + min_gap:
+            return False
     else:
-        stmt = stmt.where(tokens_table.c.position > prev_token.position)
+        if next_position <= prev_position:
+            return False
     if gap is not None and gap.max is not None:
-        stmt = stmt.where(
-            tokens_table.c.position <= prev_token.position + gap.max + 1
-        )
-    return connection.execute(stmt).all()
+        if next_position > prev_position + gap.max + 1:
+            return False
+    return True
 
 
 def _row_to_matched_token(row) -> MatchedToken:

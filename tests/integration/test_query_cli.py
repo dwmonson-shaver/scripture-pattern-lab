@@ -181,3 +181,21 @@ def test_cli_parse_error_exits_2(
     assert "parse error" in result.stderr.lower()
     # The caret pointer line is part of the position-aware error rendering.
     assert "^" in result.stderr
+
+
+def test_cli_unknown_concept_exits_3(
+    loaded_corpus_and_registry: None,
+) -> None:
+    """C-CLOSE-006: a concept absent from the seeded registry exits 3.
+
+    Distinguishes "concept not in registry" from "concept in registry but
+    no corpus matches" — the latter still exits 0 with zero matches.
+    """
+    _ = loaded_corpus_and_registry
+    result = _run_query("concept:zzznotreal")
+    assert result.returncode == 3, (
+        f"expected exit 3, got {result.returncode}; stdout={result.stdout!r}; "
+        f"stderr={result.stderr!r}"
+    )
+    assert "zzznotreal" in result.stderr
+    assert "concept not mapped" in result.stderr.lower()

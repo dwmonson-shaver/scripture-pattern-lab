@@ -15,8 +15,10 @@ import pytest
 from src.engine.executor import execute
 from src.engine.models import (
     AlternativeExpr,
+    ConceptNotMapped,
     GapConstraint,
     InverseExpr,
+    MorphFilter,
     NodeRef,
     NodeType,
     OperatorType,
@@ -200,6 +202,208 @@ def test_raises_unsupported_on_unsupported_scope_unit() -> None:
     with pytest.raises(UnsupportedPlanShape) as excinfo:
         execute(plan, plan.scope, _make_engine())
     assert excinfo.value.path == "$.scope.unit"
+
+
+def test_raises_unsupported_on_negated_node() -> None:
+    """C-CLOSE-001: a negated NodeRef must not silently flow through.
+
+    Exclusion semantics are not yet designed; until they are, the executor
+    must reject ``NodeRef.negated=True`` rather than resolve the underlying
+    lemma/concept positively.
+    """
+    seq = SequenceExpr(
+        steps=[NodeRef(type=NodeType.LEMMA, value="x", negated=True)],
+        operators=[],
+    )
+    plan = _make_plan(seq)
+    with pytest.raises(UnsupportedPlanShape) as excinfo:
+        execute(plan, plan.scope, _make_engine())
+    assert "negated" in str(excinfo.value).lower()
+    assert excinfo.value.path == "$.sequence.steps[0]"
+
+
+def test_raises_unsupported_on_negated_concept_node() -> None:
+    """A negated CONCEPT step is also rejected (same path as lemma case)."""
+    seq = SequenceExpr(
+        steps=[NodeRef(type=NodeType.CONCEPT, value="faith", negated=True)],
+        operators=[],
+    )
+    plan = _make_plan(seq)
+    with pytest.raises(UnsupportedPlanShape) as excinfo:
+        execute(plan, plan.scope, _make_engine())
+    assert "negated" in str(excinfo.value).lower()
+
+
+def test_raises_unsupported_on_morph_filter() -> None:
+    """C-CLOSE-002: morph_filters are ignored by resolution; reject them."""
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(
+                type=NodeType.LEMMA,
+                value="πίστις",
+                morph_filters=[MorphFilter(feature="NOUN")],
+            )
+        ],
+        operators=[],
+    )
+    plan = _make_plan(seq)
+    with pytest.raises(UnsupportedPlanShape) as excinfo:
+        execute(plan, plan.scope, _make_engine())
+    assert "morph_filters" in str(excinfo.value)
+    assert excinfo.value.path == "$.sequence.steps[0]"
+
+
+def test_raises_unsupported_on_operator_count_mismatch_too_few() -> None:
+    """C-CLOSE-002: 2 steps + 0 operators is malformed (need exactly 1)."""
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.LEMMA, value="πίστις"),
+            NodeRef(type=NodeType.LEMMA, value="ἐλπίς"),
+        ],
+        operators=[],
+    )
+    plan = _make_plan(seq)
+    with pytest.raises(UnsupportedPlanShape) as excinfo:
+        execute(plan, plan.scope, _make_engine())
+    assert "operator count" in str(excinfo.value).lower()
+    assert excinfo.value.path == "$.sequence.operators"
+
+
+def test_raises_unsupported_on_operator_count_mismatch_too_many() -> None:
+    """C-CLOSE-002: 2 steps + 2 operators is malformed (need exactly 1)."""
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.LEMMA, value="πίστις"),
+            NodeRef(type=NodeType.LEMMA, value="ἐλπίς"),
+        ],
+        operators=[
+            OrderOperator(type=OperatorType.PRECEDENCE),
+            OrderOperator(type=OperatorType.PRECEDENCE),
+        ],
+    )
+    plan = _make_plan(seq)
+    with pytest.raises(UnsupportedPlanShape) as excinfo:
+        execute(plan, plan.scope, _make_engine())
+    assert "operator count" in str(excinfo.value).lower()
+
+
+def test_step0_query_includes_corpus_and_language_filters() -> None:
+    """C-CLOSE-003: step-0 SELECT receives corpus + language WHERE clauses.
+
+    Stub engine returns no rows so we never reach step 1 — but the step-0
+    statement was assembled and dispatched. We snapshot its compiled string
+    and assert the scope columns appear as filters.
+    """
+    seq = SequenceExpr(
+        steps=[NodeRef(type=NodeType.LEMMA, value="πίστις")],
+        operators=[],
+    )
+    plan = _make_plan(
+        seq,
+        scope=ScopeConstraint(
+            unit=ScopeUnit.VERSE,
+            corpus="nt",
+            language="grc",
+        ),
+    )
+    fake_conn = MagicMock()
+    fake_conn.execute.return_value.all.return_value = []
+    engine = MagicMock()
+    engine.connect.return_value.__enter__.return_value = fake_conn
+    engine.connect.return_value.__exit__.return_value = False
+
+    result = execute(plan, plan.scope, engine)
+
+    assert result == []
+    # Inspect the actual compiled SQL passed to the connection.
+    assert fake_conn.execute.call_count == 1
+    stmt = fake_conn.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "corpus_id" in compiled
+    assert "language" in compiled
+
+
+def test_every_step_query_includes_scope_filters() -> None:
+    """C-CLOSE-003: later-step batched SELECT also carries scope filters.
+
+    Two-step plan; stub engine returns one row for step 0 (so chains is
+    non-empty) and zero rows for step 1. Verify both compiled statements
+    contain the corpus + language predicates.
+    """
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.LEMMA, value="πίστις"),
+            NodeRef(type=NodeType.LEMMA, value="ἐλπίς"),
+        ],
+        operators=[OrderOperator(type=OperatorType.PRECEDENCE)],
+    )
+    plan = _make_plan(
+        seq,
+        scope=ScopeConstraint(
+            unit=ScopeUnit.VERSE,
+            corpus="nt",
+            language="grc",
+        ),
+    )
+
+    # Step 0 returns one row; step 1 returns []. Use a side_effect on
+    # ``connection.execute`` so we can inspect both calls.
+    step0_row = MagicMock()
+    step0_row.id = 1
+    step0_row.book = "01"
+    step0_row.chapter = 1
+    step0_row.verse = 1
+    step0_row.position = 1
+    step0_row.global_position = 1
+    step0_row.surface_form = "πίστιν"
+    step0_row.normalized_form = "πιστιν"
+    step0_row.lemma = "πίστις"
+    step0_row.pos = "N"
+
+    step0_result = MagicMock()
+    step0_result.all.return_value = [step0_row]
+    step1_result = MagicMock()
+    step1_result.all.return_value = []
+
+    fake_conn = MagicMock()
+    fake_conn.execute.side_effect = [step0_result, step1_result]
+    engine = MagicMock()
+    engine.connect.return_value.__enter__.return_value = fake_conn
+    engine.connect.return_value.__exit__.return_value = False
+
+    result = execute(plan, plan.scope, engine)
+
+    assert result == []
+    assert fake_conn.execute.call_count == 2
+    for call in fake_conn.execute.call_args_list:
+        stmt = call.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "corpus_id" in compiled, (
+            f"expected corpus_id filter in step query: {compiled!r}"
+        )
+        assert "language" in compiled, (
+            f"expected language filter in step query: {compiled!r}"
+        )
+
+
+def test_raises_concept_not_mapped_when_registry_returns_empty() -> None:
+    """C-CLOSE-006: a concept that resolves to [] raises ConceptNotMapped.
+
+    The registry handle exists but returns no lemmas for the concept name.
+    The executor must distinguish this from RegistryRequired (no handle).
+    """
+    seq = SequenceExpr(
+        steps=[NodeRef(type=NodeType.CONCEPT, value="zzznotreal")],
+        operators=[],
+    )
+    plan = _make_plan(seq)
+
+    fake_registry = MagicMock()
+    fake_registry.get_lemmas_for_concept.return_value = []
+
+    with pytest.raises(ConceptNotMapped) as excinfo:
+        execute(plan, plan.scope, _make_engine(), concept_registry=fake_registry)
+    assert excinfo.value.concept_name == "zzznotreal"
 
 
 def test_gap_constraint_with_min_zero_does_not_disable_ordering() -> None:
