@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 # pairwise swaps) so the engine re-entry count stays small. Recorded on the
 # Contextualization envelope as ``alternative_orderings_capped``.
 _FULL_ENUMERATION_THRESHOLD = 4
+_MAX_PERMUTATIONS = 24
 
 
 def compute_node_baselines(
@@ -165,10 +166,13 @@ def compute_alternative_orderings(
 def _fallback_permutations(n: int) -> list[list[int]]:
     """Deterministic fallback subset for sequences of length ``N >= 5``.
 
-    Returns ``identity + reverse + (N-1) adjacent pairwise swaps``.  All
-    distinct (identity ≠ reverse for N >= 2; adjacent swaps are pairwise
-    distinct from each other and from identity / reverse for N >= 3).
-    Total = ``N + 1`` permutations.
+    Returns ``identity + reverse + (N-1) adjacent pairwise swaps``,
+    truncated at ``_MAX_PERMUTATIONS`` (24) to honor the canonical-09 §8
+    ceiling for direct-call plans whose length exceeds the validator's
+    supported max. All distinct (identity ≠ reverse for N >= 2; adjacent
+    swaps are pairwise distinct from each other and from identity /
+    reverse for N >= 3). Total = ``min(N + 1, 24)`` permutations
+    (Codex D-D3D4-001).
     """
     identity = list(range(n))
     reverse = list(reversed(identity))
@@ -177,7 +181,7 @@ def _fallback_permutations(n: int) -> list[list[int]]:
         swapped = identity.copy()
         swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
         permutations.append(swapped)
-    return permutations
+    return permutations[:_MAX_PERMUTATIONS]
 
 
 def _format_sequence_label(steps: list[NodeRef]) -> str:

@@ -271,6 +271,14 @@ class TestFallbackPermutations:
         as_tuples = [tuple(p) for p in perms]
         assert len(set(as_tuples)) == len(as_tuples)
 
+    def test_truncates_at_24_for_very_long_sequences(self) -> None:
+        # N=30: identity + reverse + 29 adjacent swaps would be 31 perms;
+        # honoring canonical-09 §8 ceiling truncates to 24 (Codex D-D3D4-001).
+        perms = _fallback_permutations(30)
+        assert len(perms) == 24
+        assert perms[0] == list(range(30))
+        assert perms[1] == list(reversed(range(30)))
+
 
 class TestFormatSequenceLabel:
     def test_three_step_label(self) -> None:
