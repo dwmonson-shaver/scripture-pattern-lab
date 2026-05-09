@@ -199,3 +199,68 @@ def test_cli_unknown_concept_exits_3(
     )
     assert "zzznotreal" in result.stderr
     assert "concept not mapped" in result.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# Slice D exit gate: contextualization rendering on the flagship sequence
+# ---------------------------------------------------------------------------
+
+
+def test_cli_renders_contextualization_for_flagship_sequence(
+    loaded_corpus_and_registry: None,
+) -> None:
+    """Slice D exit gate: ``faith > hope > love`` shows the Contextualization block.
+
+    Asserts the four canonical-09 §8 invariants surface in stdout:
+    - per-node baselines for faith, hope, love (with resolved-lemma names)
+    - alternative-ordering counts (3! = 6 for the 3-step sequence)
+    - the observed ordering is marked
+    - null-distribution slot is rendered as "not computed in MVP"
+    """
+    _ = loaded_corpus_and_registry
+    result = _run_query("faith > hope > love")
+    assert result.returncode == 0, (
+        f"expected exit 0, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    out = result.stdout
+
+    # Match section (unchanged from Slice C)
+    assert "1Cor 13:13" in out
+    assert "Status: supported" in out
+
+    # Contextualization block (new in Slice D)
+    assert "Contextualization (REQ:09.contextualization):" in out
+    assert "Observed count:" in out
+    assert "Constituent baselines" in out
+    # All three constituent concepts surface their resolved-lemma counts
+    assert "faith" in out
+    assert "hope" in out
+    assert "love" in out
+    # Alt-orderings: 3! = 6, observed marked with *
+    assert "Alternative orderings (6 total" in out
+    assert "*  faith > hope > love" in out  # observed marker
+    # Null-distribution slot is reserved but not computed
+    assert "Null distribution: not computed in MVP" in out
+
+
+def test_cli_renders_no_match_with_contextualization(
+    loaded_corpus_and_registry: None,
+) -> None:
+    """Zero-match query still renders the contextualization envelope.
+
+    A query whose lemmas exist (so the executor runs) but never co-occur
+    yields 0 candidates. The CLI should still print baselines + an
+    alt-orderings table — the calibration is informative even when the
+    observed count is 0.
+    """
+    _ = loaded_corpus_and_registry
+    result = _run_query("lemma:zebra > lemma:elephant")
+    assert result.returncode == 0, (
+        f"expected exit 0, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    out = result.stdout
+    assert "Found 0 matches" in out
+    assert "Contextualization (REQ:09.contextualization):" in out
+    assert "Observed count: 0" in out
+    # 2-step sequence yields 2! = 2 orderings
+    assert "Alternative orderings (2 total" in out

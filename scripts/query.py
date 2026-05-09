@@ -1,10 +1,17 @@
 #!/usr/bin/env python
 """Run a DSL query against the seeded corpus + registry and print matches.
 
-Slice C exit-point CLI: parse → validate → execute → human-readable print.
-Mirrors ``scripts/db/ingest_corpus.py`` for the sys.path bootstrap, argparse
-style, exit codes, and DATABASE_URL redaction. Strictly a thin orchestrator
-over ``src.engine`` / ``src.validation`` / ``src.ontology`` — no new logic.
+Pipeline: parse → validate → retrieve (executor + contextualization) →
+human-readable print. Mirrors ``scripts/db/ingest_corpus.py`` for the
+sys.path bootstrap, argparse style, exit codes, and DATABASE_URL
+redaction. Strictly a thin orchestrator over ``src.engine`` /
+``src.retrieval`` / ``src.validation`` / ``src.ontology`` — no new logic.
+
+The CLI is a UI-layer consumer, so it passes ``contextualize=True`` to
+:func:`retrieve` per OQ #1 middle-path resolution: the user sees
+calibrated counts (per-node baselines + alternative orderings) by
+default, the anti-confirmation-bias choice [DEC-024]. Tests / batch
+callers using the engine layer directly get ``contextualize=False``.
 
 Exit codes:
     0   success — matches found OR no matches (empty result is valid)
@@ -31,9 +38,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.engine.executor import execute  # noqa: E402
 from src.engine.models import (  # noqa: E402
     ConceptNotMapped,
+    Contextualization,
     MatchCandidate,
     NodeType,
     RegistryRequired,
@@ -42,6 +49,7 @@ from src.engine.models import (  # noqa: E402
 from src.engine.parser import ParseError, parse  # noqa: E402
 from src.ingestion.db import get_engine  # noqa: E402
 from src.ontology.registry import ConceptRegistry  # noqa: E402
+from src.retrieval.retrieve import retrieve  # noqa: E402
 from src.validation.registry import CapabilityRegistry  # noqa: E402
 from src.validation.validator import validate  # noqa: E402
 
@@ -121,6 +129,54 @@ def _print_results(
         print()
 
 
+def _print_contextualization(ctx: Contextualization) -> None:
+    """Render the Contextualization envelope in human-readable form.
+
+    Per canonical-09 §8: surfaces the per-node baselines, alternative-ordering
+    counts (with the observed ordering marked), and the null-distribution
+    slot. Output order matches the design intent — observed count is shown
+    first, baselines next, then alternative orderings sorted by count
+    descending so the most-frequent siblings rise to the top.
+    """
+    print("Contextualization (REQ:09.contextualization):")
+    print(f"  Observed count: {ctx.observed_count}")
+
+    print("  Constituent baselines (scope-filtered tokens):")
+    if ctx.node_baselines:
+        name_width = max(len(nb.node_value) for nb in ctx.node_baselines)
+        for nb in ctx.node_baselines:
+            resolved = ", ".join(nb.resolved_lemmas)
+            print(
+                f"    {nb.node_value:<{name_width}}  →  "
+                f"{resolved}: {nb.count}"
+            )
+    else:
+        print("    (none — empty sequence)")
+
+    print(
+        f"  Alternative orderings ({len(ctx.alternative_orderings)} total"
+        + (", capped" if ctx.alternative_orderings_capped else "")
+        + ", observed marked *):"
+    )
+    # Sort by count desc, observed first within ties
+    sorted_orderings = sorted(
+        ctx.alternative_orderings,
+        key=lambda o: (-o.count, not o.is_observed, o.permutation),
+    )
+    for o in sorted_orderings:
+        marker = "*" if o.is_observed else " "
+        print(f"    {marker}  {o.sequence_label}: {o.count}")
+
+    if ctx.null_distribution is None:
+        print("  Null distribution: not computed in MVP (schema slot reserved)")
+    else:
+        nd = ctx.null_distribution
+        print(
+            f"  Null distribution: mean={nd.mean:.2f} std={nd.std:.2f} "
+            f"(n={nd.sample_size}, seed={nd.seed})"
+        )
+
+
 def _print_findings(prefix: str, findings: list, stream) -> None:
     """Print one validator finding per line to ``stream``."""
     print(prefix, file=stream)
@@ -173,8 +229,12 @@ def main(argv: list[str] | None = None) -> int:
 
     executable = validation.executable_plan
     try:
-        candidates = execute(
-            executable, executable.scope, engine, concept_registry=concept_registry
+        result = retrieve(
+            executable,
+            executable.scope,
+            engine,
+            contextualize=True,
+            registry=concept_registry,
         )
     except RegistryRequired as exc:
         print(
@@ -198,7 +258,12 @@ def main(argv: list[str] | None = None) -> int:
         traceback.print_exc()
         return EXIT_UNCAUGHT
 
-    _print_results(dsl, validation.status, validation.grounding, candidates, limit)
+    _print_results(
+        dsl, validation.status, validation.grounding, result.candidates, limit
+    )
+    if result.contextualization is not None:
+        print()
+        _print_contextualization(result.contextualization)
     return EXIT_OK
 
 
