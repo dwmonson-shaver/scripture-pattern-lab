@@ -9,6 +9,8 @@ from src.engine.models import (
     ExpansionDirective,
     GapConstraint,
     InverseExpr,
+    MatchCandidate,
+    MatchedToken,
     MorphFilter,
     NodeRef,
     NodeType,
@@ -19,10 +21,13 @@ from src.engine.models import (
     QueryPlan,
     RankingFactor,
     RankingPrefs,
+    RegistryRequired,
     ScopeConstraint,
     ScopeUnit,
     SequenceExpr,
     StepExpr,
+    StepMatch,
+    UnsupportedPlanShape,
 )
 
 # ---------------------------------------------------------------------------
@@ -473,3 +478,143 @@ class TestJsonRoundTrips:
         assert restored == plan
         assert isinstance(restored.sequence, InverseExpr)
         assert len(restored.sequence.inner.steps) == 3
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Executor result types and exceptions
+# ---------------------------------------------------------------------------
+
+
+def _sample_matched_token(**overrides: object) -> MatchedToken:
+    defaults: dict[str, object] = {
+        "id": 42,
+        "book": "07",
+        "chapter": 13,
+        "verse": 13,
+        "position": 4,
+        "global_position": 100_001,
+        "surface_form": "πίστις,",
+        "normalized_form": "πίστις",
+        "lemma": "πίστις",
+        "pos": "N-",
+    }
+    defaults.update(overrides)
+    return MatchedToken(**defaults)  # type: ignore[arg-type]
+
+
+class TestMatchedToken:
+    def test_construct(self) -> None:
+        mt = _sample_matched_token()
+        assert mt.book == "07"
+        assert mt.chapter == 13
+        assert mt.verse == 13
+        assert mt.position == 4
+        assert mt.lemma == "πίστις"
+        assert mt.pos == "N-"
+
+    def test_frozen(self) -> None:
+        mt = _sample_matched_token()
+        with pytest.raises(ValidationError):
+            mt.position = 5
+
+    def test_json_round_trip(self) -> None:
+        mt = _sample_matched_token()
+        json_str = mt.model_dump_json()
+        restored = MatchedToken.model_validate_json(json_str)
+        assert restored == mt
+
+
+class TestStepMatch:
+    def test_construct(self) -> None:
+        token = _sample_matched_token()
+        sm = StepMatch(
+            step_index=0,
+            node_type=NodeType.LEMMA,
+            node_value="πίστις",
+            resolved_lemmas=["πίστις"],
+            token=token,
+        )
+        assert sm.step_index == 0
+        assert sm.node_type == NodeType.LEMMA
+        assert sm.node_value == "πίστις"
+        assert sm.resolved_lemmas == ["πίστις"]
+        assert sm.token == token
+
+    def test_frozen(self) -> None:
+        sm = StepMatch(
+            step_index=0,
+            node_type=NodeType.LEMMA,
+            node_value="πίστις",
+            resolved_lemmas=["πίστις"],
+            token=_sample_matched_token(),
+        )
+        with pytest.raises(ValidationError):
+            sm.step_index = 1
+
+    def test_concept_step_with_resolved_lemmas(self) -> None:
+        sm = StepMatch(
+            step_index=0,
+            node_type=NodeType.CONCEPT,
+            node_value="faith",
+            resolved_lemmas=["πίστις", "πιστεύω"],
+            token=_sample_matched_token(),
+        )
+        assert sm.resolved_lemmas == ["πίστις", "πιστεύω"]
+
+
+class TestMatchCandidate:
+    def test_construct_empty_alignment(self) -> None:
+        mc = MatchCandidate(
+            tokens=[_sample_matched_token()],
+            reference="1Cor 13:13",
+            match_type="exact",
+            alignment=[],
+        )
+        assert mc.reference == "1Cor 13:13"
+        assert mc.match_type == "exact"
+        assert mc.alignment == []
+        assert len(mc.tokens) == 1
+
+    def test_frozen(self) -> None:
+        mc = MatchCandidate(
+            tokens=[_sample_matched_token()],
+            reference="1Cor 13:13",
+            match_type="exact",
+            alignment=[],
+        )
+        with pytest.raises(ValidationError):
+            mc.reference = "Rom 1:1"
+
+    def test_match_type_literal_validation(self) -> None:
+        with pytest.raises(ValidationError):
+            MatchCandidate(
+                tokens=[],
+                reference="1Cor 13:13",
+                match_type="not-a-real-type",  # type: ignore[arg-type]
+                alignment=[],
+            )
+
+    def test_match_type_conceptual_accepted(self) -> None:
+        mc = MatchCandidate(
+            tokens=[],
+            reference="1Cor 13:13",
+            match_type="conceptual",
+            alignment=[],
+        )
+        assert mc.match_type == "conceptual"
+
+
+class TestExecutorExceptions:
+    def test_unsupported_plan_shape_carries_path(self) -> None:
+        err = UnsupportedPlanShape("alt step", path="$.steps[0]")
+        assert err.path == "$.steps[0]"
+        assert "alt step" in str(err)
+
+    def test_unsupported_plan_shape_default_path(self) -> None:
+        err = UnsupportedPlanShape("nope")
+        assert err.path == ""
+
+    def test_registry_required_carries_concept_name(self) -> None:
+        err = RegistryRequired("faith")
+        assert err.concept_name == "faith"
+        assert "faith" in str(err)

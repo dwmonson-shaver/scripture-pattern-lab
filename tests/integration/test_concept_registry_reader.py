@@ -226,3 +226,46 @@ def test_empty_registry_returns_empty() -> None:
     assert registry.get_inverse_claims(1) == []
     assert registry.is_prior_grounded("x", "+") is False
     assert registry.is_prior_grounded("x", None) is False
+
+
+def test_get_lemmas_for_concept_returns_lemmas_in_grc(
+    clean_engine: Engine,
+) -> None:
+    """Seeding faith with two grc lemmas returns both lemmas, ignoring order."""
+    faith_id = _insert_concept(clean_engine, "faith")
+    _insert_lemma(clean_engine, faith_id, "πίστις", "grc")
+    _insert_lemma(clean_engine, faith_id, "πιστεύω", "grc")
+
+    registry = ConceptRegistry(clean_engine)
+    lemmas = registry.get_lemmas_for_concept("faith")
+
+    assert set(lemmas) == {"πίστις", "πιστεύω"}
+
+
+def test_get_lemmas_for_concept_filters_by_language(
+    clean_engine: Engine,
+) -> None:
+    """Lemmas in a different language are not returned."""
+    faith_id = _insert_concept(clean_engine, "faith")
+    _insert_lemma(clean_engine, faith_id, "πίστις", "grc")
+    _insert_lemma(clean_engine, faith_id, "אמונה", "hbo")
+
+    registry = ConceptRegistry(clean_engine)
+    grc_lemmas = registry.get_lemmas_for_concept("faith", "grc")
+    hbo_lemmas = registry.get_lemmas_for_concept("faith", "hbo")
+
+    assert grc_lemmas == ["πίστις"]
+    assert hbo_lemmas == ["אמונה"]
+
+
+def test_get_lemmas_for_concept_unknown_returns_empty(
+    clean_engine: Engine,
+) -> None:
+    """An unknown concept name returns an empty list, not an exception."""
+    registry = ConceptRegistry(clean_engine)
+    assert registry.get_lemmas_for_concept("does_not_exist") == []
+
+
+def test_get_lemmas_for_concept_empty_registry() -> None:
+    """ConceptRegistry.empty() short-circuits get_lemmas_for_concept."""
+    assert ConceptRegistry.empty().get_lemmas_for_concept("faith") == []

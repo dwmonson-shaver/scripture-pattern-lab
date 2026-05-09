@@ -254,3 +254,103 @@ class QueryPlan(BaseModel):
 GroupExpr.model_rebuild()
 AlternativeExpr.model_rebuild()
 OptionalExpr.model_rebuild()
+
+
+# ---------------------------------------------------------------------------
+# Pattern engine output models (executor result types)
+#
+# Co-located with the AST per the executor design (decision #2): keeps
+# src/engine/ self-contained and avoids an extra module for three small
+# frozen value objects.
+# ---------------------------------------------------------------------------
+
+
+class MatchedToken(BaseModel):
+    """A token row projection used in executor results.
+
+    Intentionally drops ``morph_code``, ``language``, and ``corpus_id`` from
+    the underlying ``tokens`` row (decision #3 in
+    ``thoughts/design-pattern-engine-executor-2026-05-09.md``). MVP does not
+    need them and the extra fields invite premature feature scope.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    book: str
+    chapter: int
+    verse: int
+    position: int
+    global_position: int
+    surface_form: str
+    normalized_form: str
+    lemma: str
+    pos: str
+
+
+class StepMatch(BaseModel):
+    """How one DSL step lined up with one matched token."""
+
+    model_config = ConfigDict(frozen=True)
+
+    step_index: int
+    node_type: NodeType
+    node_value: str
+    resolved_lemmas: list[str]
+    token: MatchedToken
+
+
+class MatchCandidate(BaseModel):
+    """One verse-grouped candidate produced by ``execute()``.
+
+    Per canonical-09 §5: ``tokens`` is the ordered list of matched tokens,
+    ``reference`` is the human-readable verse pointer (``"1Cor 13:13"``),
+    ``match_type`` distinguishes exact / variant / conceptual (DEC-007), and
+    ``alignment`` carries the per-step provenance.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tokens: list[MatchedToken]
+    reference: str
+    match_type: Literal["exact", "variant", "conceptual"]
+    alignment: list[StepMatch]
+
+
+# ---------------------------------------------------------------------------
+# Executor exceptions
+#
+# Co-located with the executor result types per the design (decision #12).
+# ``UnsupportedPlanShape.path`` mirrors the validator's
+# ``ValidationFinding.path`` so error messages can point at offending AST
+# nodes; ``RegistryRequired`` carries the concept name that triggered it so
+# callers can render a helpful error.
+# ---------------------------------------------------------------------------
+
+
+class UnsupportedPlanShape(Exception):  # noqa: N818 — name spec'd in design decision #12
+    """Raised when the executor is asked to run a plan shape outside MVP.
+
+    ``path`` mirrors ``ValidationFinding.path`` (e.g. ``"$.steps[0]"``).
+    The validator is the first wall (``_reduce_plan``); the executor is the
+    second wall and fails loudly rather than coerce.
+    """
+
+    def __init__(self, message: str, *, path: str = "") -> None:
+        super().__init__(message)
+        self.path: str = path
+
+
+class RegistryRequired(Exception):  # noqa: N818 — name spec'd in design decision #12
+    """Raised when a concept node appears but no concept_registry was supplied.
+
+    ``concept_name`` is the offending concept so callers can render a
+    targeted error message.
+    """
+
+    def __init__(self, concept_name: str) -> None:
+        self.concept_name: str = concept_name
+        super().__init__(
+            f"concept registry is required to resolve concept node "
+            f"{concept_name!r} but none was supplied"
+        )

@@ -280,6 +280,35 @@ class ConceptRegistry:
             rows = connection.execute(stmt).all()
         return [Concept.model_validate(row._mapping) for row in rows]
 
+    def get_lemmas_for_concept(
+        self, concept_name: str, language: str = "grc"
+    ) -> list[str]:
+        """Return all lemma strings mapped to the named concept (concept→lemma).
+
+        Inverse of :meth:`get_by_lemma`. Issues a single SELECT joining
+        ``concept_lemmas`` to ``concepts`` filtered by name + language.
+        Returns ``[]`` when the concept is unknown or when the registry is
+        empty (engine is None). Used by the executor (Slice C) to expand
+        ``concept:X`` step nodes into the underlying lemmas before SQL
+        matching against the tokens table.
+        """
+        if self.engine is None:
+            return []
+        stmt = (
+            select(concept_lemmas_table.c.lemma)
+            .select_from(
+                concept_lemmas_table.join(
+                    concepts_table,
+                    concepts_table.c.id == concept_lemmas_table.c.concept_id,
+                )
+            )
+            .where(concepts_table.c.name == concept_name)
+            .where(concept_lemmas_table.c.language == language)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(stmt).all()
+        return [row[0] for row in rows]
+
     def get_polarity_claims(self, concept_id: int) -> list[PolarityClaim]:
         """Return all polarity claims for ``concept_id`` (any polarity)."""
         if self.engine is None:
