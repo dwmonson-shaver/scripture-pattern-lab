@@ -270,3 +270,144 @@ def test_inverse_claims_self_inverse_check_constraint() -> None:
 
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM concepts"))
+
+
+# ---------------------------------------------------------------------------
+# Domain CHECK constraints (closes Codex P2 from 2026-05-08 review)
+# ---------------------------------------------------------------------------
+
+
+def _seed_one_concept_for_checks(engine, name: str) -> int:
+    """Create a single concepts row and return its id; used by the CHECK tests."""
+    with engine.begin() as connection:
+        return connection.execute(
+            text(f"INSERT INTO concepts (name) VALUES ('{name}') RETURNING id"),
+        ).scalar_one()
+
+
+def test_origin_check_rejects_invalid_value() -> None:
+    """origin must be in ('curated', 'ai_suggested', 'lexicon_imported')."""
+    engine = get_engine()
+    _run_apply_schemas()
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO concepts (name, origin) VALUES ('bad_origin', 'invented')"),
+            )
+
+
+def test_verification_state_check_rejects_invalid_value() -> None:
+    """verification_state must be in
+    ('unverified', 'corpus_observed', 'human_confirmed').
+    """
+    engine = get_engine()
+    _run_apply_schemas()
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO concepts (name, verification_state) "
+                    "VALUES ('bad_vstate', 'verified')"
+                ),
+            )
+
+
+def test_polarity_check_rejects_invalid_value() -> None:
+    """polarity_claims.polarity must be in ('+', '-', '±')."""
+    engine = get_engine()
+    _run_apply_schemas()
+    from sqlalchemy.exc import IntegrityError
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM polarity_claims"))
+        connection.execute(text("DELETE FROM concepts"))
+    cid = _seed_one_concept_for_checks(engine, "polarity_check_test")
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO polarity_claims (concept_id, polarity) "
+                    "VALUES (:c, '?')"
+                ),
+                {"c": cid},
+            )
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM concepts"))
+
+
+def test_evidence_count_check_rejects_negative_value() -> None:
+    """polarity_claims.evidence_count must be >= 0; same for inverse_claims."""
+    engine = get_engine()
+    _run_apply_schemas()
+    from sqlalchemy.exc import IntegrityError
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM polarity_claims"))
+        connection.execute(text("DELETE FROM concepts"))
+    cid = _seed_one_concept_for_checks(engine, "evidence_count_test")
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO polarity_claims (concept_id, polarity, evidence_count) "
+                    "VALUES (:c, '+', -1)"
+                ),
+                {"c": cid},
+            )
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM concepts"))
+
+
+def test_confidence_check_rejects_out_of_range() -> None:
+    """confidence must be NULL or in [0.0, 1.0] on every table that has it."""
+    engine = get_engine()
+    _run_apply_schemas()
+    from sqlalchemy.exc import IntegrityError
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM concept_lemmas"))
+        connection.execute(text("DELETE FROM concepts"))
+    cid = _seed_one_concept_for_checks(engine, "confidence_test")
+
+    # Above 1.0 — must fail.
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO concept_lemmas (concept_id, lemma, confidence) "
+                    "VALUES (:c, 'x', 1.5)"
+                ),
+                {"c": cid},
+            )
+
+    # Below 0.0 — must fail.
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO concept_lemmas (concept_id, lemma, confidence) "
+                    "VALUES (:c, 'y', -0.1)"
+                ),
+                {"c": cid},
+            )
+
+    # NULL — must succeed (DEC-024 default).
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO concept_lemmas (concept_id, lemma, confidence) "
+                "VALUES (:c, 'z', NULL)"
+            ),
+            {"c": cid},
+        )
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM concepts"))

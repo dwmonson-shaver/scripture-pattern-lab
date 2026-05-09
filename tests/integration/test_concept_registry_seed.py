@@ -218,13 +218,18 @@ def test_concept_lemmas_confidence_is_null(clean_engine: Engine) -> None:
     )
 
 
-def test_seed_is_idempotent(clean_engine: Engine) -> None:
-    """Running the script twice without --truncate is a clean no-op the second time.
+def test_seed_is_reproducible_via_truncate(clean_engine: Engine) -> None:
+    """Re-running with --truncate produces the same row counts every time.
 
-    ``INSERT ... ON CONFLICT DO NOTHING`` on the UNIQUE constraints keeps the
-    second run from inserting duplicates; row counts must be unchanged.
+    The seed is a deterministic function of the CSVs, so ``truncate + reseed``
+    must yield identical row counts on every run. (Re-running *without*
+    ``--truncate`` against a non-empty registry is rejected by the
+    non-emptiness gate — see ``test_seed_refuses_when_nonempty_without_truncate``;
+    that contract was tightened in response to the 2026-05-08 Codex P1 finding.)
     """
-    first = _run_seed_script([])
+    first = _run_seed_script(
+        ["--truncate"], extra_env={"SPL_REGISTRY_CONFIRM_TRUNCATE": "1"}
+    )
     assert first.returncode == 0, first.stderr
 
     with clean_engine.connect() as connection:
@@ -235,7 +240,9 @@ def test_seed_is_idempotent(clean_engine: Engine) -> None:
             for table in REGISTRY_TABLES
         }
 
-    second = _run_seed_script([])
+    second = _run_seed_script(
+        ["--truncate"], extra_env={"SPL_REGISTRY_CONFIRM_TRUNCATE": "1"}
+    )
     assert second.returncode == 0, (
         f"second seed run failed: rc={second.returncode} stderr={second.stderr!r}"
     )
@@ -249,7 +256,7 @@ def test_seed_is_idempotent(clean_engine: Engine) -> None:
         }
 
     assert before == after, (
-        f"row counts changed across idempotent reruns: before={before}, after={after}"
+        f"row counts changed across truncate+reseed runs: before={before}, after={after}"
     )
 
 

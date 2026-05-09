@@ -177,28 +177,24 @@ def main(argv: list[str] | None = None) -> int:
         engine = get_engine()
 
         # Pre-flight gate: refuse to load against a non-empty registry without
-        # an explicit --truncate. Same shape as the corpus-ingest gate.
+        # an explicit --truncate. Strict non-emptiness check — matches the
+        # corpus-ingest gate exactly. Closes Codex P1 (2026-05-08): a
+        # row-count-equals-CSV-count predicate would let a foreign registry
+        # with the same row count slip through and get its concepts attached
+        # to seed-named rows via ON CONFLICT DO NOTHING.
         with engine.connect() as connection:
             existing = connection.execute(
                 text("SELECT count(*) FROM concepts")
             ).scalar_one()
 
         if existing > 0 and not args.truncate:
-            # Idempotency contract: re-running without --truncate against an
-            # already-seeded registry is a clean no-op, not a refusal. We only
-            # refuse when the existing rows look like state we did not write
-            # ourselves — i.e. when the row count differs from the seed CSV
-            # count. This lets ``test_seed_is_idempotent`` succeed while still
-            # protecting an operator who points the script at an unrelated DB.
-            if existing != len(concepts_rows):
-                print(
-                    f"refusing to load: concepts table has {existing} rows "
-                    f"(expected {len(concepts_rows)} from seed CSV); "
-                    "pass --truncate (with "
-                    f"{TRUNCATE_CONFIRM_ENV}=1) to wipe before loading.",
-                    file=sys.stderr,
-                )
-                return EXIT_USER_ERROR
+            print(
+                f"refusing to load: concepts table has {existing} rows; "
+                f"pass --truncate (with {TRUNCATE_CONFIRM_ENV}=1) "
+                "to wipe before loading.",
+                file=sys.stderr,
+            )
+            return EXIT_USER_ERROR
 
         with engine.begin() as connection:
             if args.truncate:

@@ -40,9 +40,20 @@ Polarity = Literal["+", "-", "±"]
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy 2.0 Core table mirrors
+#
+# CHECK-constraint expressions mirror the value-domain checks in
+# data/schemas/02_concept_registry.sql (REQ:08.registry-epistemics).
 # ---------------------------------------------------------------------------
 
 metadata: MetaData = MetaData()
+
+_ORIGIN_CHECK = "origin IN ('curated', 'ai_suggested', 'lexicon_imported')"
+_VSTATE_CHECK = (
+    "verification_state IN ('unverified', 'corpus_observed', 'human_confirmed')"
+)
+_POLARITY_CHECK = "polarity IN ('+', '-', '±')"
+_CONFIDENCE_CHECK = "confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)"
+_EVIDENCE_CHECK = "evidence_count >= 0"
 
 concepts_table: Table = Table(
     "concepts",
@@ -57,6 +68,8 @@ concepts_table: Table = Table(
         nullable=False,
         server_default="unverified",
     ),
+    CheckConstraint(_ORIGIN_CHECK),
+    CheckConstraint(_VSTATE_CHECK),
 )
 
 concept_lemmas_table: Table = Table(
@@ -80,6 +93,9 @@ concept_lemmas_table: Table = Table(
         server_default="unverified",
     ),
     UniqueConstraint("lemma", "language", "concept_id"),
+    CheckConstraint(_ORIGIN_CHECK),
+    CheckConstraint(_VSTATE_CHECK),
+    CheckConstraint(_CONFIDENCE_CHECK),
 )
 
 polarity_claims_table: Table = Table(
@@ -103,6 +119,11 @@ polarity_claims_table: Table = Table(
     ),
     Column("confidence", Float, nullable=True, default=None),
     UniqueConstraint("concept_id", "polarity"),
+    CheckConstraint(_POLARITY_CHECK),
+    CheckConstraint(_ORIGIN_CHECK),
+    CheckConstraint(_VSTATE_CHECK),
+    CheckConstraint(_EVIDENCE_CHECK),
+    CheckConstraint(_CONFIDENCE_CHECK),
 )
 
 inverse_claims_table: Table = Table(
@@ -132,6 +153,10 @@ inverse_claims_table: Table = Table(
     Column("confidence", Float, nullable=True, default=None),
     UniqueConstraint("concept_id", "inverse_concept_id"),
     CheckConstraint("concept_id <> inverse_concept_id"),
+    CheckConstraint(_ORIGIN_CHECK),
+    CheckConstraint(_VSTATE_CHECK),
+    CheckConstraint(_EVIDENCE_CHECK),
+    CheckConstraint(_CONFIDENCE_CHECK),
 )
 
 
