@@ -13,6 +13,7 @@ import pytest
 from src.engine.models import (
     AlternativeOrderingCount,
     Contextualization,
+    InverseExpr,
     MatchCandidate,
     MatchedToken,
     NodeBaseline,
@@ -233,7 +234,11 @@ class TestExplainFlagship:
         assert "alternative ordering" in ers.summary.lower()
         assert "faith > love > hope" in ers.summary
 
-    def test_summary_at_most_six_lines(self) -> None:
+    def test_summary_at_most_five_lines(self) -> None:
+        # Implementation cap is 5 lines (1 match-count + 1 singularity/multi-verse +
+        # 1 alt-ordering + 1 baseline + 1 capped qualifier). Spec says ≤ 6 — we
+        # assert the tighter actual bound so a regression that adds a sixth line
+        # is caught by this test, not buried under the spec tolerance.
         plan = _plan_for_concepts("faith", "hope", "love")
         result = RetrievalResult(
             candidates=[
@@ -245,7 +250,7 @@ class TestExplainFlagship:
         )
         ers = explain(result, plan, _supported_validation())
         lines = ers.summary.splitlines()
-        assert len(lines) <= 6, f"summary exceeded 6 lines: got {len(lines)}\n{ers.summary}"
+        assert len(lines) <= 5, f"summary exceeded 5 lines: got {len(lines)}\n{ers.summary}"
 
     def test_per_candidate_explanation_cites_verse_and_lemmas(self) -> None:
         plan = _plan_for_concepts("faith", "hope", "love")
@@ -541,6 +546,109 @@ class TestFormatAltOrderingsPhrase:
 # ---------------------------------------------------------------------------
 # Edge — long sequence (capped)
 # ---------------------------------------------------------------------------
+
+
+class TestExplainEdgePaths:
+    """Closes F-F4F5-001 (P2): InverseExpr label, nl_source round-trip, text_display."""
+
+    def test_inverse_expr_plan_label_in_summary(self) -> None:
+        plan = QueryPlan(
+            version="0.1",
+            source="inverse(faith > hope)",
+            sequence=InverseExpr(
+                inner=SequenceExpr(
+                    steps=[_node("faith"), _node("hope")],
+                    operators=[OrderOperator(type=OperatorType.PRECEDENCE)],
+                )
+            ),
+            scope=ScopeConstraint(),
+            mode="conceptual",
+            metadata=QueryMetadata(),
+        )
+        result = RetrievalResult(candidates=[], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        assert "inverse(faith > hope)" in ers.summary
+
+    def test_nl_source_round_trips_from_plan_metadata(self) -> None:
+        plan = _plan_for_concepts("faith", "hope")
+        plan = plan.model_copy(
+            update={"metadata": QueryMetadata(nl_source="Does faith come before hope?")}
+        )
+        result = RetrievalResult(candidates=[], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        assert ers.nl_source == "Does faith come before hope?"
+
+    def test_text_display_populated_from_alignment(self) -> None:
+        result = RetrievalResult(
+            candidates=[_candidate([("πίστις", "faith"), ("ἐλπίς", "hope")])],
+            stages_used=["symbolic"],
+        )
+        ers = explain(result, _plan_for_concepts("faith", "hope"), _supported_validation())
+        assert ers.results[0].text_display == "πίστις, ἐλπίς"
+
+    def test_text_display_empty_when_no_alignment(self) -> None:
+        t = _token("πίστις")
+        c = MatchCandidate(
+            tokens=[t], reference="1Cor 13:13", match_type="exact", alignment=[]
+        )
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, _plan_for_concepts("faith"), _supported_validation())
+        assert ers.results[0].text_display == ""
+
+
+class TestVariantMatchType:
+    """Closes F-F4F5-004 (P3): variant pass-through path."""
+
+    def test_variant_match_type_preserved_in_per_candidate_prose(self) -> None:
+        c = _candidate([("πίστις", "faith")], match_type="variant")
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, _plan_for_concepts("faith"), _supported_validation())
+        assert len(ers.results) == 1
+        assert ers.results[0].match_type == "variant"
+        assert "variant" in ers.results[0].explanation.lower()
+
+
+class TestPoseQualityFixes:
+    """Confirms F-F4F5-002 and F-F4F5-003 closures: no redundant lines."""
+
+    def test_n1_does_not_emit_singularity_line(self) -> None:
+        plan = _plan_for_concepts("faith")
+        result = RetrievalResult(
+            candidates=[_candidate([("πίστις", "faith")])],
+            stages_used=["symbolic"],
+        )
+        ers = explain(result, plan, _supported_validation())
+        # Line 1 already names the verse; a redundant "only verse" line must NOT appear
+        assert "only verse where the sequence fires" not in ers.summary
+
+    def test_multi_verse_under_cap_does_not_repeat_count(self) -> None:
+        plan = _plan_for_concepts("faith")
+        result = RetrievalResult(
+            candidates=[
+                _candidate([("πίστις", "faith")], ref="Rom 1:17"),
+                _candidate([("πίστις", "faith")], ref="Gal 3:11"),
+            ],
+            stages_used=["symbolic"],
+        )
+        ers = explain(result, plan, _supported_validation())
+        # Line 1 enumerates the verses inline; line 2 must NOT repeat the count
+        assert "fires across 2 distinct verses" not in ers.summary
+
+    def test_multi_verse_over_cap_does_emit_count_line(self) -> None:
+        plan = _plan_for_concepts("faith")
+        # 4 distinct refs > _VERSE_LIST_CAP (3); inline list is truncated, so the
+        # count line carries the total
+        result = RetrievalResult(
+            candidates=[
+                _candidate([("πίστις", "faith")], ref="Rom 1:17"),
+                _candidate([("πίστις", "faith")], ref="Gal 3:11"),
+                _candidate([("πίστις", "faith")], ref="Heb 11:1"),
+                _candidate([("πίστις", "faith")], ref="Jas 2:17"),
+            ],
+            stages_used=["symbolic"],
+        )
+        ers = explain(result, plan, _supported_validation())
+        assert "fires across 4 distinct verses" in ers.summary
 
 
 class TestCappedSummary:

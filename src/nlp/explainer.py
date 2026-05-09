@@ -50,6 +50,14 @@ def explain(
 
     Deterministic. Every prose claim is derived from fields on ``result``,
     ``plan``, or ``validation`` — never invented.
+
+    Caller contract (DEC-024 corpus-is-ground-truth): when
+    ``result.contextualization`` is supplied, its ``observed_count`` MUST be
+    derived from the same retrieval pass that produced ``result.candidates``.
+    The explainer reads ``ctx.observed_count`` for the alt-ordering
+    comparative phrase and ``len(candidates)`` for the match-count line; if
+    the caller passes inconsistent values the summary will internally
+    contradict itself. The explainer does not re-execute retrieval to verify.
     """
     sequence_label = _sequence_label_for_plan(plan)
     summary = _summary_prose(
@@ -110,13 +118,13 @@ def _summary_prose(
             f"{verse_clause}."
         )
 
-    # Line 2: singularity / multi-verse note
+    # Line 2: singularity / multi-verse note. Suppress when line 1 already
+    # carries the same information: n=1 already names the only verse;
+    # multi-verse with refs ≤ cap already enumerates them inline.
     refs = sorted({c.reference for c in candidates})
-    if n > 0 and len(refs) == 1:
-        lines.append(
-            f"This is the only verse where the sequence fires."
-        )
-    elif n > 1 and len(refs) > 1:
+    if n > 1 and len(refs) == 1:
+        lines.append("This is the only verse where the sequence fires.")
+    elif n > 1 and len(refs) > _VERSE_LIST_CAP:
         lines.append(f"The pattern fires across {len(refs)} distinct verses.")
 
     # Line 3: alt-ordering comparative observation (if contextualization present)
