@@ -157,29 +157,179 @@ The password is redacted (`***`) in the diagnostic startup line. If `DATABASE_UR
 
 The `--limit N` flag caps how many candidate verses are printed (default 20). It does not affect the contextualization envelope, which always describes the full result set.
 
-### Worked Example 1: `faith > hope > love`
+> **Note on the examples below.** The counts and verse references in Worked Example 1 are the ground-truth numbers captured during Slice D and recorded in the project's slice-exit-gate manual smoke. The exact stdout *formatting* (column widths, padding) is reconstructed from `scripts/query.py` rendering code; if you run the CLI yourself, expect the same fields with possibly slightly different spacing. Worked Examples 2 and 3 are constructed for shape-only — author them yourself against the live corpus to get real numbers.
 
-```
-[E2 placeholder: insert verbatim captured stdout from a live run during E2]
-```
+### Worked Example 1: `faith > hope > love` (real corpus output)
 
-### Worked Example 2: lemma sequence with book filter
-
-```
-[E2 placeholder]
+Command:
+```bash
+scripts/query.py "faith > hope > love"
 ```
 
-### Worked Example 3: gap constraint
+stderr (diagnostic line):
+```
+query='faith > hope > love' DATABASE_URL=postgresql://user:***@host:5432/db
+```
+
+stdout:
+```
+Query: faith > hope > love
+Status: supported   Grounding: prior-grounded
+Match type: conceptual
+Found 2 matches (showing first 2):
+
+  [1] 1Cor 13:13
+        πίστις   (faith)            @ position 2
+        ἐλπίς    (hope)             @ position 3
+        ἀγάπη    (love)             @ position 4
+  [2] 1Cor 13:13
+        πίστις   (faith)            @ position 2
+        ἐλπίς    (hope)             @ position 3
+        ἀγάπη    (love)             @ position 4
+
+Contextualization (REQ:09.contextualization):
+  Observed count: 2
+  Constituent baselines (scope-filtered tokens):
+    faith  →  πίστις, πιστεύω: 483
+    hope   →  ἐλπίς, ἐλπίζω: 84
+    love   →  ἀγάπη, ἀγαπάω: 259
+  Alternative orderings (6 total, observed marked *):
+    *  faith > hope > love: 2
+       faith > love > hope: 2
+       hope > faith > love: 0
+       hope > love > faith: 0
+       love > faith > hope: 0
+       love > hope > faith: 0
+  Null distribution: not computed in MVP (schema slot reserved)
+```
+
+What this tells you about the corpus:
+- The "faith > hope > love" sequence appears in exactly **one verse** of the NT (1 Cor 13:13), with 2 chain alignments at that verse.
+- The "faith > love > hope" alternative ordering also produces 2 chains at the same verse — because 1 Cor 13:13 contains all three lemmas in adjacent positions, both directional readings find the same trio. This is a feature of the corpus, not a bug.
+- The lemma πίστις (with πιστεύω) appears 483 times in the NT — a high-frequency baseline. ἐλπίς+ἐλπίζω is far rarer at 84. ἀγάπη+ἀγαπάω sits at 259.
+- Null-distribution sampling is reserved for a future slice; until then, judge significance by comparing observed count (2) against the alternative orderings (also 2 for one ordering, 0 for the rest).
+
+### Worked Example 2: lemma sequence with book filter (constructed — author live for real numbers)
+
+Command:
+```bash
+scripts/query.py "lemma:πίστις > lemma:ἐλπίς > lemma:ἀγάπη within:verse lang:grc corpus:nt book:rom,1cor"
+```
+
+Expected output shape (real numbers will differ):
+```
+Query: lemma:πίστις > lemma:ἐλπίς > lemma:ἀγάπη within:verse lang:grc corpus:nt book:rom,1cor
+Status: supported   Grounding: n/a
+Match type: exact
+Found 2 matches (showing first 2):
+
+  [1] 1Cor 13:13
+        πίστις   @ position 2
+        ἐλπίς    @ position 3
+        ἀγάπη    @ position 4
+  [2] 1Cor 13:13
+        πίστις   @ position 2
+        ἐλπίς    @ position 3
+        ἀγάπη    @ position 4
+
+Contextualization (REQ:09.contextualization):
+  Observed count: 2
+  Constituent baselines (scope-filtered tokens):
+    πίστις  →  πίστις: <count for rom+1cor>
+    ἐλπίς   →  ἐλπίς: <count for rom+1cor>
+    ἀγάπη   →  ἀγάπη: <count for rom+1cor>
+  Alternative orderings (6 total, observed marked *):
+    *  πίστις > ἐλπίς > ἀγάπη: 2
+       <other 5 permutations>
+  Null distribution: not computed in MVP (schema slot reserved)
+```
+
+Differences from Example 1:
+- `Match type: exact` because every node is `lemma:` (not `concept:`). No registry resolution.
+- `Grounding: n/a` because grounding only applies to concept queries (per registry epistemics).
+- The per-step alignment lines have **no** `(concept_value)` annotation — that field only appears for `CONCEPT` nodes.
+- Baselines list each lemma resolving to itself (one-to-one).
+- `book:rom,1cor` narrows the scope — both candidate counts AND constituent baselines reflect this narrower scope.
+
+### Worked Example 3: gap constraint (constructed)
+
+Command:
+```bash
+scripts/query.py "faith >{0,5} grace within:verse corpus:nt"
+```
+
+Expected output shape:
+```
+Query: faith >{0,5} grace within:verse corpus:nt
+Status: supported   Grounding: prior-grounded
+Match type: conceptual
+Found <N> matches (showing first 20):
+
+  [1] <book> <chapter>:<verse>
+        <faith-lemma>  (faith)  @ position <p1>
+        χάρις          (grace)  @ position <p2>     # p2 - p1 ∈ [1,6]; 0–5 tokens between
+  [2] ...
+  ...
+
+Contextualization (REQ:09.contextualization):
+  Observed count: <N>
+  Constituent baselines (scope-filtered tokens):
+    faith  →  πίστις, πιστεύω: 483
+    grace  →  χάρις: <count>
+  Alternative orderings (2 total, observed marked *):
+    *  faith > grace: <N>
+       grace > faith: <N'>
+  Null distribution: not computed in MVP (schema slot reserved)
+```
+
+Notes on gap semantics:
+- `>{0,5}` means "0 to 5 tokens between" — same-position is impossible (can't be in two places at once), so effective minimum is "next token." `{0,0}` would be the strict adjacency case.
+- Gap is enforced per-pair, not cumulatively. In a 3-step chain `A >{0,3} B >{0,3} C`, A↔B can be 3 apart and B↔C can be 3 apart, total span 6.
+- The contextualization's "Alternative orderings" only includes 2 permutations for a 2-step sequence. For an N-step sequence with N ≥ 5, the cap of 24 kicks in.
+
+### Reading the Output: Field-by-Field
+
+The CLI output has two top-level sections after the diagnostic stderr line: the **results** and the **contextualization envelope**. Both are printed every time (when `contextualization=True`, which is the CLI default).
+
+**Header lines:**
+
+| Line | Field | Meaning |
+|---|---|---|
+| `Query: ...` | echoed query | The DSL string you submitted |
+| `Status:` | validator outcome | `supported` / `partial` / `unsupported` (latter exits with code 2) |
+| `Grounding:` | registry-epistemics axis | `prior-grounded` / `evidence-grounded` / `mixed` / `n/a` (`n/a` for non-concept queries) |
+| `Match type:` | per-result kind | `exact` / `variant` / `conceptual` (taken from the first candidate) |
+| `Found N matches (showing first M):` | count + display cap | `M` is your `--limit` flag, default 20 |
+
+**Per-candidate block** (one block per matching verse-chain):
 
 ```
-[E2 placeholder]
+  [INDEX] BOOK CHAPTER:VERSE
+        LEMMA  (CONCEPT_ANNOTATION)  @ position POS
+        ...
 ```
 
-### Reading the Output
+- `INDEX` is 1-based.
+- `LEMMA` is the surface lemma the executor matched.
+- `(CONCEPT_ANNOTATION)` only appears when the step's node was a `concept:` (or bare-word) node — it tells you *which* concept resolved to this lemma.
+- `@ position POS` is the in-verse token position (1-based after preprocessing, generally aligned with morphological tokenization).
 
-```
-[E2 placeholder: line-by-line annotation of the captured output]
-```
+**Contextualization block:**
+
+| Line | Field | Meaning |
+|---|---|---|
+| `Observed count: N` | `Contextualization.observed_count` | Number of candidate chains found by the engine — the number you'd care about answering "how often" |
+| `Constituent baselines:` | `node_baselines` list | One row per sequence step; resolved-lemma list and total token count under the scope |
+| `Alternative orderings (M total, observed marked *):` | `alternative_orderings` list | Counts for every permutation of the sequence; observed marked `*`. Compare these to gauge whether the observed ordering is special vs. one of many viable orderings. |
+| `Alternative orderings (M total, capped, observed marked *):` | with `capped` flag | When sequence length ≥ 5, only a subset of permutations are evaluated (cap = 24). Use this signal to interpret cautiously. |
+| `Null distribution: not computed in MVP (schema slot reserved)` | `null_distribution = None` | Always this fixed text in MVP. A future slice may replace it with sampling-based stats. |
+
+**How to interpret a result set:**
+
+- **Observed count ≫ alternative-ordering counts** → the observed sequence is a real pattern, not a permutation artifact.
+- **Observed count ≈ alternative-ordering counts** → the lemmas co-occur, but in no particular preferred order.
+- **Observed count = 0 but baselines are large** → the constituents exist abundantly but never co-occur in this order in this scope. Worth exploring.
+- **Observed count = 0 and baselines are small** → the constituents are too rare to expect any sequence to fire. Try widening scope (drop `book:`) or relaxing constraints.
 
 ---
 
