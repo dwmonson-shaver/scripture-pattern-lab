@@ -374,3 +374,96 @@ class ConceptNotMapped(Exception):  # noqa: N818 — name parallels RegistryRequ
         super().__init__(
             f"concept {concept_name!r} has no lemma mapping in the registry"
         )
+
+
+# ---------------------------------------------------------------------------
+# Result-set contextualization (REQ:09.contextualization)
+#
+# Calibrates a result set against (a) constituent-node baselines, (b) sibling
+# permutations of the same node-set, and (c) a null distribution (schema slot
+# only in MVP). The envelope hangs on ``RetrievalResult``; the explainer slice
+# will surface it on ``ExplainedResultSet`` when it lands.
+# ---------------------------------------------------------------------------
+
+
+class NodeBaseline(BaseModel):
+    """How often a single constituent node fires alone in the scoped corpus.
+
+    Lemma nodes resolve to themselves; concept nodes resolve to all lemmas in
+    the registry mapping (per REQ:04.matching-rules). ``count`` is a scoped
+    SELECT COUNT(*) against the tokens table — always >= 0.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    node_index: int
+    node_type: NodeType
+    node_value: str
+    resolved_lemmas: list[str]
+    count: int
+
+
+class AlternativeOrderingCount(BaseModel):
+    """Match count for one permutation of the original node sequence.
+
+    The original ordering is included in the list with ``is_observed=True``
+    so consumers can render it alongside its siblings without comparing
+    permutations themselves.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    permutation: list[int]
+    sequence_label: str
+    count: int
+    is_observed: bool
+
+
+class NullDistribution(BaseModel):
+    """Sampling-based null baseline.
+
+    MVP reserves the schema slot but never populates it (per design OQ #3
+    resolution: the sampling protocol needs its own design pass — what
+    counts as a "comparable-frequency" lemma, how comparability is defined,
+    and how the seed propagates). Exposed as ``Contextualization.null_distribution``;
+    always ``None`` until a future slice ships the sampling code.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    sample_size: int
+    mean: float
+    std: float
+    seed: int
+
+
+class Contextualization(BaseModel):
+    """Calibration envelope for a single result set.
+
+    Per canonical-09 §8: contextualization runs after retrieval, before
+    scoring. It does not modify per-match scores; it calibrates the result
+    set as a whole against constituent-node baselines and sibling permutations.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    observed_count: int
+    node_baselines: list[NodeBaseline]
+    alternative_orderings: list[AlternativeOrderingCount]
+    alternative_orderings_capped: bool
+    null_distribution: NullDistribution | None = None
+
+
+class RetrievalResult(BaseModel):
+    """Top-level envelope returned by ``retrieve()``.
+
+    Per canonical-09 §6. ``contextualization`` is populated only when the
+    caller requested it (engine-layer default ``False``; CLI/API default
+    ``True`` per OQ #1 middle-path resolution).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    candidates: list[MatchCandidate]
+    stages_used: list[str]
+    contextualization: Contextualization | None = None

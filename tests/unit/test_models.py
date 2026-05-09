@@ -5,6 +5,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from src.engine.models import (
     AlternativeExpr,
+    AlternativeOrderingCount,
+    Contextualization,
     ExpansionDirection,
     ExpansionDirective,
     GapConstraint,
@@ -12,8 +14,10 @@ from src.engine.models import (
     MatchCandidate,
     MatchedToken,
     MorphFilter,
+    NodeBaseline,
     NodeRef,
     NodeType,
+    NullDistribution,
     OperatorType,
     OptionalExpr,
     OrderOperator,
@@ -22,6 +26,7 @@ from src.engine.models import (
     RankingFactor,
     RankingPrefs,
     RegistryRequired,
+    RetrievalResult,
     ScopeConstraint,
     ScopeUnit,
     SequenceExpr,
@@ -618,3 +623,254 @@ class TestExecutorExceptions:
         err = RegistryRequired("faith")
         assert err.concept_name == "faith"
         assert "faith" in str(err)
+
+
+# ---------------------------------------------------------------------------
+# Result-set contextualization (REQ:09.contextualization)
+# ---------------------------------------------------------------------------
+
+
+def _sample_node_baseline() -> NodeBaseline:
+    return NodeBaseline(
+        node_index=0,
+        node_type=NodeType.CONCEPT,
+        node_value="faith",
+        resolved_lemmas=["πίστις", "πιστεύω"],
+        count=243,
+    )
+
+
+def _sample_alt_ordering(
+    *, permutation: list[int], label: str, count: int, observed: bool
+) -> AlternativeOrderingCount:
+    return AlternativeOrderingCount(
+        permutation=permutation,
+        sequence_label=label,
+        count=count,
+        is_observed=observed,
+    )
+
+
+class TestNodeBaseline:
+    def test_construct(self) -> None:
+        nb = _sample_node_baseline()
+        assert nb.node_index == 0
+        assert nb.node_type == NodeType.CONCEPT
+        assert nb.resolved_lemmas == ["πίστις", "πιστεύω"]
+        assert nb.count == 243
+
+    def test_frozen(self) -> None:
+        nb = _sample_node_baseline()
+        with pytest.raises(ValidationError):
+            nb.count = 99
+
+    def test_json_round_trip(self) -> None:
+        nb = _sample_node_baseline()
+        restored = NodeBaseline.model_validate_json(nb.model_dump_json())
+        assert restored == nb
+
+    def test_lemma_node_baseline(self) -> None:
+        nb = NodeBaseline(
+            node_index=1,
+            node_type=NodeType.LEMMA,
+            node_value="πίστις",
+            resolved_lemmas=["πίστις"],
+            count=243,
+        )
+        assert nb.node_type == NodeType.LEMMA
+        assert nb.resolved_lemmas == ["πίστις"]
+
+
+class TestAlternativeOrderingCount:
+    def test_construct_observed(self) -> None:
+        alt = _sample_alt_ordering(
+            permutation=[0, 1, 2],
+            label="faith > hope > love",
+            count=2,
+            observed=True,
+        )
+        assert alt.is_observed is True
+        assert alt.permutation == [0, 1, 2]
+        assert alt.count == 2
+
+    def test_construct_alternative(self) -> None:
+        alt = _sample_alt_ordering(
+            permutation=[1, 0, 2],
+            label="hope > faith > love",
+            count=0,
+            observed=False,
+        )
+        assert alt.is_observed is False
+        assert alt.count == 0
+
+    def test_frozen(self) -> None:
+        alt = _sample_alt_ordering(
+            permutation=[0, 1, 2],
+            label="faith > hope > love",
+            count=2,
+            observed=True,
+        )
+        with pytest.raises(ValidationError):
+            alt.count = 99
+
+    def test_json_round_trip(self) -> None:
+        alt = _sample_alt_ordering(
+            permutation=[2, 1, 0],
+            label="love > hope > faith",
+            count=0,
+            observed=False,
+        )
+        restored = AlternativeOrderingCount.model_validate_json(alt.model_dump_json())
+        assert restored == alt
+
+
+class TestNullDistribution:
+    def test_construct(self) -> None:
+        nd = NullDistribution(sample_size=50, mean=12.4, std=3.7, seed=20260509)
+        assert nd.sample_size == 50
+        assert nd.mean == 12.4
+        assert nd.std == 3.7
+        assert nd.seed == 20260509
+
+    def test_frozen(self) -> None:
+        nd = NullDistribution(sample_size=50, mean=12.4, std=3.7, seed=1)
+        with pytest.raises(ValidationError):
+            nd.mean = 0.0
+
+    def test_json_round_trip(self) -> None:
+        nd = NullDistribution(sample_size=100, mean=5.0, std=1.5, seed=42)
+        restored = NullDistribution.model_validate_json(nd.model_dump_json())
+        assert restored == nd
+
+
+class TestContextualization:
+    def test_construct_minimum(self) -> None:
+        ctx = Contextualization(
+            observed_count=2,
+            node_baselines=[_sample_node_baseline()],
+            alternative_orderings=[
+                _sample_alt_ordering(
+                    permutation=[0],
+                    label="faith",
+                    count=243,
+                    observed=True,
+                )
+            ],
+            alternative_orderings_capped=False,
+        )
+        assert ctx.observed_count == 2
+        assert ctx.alternative_orderings_capped is False
+        assert ctx.null_distribution is None
+
+    def test_null_distribution_default_is_none(self) -> None:
+        ctx = Contextualization(
+            observed_count=0,
+            node_baselines=[],
+            alternative_orderings=[],
+            alternative_orderings_capped=False,
+        )
+        assert ctx.null_distribution is None
+
+    def test_null_distribution_can_be_populated(self) -> None:
+        ctx = Contextualization(
+            observed_count=2,
+            node_baselines=[_sample_node_baseline()],
+            alternative_orderings=[],
+            alternative_orderings_capped=False,
+            null_distribution=NullDistribution(
+                sample_size=50, mean=1.5, std=0.7, seed=42
+            ),
+        )
+        assert ctx.null_distribution is not None
+        assert ctx.null_distribution.sample_size == 50
+
+    def test_frozen(self) -> None:
+        ctx = Contextualization(
+            observed_count=2,
+            node_baselines=[],
+            alternative_orderings=[],
+            alternative_orderings_capped=False,
+        )
+        with pytest.raises(ValidationError):
+            ctx.observed_count = 99
+
+    def test_json_round_trip(self) -> None:
+        ctx = Contextualization(
+            observed_count=2,
+            node_baselines=[_sample_node_baseline()],
+            alternative_orderings=[
+                _sample_alt_ordering(
+                    permutation=[0, 1, 2],
+                    label="faith > hope > love",
+                    count=2,
+                    observed=True,
+                ),
+                _sample_alt_ordering(
+                    permutation=[2, 1, 0],
+                    label="love > hope > faith",
+                    count=0,
+                    observed=False,
+                ),
+            ],
+            alternative_orderings_capped=False,
+        )
+        restored = Contextualization.model_validate_json(ctx.model_dump_json())
+        assert restored == ctx
+
+
+class TestRetrievalResult:
+    def test_construct_without_contextualization(self) -> None:
+        rr = RetrievalResult(
+            candidates=[
+                MatchCandidate(
+                    tokens=[],
+                    reference="1Cor 13:13",
+                    match_type="conceptual",
+                    alignment=[],
+                )
+            ],
+            stages_used=["symbolic"],
+        )
+        assert len(rr.candidates) == 1
+        assert rr.stages_used == ["symbolic"]
+        assert rr.contextualization is None
+
+    def test_construct_with_contextualization(self) -> None:
+        rr = RetrievalResult(
+            candidates=[],
+            stages_used=["symbolic"],
+            contextualization=Contextualization(
+                observed_count=0,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+            ),
+        )
+        assert rr.contextualization is not None
+        assert rr.contextualization.observed_count == 0
+
+    def test_frozen(self) -> None:
+        rr = RetrievalResult(candidates=[], stages_used=[])
+        with pytest.raises(ValidationError):
+            rr.stages_used = ["other"]
+
+    def test_json_round_trip(self) -> None:
+        rr = RetrievalResult(
+            candidates=[
+                MatchCandidate(
+                    tokens=[],
+                    reference="1Cor 13:13",
+                    match_type="conceptual",
+                    alignment=[],
+                )
+            ],
+            stages_used=["symbolic"],
+            contextualization=Contextualization(
+                observed_count=2,
+                node_baselines=[_sample_node_baseline()],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+            ),
+        )
+        restored = RetrievalResult.model_validate_json(rr.model_dump_json())
+        assert restored == rr
