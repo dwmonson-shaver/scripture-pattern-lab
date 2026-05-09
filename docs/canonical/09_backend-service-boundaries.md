@@ -147,14 +147,15 @@ class MatchCandidate:
 
 **Interface**:
 ```python
-def retrieve(plan: QueryPlan) -> RetrievalResult
+def retrieve(plan: QueryPlan, *, contextualize: bool = False) -> RetrievalResult
 
 class RetrievalResult:
     candidates: list[MatchCandidate]
-    stages_used: list[str]      # Which retrieval stages contributed
+    stages_used: list[str]                       # Which retrieval stages contributed
+    contextualization: Contextualization | None  # Populated when contextualize=True; None otherwise
 ```
 
-**MVP implementation**: Single-stage symbolic retrieval only (calls the pattern engine). The pipeline interface exists so that semantic retrieval can be added later without changing the API surface.
+**MVP implementation**: Single-stage symbolic retrieval only (calls the pattern engine). The pipeline interface exists so that semantic retrieval can be added later without changing the API surface. The `contextualize` flag is engine-layer default-`False` (test-friendly, deterministic, cost-bounded); API-layer / CLI consumers pass `True` so users see calibrated counts by default. [DEC-024]
 
 <!-- REQ:09.scoring-ranking -->
 ### 7. Scoring & Ranking
@@ -173,8 +174,62 @@ class ScoredMatch:
 
 **MVP implementation**: Simple weighted scoring with default weights. Factors: lexical alignment (do lemmas match exactly?), sequence fidelity (are positions in order with acceptable gaps?), scope precision (verse-level vs. cross-verse). More factors (morphology, semantic, polarity, rarity) added as retrieval stages expand.
 
+**Boundary**: scoring ranks **within** a result set; it does not calibrate the result set against alternatives. That second concern is the contextualization layer (§8) — see DEC-024 for the epistemic split.
+
+<!-- REQ:09.contextualization -->
+### 8. Result Contextualization
+**Location**: `src/retrieval/contextualization.py`
+**Responsibility**: Calibrate the result count of a query against (a) the constituent nodes' baseline frequencies in the corpus, (b) the alternative orderings of the same node-set, and (c) a null-distribution baseline (when feasible). Produces a `Contextualization` envelope attached to the result set; does not modify per-match scoring. The corpus-is-ground-truth principle [DEC-024] makes this an output-side counterpart to the registry-epistemics input-side: raw match counts presented without baseline context invite confirmation bias the same way unverified registry entries do.
+
+**Interface**:
+```python
+def contextualize(
+    plan: QueryPlan,
+    scope: ScopeConstraint,
+    candidates: list[MatchCandidate],
+    engine: Engine,
+    registry: ConceptRegistry,
+) -> Contextualization
+
+class NodeBaseline:
+    node_index: int             # Index of the node in the original sequence
+    node_type: str              # "lemma", "concept", etc.
+    node_value: str             # The lemma name or concept name
+    resolved_lemmas: list[str]  # The actual lemmas matched (after registry resolution)
+    count: int                  # COUNT(*) against tokens for this node alone, scope-filtered
+
+class AlternativeOrderingCount:
+    permutation: list[int]      # Permutation of step indices, e.g. [1,0,2] for "hope > faith > love"
+    sequence_label: str         # Human-readable label, e.g. "hope > faith > love"
+    count: int                  # Result count for this ordering (0 if no matches)
+    is_observed: bool           # True for the original ordering; False otherwise
+
+class NullDistribution:
+    sample_size: int            # Number of random comparable-frequency sequences sampled
+    mean: float
+    std: float
+    seed: int                   # Fixed seed for sampling reproducibility
+
+class Contextualization:
+    observed_count: int                              # The original query's match count
+    node_baselines: list[NodeBaseline]               # One per node in the sequence
+    alternative_orderings: list[AlternativeOrderingCount]
+    alternative_orderings_capped: bool               # True if the permutation set was truncated
+    null_distribution: NullDistribution | None       # MVP: always None; schema slot for future slices
+```
+
+**Invariants**:
+- (a) Every result set produced with `contextualize=True` carries node-level baseline counts for every constituent node.
+- (b) Every result set carries alternative-ordering counts for the same node-set, capped at `min(N!, 24)` permutations; for N ≥ 5, the cap-fallback is identity + reverse + N pairwise swaps.
+- (c) A null-distribution slot is reserved on the envelope; MVP always sets it to `None` (sampling protocol pending future `/research` and `/design`).
+- (d) The explainer (§9) must surface contextualization in user-facing output, not just the raw observed count.
+
+**MVP implementation**: Direct SQL `COUNT(*)` against `tokens` for each node baseline (lemma direct; concept resolved via `ConceptRegistry.get_lemmas_for_concept` per `REQ:04.matching-rules`). Re-enters the pattern engine for each non-original permutation. Scope filters (`corpus_id`, `language`, `books`) carry into every baseline and alt-ordering query. Opt-in via the retrieval pipeline's `contextualize` flag (engine-layer default `False`; API/CLI consumer default `True`).
+
+**Future**: Null-distribution sampling protocol (separate `/research` and `/design`); concept-baseline caching; cross-corpus baseline comparison.
+
 <!-- REQ:09.result-explainer -->
-### 8. Result Builder & Explainer
+### 9. Result Builder & Explainer
 **Location**: `src/nlp/explainer.py`
 **Responsibility**: Transform scored matches into user-facing results with explanations. Uses an LLM to generate natural-language explanations of why each result matched and what its limitations are. [DEC-015]
 
@@ -187,6 +242,7 @@ class ExplainedResultSet:
     nl_source: str | None       # Original NL if applicable
     validation_notes: list[str] # Any capability limitations
     results: list[ExplainedResult]
+    contextualization: Contextualization | None  # Populated when retrieve() ran with contextualize=True; None otherwise
 
 class ExplainedResult:
     reference: str
@@ -199,7 +255,7 @@ class ExplainedResult:
 **MVP implementation**: Template-based explanation for exact/variant matches. LLM explanation for conceptual matches or when results need qualification.
 
 <!-- REQ:09.ingestion -->
-### 9. Corpus Ingestion (non-request-path)
+### 10. Corpus Ingestion (non-request-path)
 **Location**: `src/ingestion/`
 **Responsibility**: Parse corpus source files (MorphGNT today, future corpora later), bulk-load tokens into Postgres, manage schema apply. Invoked from scripts or workers — never from a query route. [DEC-025]
 
@@ -241,7 +297,7 @@ FastAPI process
 └── Postgres connection pool
 ```
 
-`src/ingestion/` is in the codebase but runs outside this process — invoked via a script or worker (see component §9). Query-side modules above must not import from it.
+`src/ingestion/` is in the codebase but runs outside this process — invoked via a script or worker (see component §10). Query-side modules above must not import from it.
 
 ### Future: Extraction Points
 When scale or team structure demands it, the natural extraction boundaries are:
