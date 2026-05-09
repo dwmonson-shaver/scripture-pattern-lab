@@ -19,7 +19,6 @@ from sqlalchemy.engine import Engine
 
 from src.app.dependencies import get_concept_registry, get_engine
 from src.app.main import create_app
-from src.app.orchestration import ValidationUnsupported
 from src.app.schemas import QueryDSLResponse
 from src.engine.models import (
     ConceptNotMapped,
