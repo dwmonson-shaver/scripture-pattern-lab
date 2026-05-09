@@ -264,3 +264,53 @@ def test_cli_renders_no_match_with_contextualization(
     assert "Observed count: 0" in out
     # 2-step sequence yields 2! = 2 orderings
     assert "Alternative orderings (2 total" in out
+
+
+def test_cli_renders_explanation_for_flagship_sequence(
+    loaded_corpus_and_registry: None,
+) -> None:
+    """Slice F exit gate: faith > hope > love prints the Explanation block.
+
+    Asserts the prose block lands AFTER the contextualization block, has the
+    canonical heading, indented summary lines, and grounds its claims in the
+    actual counts from project_status.md (483 / 84 / 259 baselines, 2 matches
+    at 1Cor 13:13, alt-ordering observation).
+    """
+    _ = loaded_corpus_and_registry
+    result = _run_query("faith > hope > love")
+    assert result.returncode == 0, (
+        f"expected exit 0, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    out = result.stdout
+
+    # Heading on its own line, after the contextualization block
+    assert "Explanation:" in out
+    ctx_idx = out.index("Contextualization (REQ:09.contextualization):")
+    exp_idx = out.index("Explanation:")
+    assert exp_idx > ctx_idx, "Explanation block must appear after Contextualization"
+
+    # Summary content grounded in actual counts
+    assert "faith > hope > love" in out
+    assert "2 times" in out
+    assert "1Cor 13:13" in out
+    # Baselines present (at least one of the three numbers)
+    assert any(n in out for n in ("483", "84", "259"))
+    # Alt-ordering observation (faith > love > hope tied case)
+    assert "alternative ordering" in out.lower()
+
+
+def test_cli_no_prose_flag_suppresses_explanation(
+    loaded_corpus_and_registry: None,
+) -> None:
+    """``--no-prose`` suppresses the Explanation block; structured output remains."""
+    _ = loaded_corpus_and_registry
+    result = _run_query("faith > hope > love", extra_args=["--no-prose"])
+    assert result.returncode == 0, (
+        f"expected exit 0, got {result.returncode}; stderr={result.stderr!r}"
+    )
+    out = result.stdout
+    # Structured + contextualization blocks still print
+    assert "1Cor 13:13" in out
+    assert "Contextualization (REQ:09.contextualization):" in out
+    # But no prose block
+    assert "Explanation:" not in out

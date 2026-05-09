@@ -48,6 +48,7 @@ from src.engine.models import (  # noqa: E402
 )
 from src.engine.parser import ParseError, parse  # noqa: E402
 from src.ingestion.db import get_engine  # noqa: E402
+from src.nlp.explainer import explain  # noqa: E402
 from src.ontology.registry import ConceptRegistry  # noqa: E402
 from src.retrieval.retrieve import retrieve  # noqa: E402
 from src.validation.registry import CapabilityRegistry  # noqa: E402
@@ -67,6 +68,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("dsl", type=str, help="DSL query string (e.g. 'faith > hope > love').")
     parser.add_argument(
         "--limit", type=int, default=20, help="cap on candidates to print (default: 20)"
+    )
+    parser.add_argument(
+        "--no-prose",
+        action="store_true",
+        help="suppress the deterministic prose explanation block (default: prose ON)",
     )
     return parser.parse_args(argv)
 
@@ -184,11 +190,24 @@ def _print_findings(prefix: str, findings: list, stream) -> None:
         print(f"  {f.severity}: {f.code} at {f.path}: {f.message}", file=stream)
 
 
+def _print_explanation(summary: str) -> None:
+    """Render the deterministic prose explanation block to stdout.
+
+    Heading on its own line; each summary line indented two spaces. Emitted
+    only when ``--no-prose`` is NOT set. Per REQ:09.result-explainer (MVP)
+    and DEC-061: deterministic, no LLM, no I/O.
+    """
+    print("Explanation:")
+    for line in summary.splitlines():
+        print(f"  {line}")
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint. Returns process exit code; never raises on user error."""
     args = _parse_args(argv)
     dsl: str = args.dsl
     limit: int = args.limit
+    no_prose: bool = args.no_prose
 
     url = os.environ.get("DATABASE_URL")
     redacted = _redact_database_url(url) if url else "<unset>"
@@ -264,6 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     if result.contextualization is not None:
         print()
         _print_contextualization(result.contextualization)
+
+    if not no_prose:
+        explained = explain(result, executable, validation)
+        print()
+        _print_explanation(explained.summary)
+
     return EXIT_OK
 
 
