@@ -569,3 +569,16 @@
 - Files: src/engine/executor.py (rename); tests/unit/test_executor.py (comment update)
 - Spec refs: REQ:09.pattern-engine (consumer-side); REQ:09.contextualization (consumer-side); REQ:04.matching-rules (resolution rules referenced by both)
 - Cross-refs: DEC-025 (boundary preserved — retrieval imports engine, not the reverse); DEC-052 (engine schema mirror — analogous pattern: shared utilities live in their natural home, mirrored only when boundaries forbid imports)
+
+## DEC-060 — Agent-facing caller documentation lives in `docs/agent/`, separate from canonical specs
+- Status: Accepted
+- Question: When introducing a cookbook + prompt template designed to be the single source of truth for an LLM agent calling the system, where should the docs live? Inside `docs/canonical/` (alongside invariant specs)? In a new `docs/user/` (parallel to a future novice-doc slice)? Or in a new `docs/agent/`?
+- Decision: New top-level subdirectory `docs/agent/`. Slice E lands `docs/agent/dsl-cookbook.md` and `docs/agent/prompt-template.md` there. `docs/canonical/` remains reserved for invariant contracts (REQ markers, schemas, service boundaries). `docs/user/` is reserved for the future novice-doc slice (target audience: human researcher, not an LLM agent).
+- Rationale: Audience separation. Canonical docs target implementers and protect contracts via REQ markers. Agent-facing docs target LLM callers and consolidate the executable surface for fast in-context onboarding. Mixing them risks (a) cookbook drift when canonical is amended for invariant changes that do not affect what executes today and (b) REQ-marker pollution onto documentation that is descriptive rather than contractual. Three named buckets — canonical (invariants), agent (caller convenience for LLMs), user (caller convenience for humans) — keeps each artifact's purpose clean.
+- Alternatives considered: (a) Single `docs/user/` shared by humans and agents — rejected; an agent reading "set up your IDE" header text is wasted context, and a human reading "your role as an LLM" is misleading. (b) Inside `docs/canonical/` as e.g. `99_agent-cookbook.md` — rejected; not invariant-shaped, would dilute REQ-marker meaning. (c) `docs/external/` umbrella — rejected; too vague.
+- Confidence: High.
+- Made-by: orchestrator-mode (low-stakes / high-confidence; consistent with the existing canonical-vs-governance separation).
+- Commit: `63fe651` (E1 creates the directory and the cookbook skeleton). Closing SHA chain: `63fe651`..`9e08096`.
+- Files: docs/agent/dsl-cookbook.md (created); docs/agent/prompt-template.md (created)
+- Spec refs: (none — agent docs are descriptive, not contractual; reference-only links to REQ:02.*, REQ:06.*, REQ:09.*)
+- Cross-refs: DEC-003 (NL must compile to DSL — cookbook teaches DSL, not NL bypass); DEC-006 (capability validation must be explicit and first-class); DEC-024 (corpus is ground truth — prompt template anchors the no-fabrication constraint in operational behavior)
