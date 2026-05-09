@@ -70,6 +70,70 @@ The backend is decomposed into logical components with clear boundaries, but the
 
 **Input/output format**: JSON. Requests and responses use typed schemas.
 
+**Response envelope (POST /api/v1/query/dsl)**: composes existing
+project models verbatim — no wrapping, no re-derivation. All four
+fields are always emitted:
+
+```python
+class QueryDSLResponse(BaseModel):
+    query: str                         # echo of the request DSL
+    validation: ValidationResult        # status, findings, grounding
+    result: RetrievalResult             # candidates, stages_used, contextualization
+    explanation: ExplainedResultSet     # deterministic prose summary
+```
+
+**Null-field policy**: nullable fields emit as `null` in JSON, not
+omitted. The codebase calls `model_dump`/`model_dump_json` without
+`exclude_none=True` so `Contextualization.null_distribution`,
+`ExplainedResultSet.contextualization`, `ValidationResult.grounding`,
+etc., all surface as keys with value `null` when their value is
+`None`. [DEC-G8 / DEC-057]
+
+**Error envelope**: error responses use `HTTPException(detail=ErrorResponse(...).model_dump())`:
+
+```python
+class ErrorResponse(BaseModel):
+    error: str                  # stable machine code, e.g. "parse_error"
+    message: str                # human-readable description
+    details: dict | None = None # error-type-specific fields
+```
+
+**HTTP status code mapping** for the DSL pipeline. Each pipeline
+exception maps to one row; the route handler's `try/except` chain
+must cover all of them. Unmapped exceptions fall through to 500.
+
+| Pipeline exception / state                   | HTTP status                      | `error` code              | `details` keys              |
+|----------------------------------------------|----------------------------------|---------------------------|-----------------------------|
+| Pydantic body validation (FastAPI default)   | 422 Unprocessable Content        | (FastAPI default shape)   | (FastAPI default)           |
+| `ParseError` from `src/engine/parser.py`     | 422 Unprocessable Content        | `parse_error`             | `position`, `source`        |
+| Validator returns `status="unsupported"`     | 422 Unprocessable Content        | `validation_unsupported`  | `findings: [...]`           |
+| `UnsupportedPlanShape` from executor         | 422 Unprocessable Content        | `unsupported_plan_shape`  | `path`                      |
+| `ConceptNotMapped` from executor             | 422 Unprocessable Content        | `concept_not_mapped`      | `concept_name`              |
+| `RegistryRequired` from executor             | 503 Service Unavailable          | `registry_required`       | `concept_name`              |
+| Engine missing (lifespan didn't construct)   | 503 Service Unavailable          | `engine_unavailable`      | (none)                      |
+| Registry missing (lifespan didn't construct) | 503 Service Unavailable          | `registry_unavailable`    | (none)                      |
+| Any uncaught exception                       | 500 Internal Server Error        | `internal_error`          | (none — message is generic; full traceback logged server-side) |
+
+`partial` and `supported` validation statuses both return HTTP 200
+with `validation.findings` carrying any reduction warnings; the
+client renders them but the response is not an error.
+
+**Dependency injection**: `Engine` and `ConceptRegistry` are
+process-scoped resources constructed once during the FastAPI
+`lifespan` async context manager and stashed on `app.state`. Route
+handlers obtain them via `Depends(get_engine)` /
+`Depends(get_concept_registry)` providers in
+`src/app/dependencies.py`. The CLI's "one engine per invocation"
+pattern generalizes to "one engine per FastAPI process." Tests
+bypass the providers via `app.dependency_overrides` so unit-shape
+HTTP tests don't require `DATABASE_URL`. [DEC-G2]
+
+**Concurrency**: handlers are sync `def` (not `async def`) because
+all upstream code is sync (`engine.connect()`, `validate()`,
+`retrieve()`, `explain()`); FastAPI offloads sync handlers to a
+thread pool, which is correct here. SQLAlchemy `Engine` is
+thread-safe across `connect()` calls.
+
 <!-- REQ:09.nl-to-dsl -->
 ### 2. NL-to-DSL Service
 **Location**: `src/nlp/`
