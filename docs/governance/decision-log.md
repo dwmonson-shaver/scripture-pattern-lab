@@ -491,3 +491,81 @@
 - Files: src/ontology/book_codes.py (NEW); tests/unit/test_book_codes.py (NEW); src/engine/executor.py (consumer)
 - Spec refs: REQ:08.token-schema (consumed); REQ:09.pattern-engine (uses)
 - Cross-refs: DEC-026 (BB-digit storage decision); reviews-log.md Bucket 3 (closing SHA recorded in this commit)
+
+## DEC-054 — REQ:09.contextualization umbrella: result-set calibration is an orthogonal axis on the result envelope, not a per-match concern
+- Status: Accepted
+- Question: Where does result contextualization live in the canonical service-boundary spec, and what invariants does it commit to?
+- Decision: A new `REQ:09.contextualization` marker lands in `docs/canonical/09_backend-service-boundaries.md` between `REQ:09.scoring-ranking` (§7) and `REQ:09.result-explainer` (§9). It encodes four invariants: (a) every result set produced with `contextualize=True` carries node-level baseline counts for every constituent node; (b) every result set carries alternative-ordering counts for the same node-set, capped at `min(N!, 24)` permutations; (c) a null-distribution slot is reserved on the envelope (always `None` in MVP); (d) the explainer must surface contextualization, not just the raw observed count. The `Contextualization` envelope hangs on `RetrievalResult` (carrier through the pipeline) and on `ExplainedResultSet` (user-facing); per-match types (`MatchCandidate`, `ScoredMatch`) are unchanged.
+- Rationale: Per the design, contextualization calibrates the result *set* against alternatives — a different axis from per-match scoring. Folding it into `REQ:09.scoring-ranking` would conflate "rank within set" with "calibrate set vs alternatives." A new marker draws the boundary cleanly without amending existing scoring text. DEC-024 (corpus-is-ground-truth) makes this load-bearing: raw counts presented without baseline context invite confirmation bias the same way unverified registry entries do.
+- Alternatives considered: (a) Amend `REQ:01.transparent-evidence` instead — deferred (OQ #5; revisit when explainer slice ships and user-facing wording is concrete). (b) Place under `REQ:09.scoring-ranking` — rejected; conflates two axes.
+- Confidence: High.
+- Made-by: orchestrator-mode (low-stakes / high-confidence per `feedback_dec_autonomy.md`; design at `thoughts/design-result-contextualization-2026-05-03.md` status: design-stable).
+- Commit: `0f8b553` (D1 canonical amendment); refined by `e3d557b` (request lifecycle text) and `37ed192` (signature alignment).
+- Files: docs/canonical/09_backend-service-boundaries.md (REQ marker, §8, RetrievalResult/ExplainedResultSet text blocks, request lifecycle, directory map)
+- Spec refs: REQ:09.contextualization (NEW); REQ:09.retrieval-pipeline (extension); REQ:09.scoring-ranking (boundary clarified); REQ:09.result-explainer (extension)
+- Cross-refs: DEC-024 (corpus-is-ground-truth); DEC-049 (registry-epistemics input-side); DEC-051 (Track 2 deferred to Slice D)
+
+## DEC-055 — `src/retrieval/contextualization.py` is the code home (resolves design OQ #2)
+- Status: Accepted
+- Question: Should contextualization live under `src/scoring/` (calibration is a scoring-adjacent concern) or `src/retrieval/` (the dominant work is alternative-ordering re-entries through the retrieval pipeline)?
+- Decision: `src/retrieval/contextualization.py`. Reverses the design draft's decision #3 (which paired scoring + a callback-injection pattern). Eliminates the callback by letting `contextualization` import `execute()` directly — `src/retrieval/` importing from `src/engine/` is the natural dependency direction and creates no cycle. Boundary precedent: CLAUDE.md's architecture list defines `src/retrieval/` as "Multi-stage retrieval orchestration"; alt-ordering re-entries are exactly that.
+- Rationale: The dominant work is *re-running queries* (retrieval activity). The CLAUDE.md boundary calls scoring "Scoring and ranking logic" — contextualization is calibration, not ranking. Moving the home to retrieval simplifies the call graph (no callback inversion) and matches OQ #1's middle-path resolution which puts the `contextualize` flag on `retrieve()`.
+- Alternatives considered: (a) `src/scoring/contextualization.py` with retrieve-fn callback — rejected per OQ #2 walkthrough; the callback is plumbing-tax for a non-existent benefit (no producer/consumer split). (b) New top-level `src/calibration/` package — rejected; CLAUDE.md's architecture list does not include one and adding a layer for a single module is over-architecture.
+- Confidence: High.
+- Made-by: orchestrator-mode (resolves design OQ #2; consistent with CLAUDE.md architecture).
+- Commit: `1144075` (D3 introduces the file); `f0ad909` (D5 lands `contextualize()` orchestrator); `44fc697` (D6 adds the consumer).
+- Files: src/retrieval/contextualization.py (NEW); src/retrieval/retrieve.py (NEW)
+- Spec refs: REQ:09.contextualization (implementation home); REQ:09.retrieval-pipeline (consumer)
+- Cross-refs: DEC-025 (engine ⊥ ingestion boundary preserved); DEC-054 (REQ marker)
+
+## DEC-056 — Contextualize defaults: engine-layer `False`, API/CLI-layer `True` (resolves design OQ #1, middle path)
+- Status: Accepted
+- Question: Should `retrieve(contextualize=...)` default to `True` (epistemic argument: don't hide calibration from users) or `False` (test/batch determinism + cost control)?
+- Decision: Middle path. The engine-layer Python function `retrieve()` defaults `contextualize=False`. UI-layer consumers (CLI today; FastAPI route when it lands) pass `contextualize=True`. The CLI in `scripts/query.py` does so explicitly.
+- Rationale: Both arguments are correct in their layer. Engine-layer callers (tests, batch ETL, programmatic introspection) want determinism + cost control: contextualization re-enters the engine N≤24 times and runs N small COUNT queries, which is wasted work when the caller already knows what they want. UI-layer callers want the anti-confirmation-bias choice (DEC-024): raw counts presented without context recreate the failure mode the slice exists to prevent. Splitting the default by layer respects both.
+- Alternatives considered: (a) Default `True` everywhere — rejected; engine-layer callers pay performance + non-determinism tax for no benefit. (b) Default `False` everywhere — rejected; UI users get the anti-pattern by default. (c) No default; require explicit kwarg — rejected; ergonomically painful for the dominant case (CLI) and ignores the design's epistemic stance.
+- Confidence: High.
+- Made-by: orchestrator-mode (resolves design OQ #1; the middle path was explicitly named in the OQ-walkthrough).
+- Commit: `f0ad909` (D5 wires the defaults); `44fc697` (D6 confirms CLI-layer behavior).
+- Files: src/retrieval/retrieve.py; scripts/query.py
+- Spec refs: REQ:09.contextualization; REQ:09.retrieval-pipeline
+- Cross-refs: DEC-024 (corpus-is-ground-truth, the epistemic argument); DEC-054 (REQ marker)
+
+## DEC-057 — Null-distribution is a schema slot only in MVP (resolves design OQ #3)
+- Status: Accepted
+- Question: Ship null-distribution sampling in MVP with a fixed seed and a documented protocol, or defer entirely and ship the schema slot only?
+- Decision: Defer entirely. `Contextualization.null_distribution: NullDistribution | None` exists in the schema, populated as `None` in MVP. The CLI prints "Null distribution: not computed in MVP (schema slot reserved)". A future `/research` + `/design` will define the sampling protocol (what counts as a "comparable-frequency" lemma, how comparability is bounded, how the seed propagates).
+- Rationale: Sampling-based stats need their own reproducibility infrastructure (fixed seed, documented sampling protocol, edge-case handling for low-N comparability classes). Shipping that without the design pass would either produce false-precision numbers (σ on small samples) or burn slice budget on infrastructure that the user can't yet evaluate against real output. The schema slot keeps the future addition non-breaking — when null-distribution lands, it's adding a populated `NullDistribution` value to a field that already exists, not introducing a new field.
+- Alternatives considered: (a) Ship sampling now with arbitrary seed — rejected; presentation concerns (false precision) bleed into the explainer's design space and need their own pass. (b) Drop the schema slot entirely — rejected; future addition would then require a breaking schema change; reserving the field is a minor cost for major future flexibility.
+- Confidence: High.
+- Made-by: orchestrator-mode (resolves design OQ #3; aligns with the MVP scope decision in the design's "Resolution" block).
+- Commit: `cbd27b5` (D2 schema slot); `f0ad909` (D5 always-None); `44fc697` (D6 CLI rendering).
+- Files: src/engine/models.py (NullDistribution + Contextualization.null_distribution); src/retrieval/contextualization.py; scripts/query.py
+- Spec refs: REQ:09.contextualization (invariant (c))
+- Cross-refs: DEC-054 (REQ marker)
+
+## DEC-058 — Alternative-ordering permutation cap: enumerate full N! through N=4; for N≥5 use identity + reverse + (N−1) adjacent swaps, truncated at 24
+- Status: Accepted
+- Question: How does the contextualization layer cap the permutation set so engine re-entries stay bounded?
+- Decision: For sequences of length N ≤ 4, enumerate all N! permutations (≤ 24, lexicographic order). For N ≥ 5, use the deterministic fallback subset = identity + reverse + (N−1) adjacent pairwise swaps, truncated at `_MAX_PERMUTATIONS = 24`. The truncation honors canonical-09 §8 invariant (b) for direct-call plans whose length exceeds the validator's supported max. `Contextualization.alternative_orderings_capped` is `True` whenever the fallback ran; consumers can show "showing 6 of 120 alternative orderings" in the explainer.
+- Rationale: 4! = 24 sets a natural ceiling. N=5 → 120 permutations is too many to re-execute the engine for; the fallback gives a "neighborhood" sample (the identity, the most-distant ordering, and every adjacent reversal) that captures the most-informative siblings without combinatorial blowup. N=10 (validator max) → 11 fallback perms = 11 engine re-entries — fully bounded. The truncation handles direct-call plans bypassing the validator; in normal MVP traffic it never binds.
+- Alternatives considered: (a) Cap at 6 (= 3!) — rejected; loses the N=4 full set, which is a common query shape. (b) Cap at 720 (= 6!) — rejected; engine re-entry cost is too high. (c) Use a uniformly-random subset — rejected; non-determinism is the wrong property for a calibration layer.
+- Confidence: High — design decision 5 names the cap; D-D3D4-001 closure tightens the fallback to honor it for direct-call long plans.
+- Made-by: orchestrator-mode (the cap value is heuristic; the shape is design-decision-anchored).
+- Commit: `d48aaca` (D4 fallback shape); `d52b491` (truncation closure on D-D3D4-001).
+- Files: src/retrieval/contextualization.py (`_fallback_permutations`, `_FULL_ENUMERATION_THRESHOLD`, `_MAX_PERMUTATIONS`); tests/unit/test_contextualization.py (boundary tests)
+- Spec refs: REQ:09.contextualization (invariant (b))
+- Cross-refs: DEC-050 (executor MVP contract — re-entry preserves the same shape gate)
+
+## DEC-059 — Executor helpers `resolve_step_lemmas`, `build_scope_where`, `validate_plan_shape` are public (DEC-025 boundary mechanics)
+- Status: Accepted
+- Question: The retrieval layer needs the same step-lemma resolution, scope WHERE construction, and MVP plan-shape validation that the executor does. Should these be code-duplicated (engine-private + retrieval-private), extracted into a shared module, or promoted to public on `src/engine/executor.py`?
+- Decision: Promote in place. `_resolve_step_lemmas` → `resolve_step_lemmas`, `_build_scope_where` → `build_scope_where`, `_validate_plan_shape` → `validate_plan_shape`. The functions stay in `src/engine/executor.py`; only the leading underscore is dropped. `src/retrieval/contextualization.py` imports them via the public name. No other modules consume them today.
+- Rationale: All three functions are general utilities (single-step resolution; scope WHERE construction; MVP plan-shape validation), not executor-specific internals. Making them public on the engine module is the cheapest move that respects intent. Code duplication would create drift risk. Extracting to a new shared module (`src/engine/_resolution.py`) is a refactor for refactor's sake — the executor module is already the natural home.
+- Alternatives considered: (a) Code-duplicate in `src/retrieval/contextualization.py` — rejected; the design's "Patterns to Follow" explicitly names DEC-025-style boundaries, and duplicating drift-prone logic across packages violates the spirit. (b) Extract to a new `src/engine/utils.py` or `src/engine/_resolution.py` — rejected; refactor without a value driver. The promoted public API can move later if the engine module grows uncomfortable.
+- Confidence: High.
+- Made-by: orchestrator-mode (low-stakes / high-confidence; mechanical rename).
+- Commit: `1144075` (D3 introduces the rename; updates executor's internal callers and one test comment).
+- Files: src/engine/executor.py (rename); tests/unit/test_executor.py (comment update)
+- Spec refs: REQ:09.pattern-engine (consumer-side); REQ:09.contextualization (consumer-side); REQ:04.matching-rules (resolution rules referenced by both)
+- Cross-refs: DEC-025 (boundary preserved — retrieval imports engine, not the reverse); DEC-052 (engine schema mirror — analogous pattern: shared utilities live in their natural home, mirrored only when boundaries forbid imports)
