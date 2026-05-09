@@ -81,15 +81,15 @@ The parser infers the `mode:` directive from your query. If any node is `concept
 |---|---|---|
 | `>` | precedence (later in scope) | ✅ |
 | `>{m,n}` | precedence with gap window | ✅ |
-| `>>` | strict adjacency | ❌ parses, raises `UnsupportedPlanShape` |
-| `~` | cooccurrence (no order) | ❌ parses, raises `UnsupportedPlanShape` |
-| `+`, `-`, `±` (polarity prefix) | polarity marker on a node | ❌ parses, validator rejects |
+| `>>` | strict adjacency | ❌ parses, validator accepts (`adjacency` is in MVP registry), executor raises `UnsupportedPlanShape` |
+| `~` | cooccurrence (no order) | ❌ parses, validator rejects (`cooccurrence` not in MVP registry's operators) |
+| `+`, `-`, `±` (polarity prefix) | polarity marker on a node | ⚠️ parses, validator accepts (MVP `polarity_support=True`), executor accepts — but **polarity does not affect matching in MVP**. It is recorded on the AST and consumed only by the registry-grounding axis (`Grounding:` line). Do not rely on `+`/`-` to filter results. |
 | `!` (negation prefix) | negate a node | ❌ parses, executor rejects |
 | `[step]` | optional step | ❌ parses, executor rejects |
 | `(a \| b)` | alternative options | ❌ parses, executor rejects |
 | `inverse(...)` | inverse of a sequence | ❌ parses, validator rejects |
 | `=> forward:N` / `=> backward:N` / `=> expand:N` | expansion directive | ❌ parses, validator warns; query reduces |
-| `lemma:X+morph:Y` | compound morph filter | ❌ parses, validator rejects |
+| `lemma:X+morph:Y` | compound morph filter | ❌ parses, executor rejects |
 
 ### Quick Reference: CLI Exit Codes
 
@@ -213,6 +213,7 @@ Contextualization (REQ:09.contextualization):
 
 What this tells you about the corpus:
 - The "faith > hope > love" sequence appears in exactly **one verse** of the NT (1 Cor 13:13), with 2 chain alignments at that verse.
+- Why two candidates with seemingly identical positions? The executor's in-memory join can produce more than one valid `MatchCandidate` for the same verse when the underlying step-resolution path admits more than one chain through the position constraints. Treat repeated `[N] BOOK CH:VV` blocks at the same reference as separate alignment paths, not duplicates to deduplicate.
 - The "faith > love > hope" alternative ordering also produces 2 chains at the same verse — because 1 Cor 13:13 contains all three lemmas in adjacent positions, both directional readings find the same trio. This is a feature of the corpus, not a bug.
 - The lemma πίστις (with πιστεύω) appears 483 times in the NT — a high-frequency baseline. ἐλπίς+ἐλπίζω is far rarer at 84. ἀγάπη+ἀγαπάω sits at 259.
 - Null-distribution sampling is reserved for a future slice; until then, judge significance by comparing observed count (2) against the alternative orderings (also 2 for one ordering, 0 for the rest).
@@ -306,7 +307,7 @@ The CLI output has two top-level sections after the diagnostic stderr line: the 
 | `Query: ...` | echoed query | The DSL string you submitted |
 | `Status:` | validator outcome | `supported` / `partial` / `unsupported` (latter exits with code 2) |
 | `Grounding:` | registry-epistemics axis | `prior-grounded` / `evidence-grounded` / `mixed` / `n/a` (`n/a` for non-concept queries) |
-| `Match type:` | per-result kind | `exact` / `variant` / `conceptual` (taken from the first candidate) |
+| `Match type:` | per-result kind | `exact` / `variant` / `conceptual` (taken from the first candidate). **Omitted entirely** when zero matches were found — for a 0-match result you will not see this line. |
 | `Found N matches (showing first M):` | count + display cap | `M` is your `--limit` flag, default 20 |
 
 **Per-candidate block** (one block per matching verse-chain):
@@ -372,7 +373,7 @@ The caret `^` points at the offending character.
 
 **Recognition (stderr + exit code 2):**
 ```
-validator returned unsupported — cannot execute
+validator rejected plan: status=unsupported
   error: <CODE> at <path>: <message>
 ```
 
@@ -381,8 +382,7 @@ validator returned unsupported — cannot execute
 | Code | Cause | Recovery |
 |---|---|---|
 | `UNSUPPORTED_NODE_TYPE` | Used `token:`, `root:`, `morph:`, `domain:`, or `*` wildcard | Restrict to `concept:` and `lemma:` only |
-| `UNSUPPORTED_OPERATOR` | Used `>>` or `~` | Use `>` (with optional gap) instead |
-| `UNSUPPORTED_POLARITY` | Used `+`, `-`, or `±` | Drop the polarity prefix; future slice will enable polarity |
+| `UNSUPPORTED_OPERATOR` | Used `~` (cooccurrence — not in MVP operators list). Note: `>>` adjacency *is* in the MVP operators list, so it passes the validator and is rejected later by the executor's `UnsupportedPlanShape` check, not here. | Use `>` (with optional gap) instead |
 | `UNSUPPORTED_INVERSE` | Used `inverse(...)` | Reformulate as the explicit inverse sequence (e.g., for `inverse(faith > love)` try `unbelief > hatred`) — see the seeded inverse-claims pairs in canonical-08 |
 | `UNSUPPORTED_COMPOUND_NODE` | Used `lemma:X+morph:Y` | Drop the `+morph:` filter |
 | `UNSUPPORTED_MATCH_MODE` | Used a `mode:` value not in `exact \| variant \| conceptual \| hybrid` | Drop the explicit `mode:` directive — parser will infer correctly |
@@ -407,7 +407,7 @@ validator returned partial — proceeding with reduced executable plan
 
 **Recognition (stderr + exit code 3):**
 ```
-concept not mapped: '<concept-name>' has no lemma rows in the registry
+concept not mapped: '<concept-name>' is not present in the concept registry (no lemma rows). Add it via scripts/db/seed_registry.py or correct the query.
 ```
 
 **Cause:** You used a `concept:` (or bare-word) node whose name is not in the 20-concept seeded list.
@@ -417,26 +417,25 @@ concept not mapped: '<concept-name>' has no lemma rows in the registry
 2. If your concept truly isn't seeded, fall back to direct `lemma:` queries with the Greek lemma you have in mind.
 3. If you don't know the Greek lemma, ask the user — adding new concepts is a registry-extension task, not a query-time recovery.
 
-### `RegistryRequired` — concept used but registry not connected
+### `registry not seeded` — concept lemma mapping missing (handles both `RegistryRequired` and an empty-registry path)
 
 **Recognition (stderr + exit code 3):**
 ```
-RegistryRequired: concept registry is required to resolve concept node '<name>' but none was supplied
+registry not seeded: concept '<name>' has no lemma mapping. Run scripts/db/seed_registry.py first.
 ```
 
-**Cause:** This shouldn't happen via the CLI in normal operation — the CLI always wires the registry. If you see it, it's a bug in the CLI invocation, not your query.
+**Cause:** The CLI caught a `RegistryRequired` (or equivalent empty-mapping) condition. Most commonly, the registry tables exist but have not been seeded for this concept.
 
-**Recovery:** Report the problem to the user; do not retry. This signals a regression in the CLI bootstrap path.
+**Recovery:** This is typically not a query-author problem. Tell the user the registry needs `scripts/db/seed_registry.py` run; do not retry the query unmodified.
 
-### `UnsupportedPlanShape` — executor's second wall
+### `executor rejected plan` (`UnsupportedPlanShape`) — executor's second wall
 
-**Recognition (stderr + exit code 2):**
+**Recognition (stderr + exit code 2, single line):**
 ```
-UnsupportedPlanShape: <message>
-  path: <jsonpath>
+executor rejected plan: <message> (path=<jsonpath>)
 ```
 
-**Cause:** A query that passed the parser AND the validator was still rejected by the executor. This is rare but possible — the executor checks shape invariants the validator does not (e.g., `validate_plan_shape` enforces stricter rules on operators, scope unit, book abbreviations).
+**Cause:** A query that passed the parser AND the validator was still rejected by the executor. The executor checks shape invariants the validator does not — e.g., `validate_plan_shape` rejects `>>` adjacency operators, non-`NodeRef` step types (groups, alternatives, optionals), node types other than `LEMMA`/`CONCEPT`, `negated=True` nodes, non-empty `morph_filters`, `within:` set to anything other than `verse`, and unknown book abbreviations.
 
 **Recovery:**
 1. Read the `path:` to see which AST node was unsupported (e.g., `$.scope.unit`, `$.sequence.steps[2]`, `$.scope.books[1]`).
@@ -444,10 +443,11 @@ UnsupportedPlanShape: <message>
 
 ### `Found 0 matches` — corpus is silent on this query
 
-**Recognition (stdout + exit code 0):**
+**Recognition (stdout + exit code 0; the `Match type:` header line is omitted in this case):**
 ```
-Found 0 matches (showing first 0):
-
+Query: <your DSL>
+Status: supported   Grounding: <label>
+Found 0 matches.
 Contextualization (REQ:09.contextualization):
   Observed count: 0
   ...
@@ -477,7 +477,6 @@ These DSL features are recognized by the parser but raise `UnsupportedPlanShape`
 - `inverse(SEQUENCE)` — find sequences expressing the inverse pattern (e.g., negative pole of trust)
 - `>>` — strict adjacency (no tokens between)
 - `~` — cooccurrence without order
-- `+`, `-`, `±` polarity prefixes
 - `!` negation
 - `[step]` optional step
 - `(a | b | c)` alternative options
