@@ -112,10 +112,28 @@ The concept registry maps concepts to lemmas. For MVP, we need a small but meani
 This gives ~20 concepts with ~30 lemma mappings, enough to test sequence, polarity, and inverse queries across the Pauline corpus.
 
 ### Registry growth strategy
-- The initial set is manually curated
-- AI-assisted expansion will suggest new mappings as users explore queries that reference unmapped concepts
-- Each new mapping must be reviewed before it enters the registry (not auto-approved)
+- The initial set is manually curated (`origin='curated'`)
+- AI-assisted expansion suggests new mappings; suggestions land with `origin='ai_suggested'` and `verification_state='unverified'`
+- Each new mapping must be reviewed before it advances to `verification_state='human_confirmed'` (not auto-approved)
 - The registry is versioned alongside the DSL
+- The seed-time `Polarity` column above is informational; in the schema, polarity is a *claim* (a row in `polarity_claims`, see below) with provenance and evidence — not a column on `concepts`
+
+<!-- REQ:08.registry-epistemics -->
+## Registry Epistemics — Provenance, Evidence, and Grounding
+
+DEC-024 makes the corpus-is-ground-truth principle a non-negotiable architectural rule: registry entries (concept seeds, lemma mappings, polarity claims, inverse claims) are **provisional priors** that must clear corpus evidence before the system treats them as confirmed. Query results that depend on unverified registry entries are **prior-grounded**, not evidence-grounded, and must be labeled as such.
+
+This section is the structural commitment behind that decision. It encodes four invariants that the schema sketch below realizes:
+
+1. **Provenance on every registry row.** Every row in `concepts`, `concept_lemmas`, `polarity_claims`, and `inverse_claims` carries `origin VARCHAR(20) NOT NULL DEFAULT 'curated'`. Allowed values: `'curated'` (human-entered seed), `'ai_suggested'` (AI-proposed, awaiting review), `'lexicon_imported'` (drawn from a third-party lexical source). Origin tracks where the assertion came from; absence of provenance is not allowed.
+
+2. **`confidence` defaults to NULL, never 1.0.** A NULL confidence reads as "we have no probability estimate yet" — distinct from `0.0` ("we estimate zero"). Defaulting to `1.0` would silently convert a curator's unverified assertion into a maximum-confidence corpus fact, which is the failure mode DEC-024 exists to prevent.
+
+3. **Polarity and inverse are evidence-bearing relational claims, not concept properties.** `polarity_claims` and `inverse_claims` are separate tables (not columns on `concepts`), each carrying `evidence_count INTEGER NOT NULL DEFAULT 0` and `verification_state VARCHAR(20) NOT NULL DEFAULT 'unverified'`. The verification state has three values: `'unverified'` (seeded but not corroborated by corpus observation), `'corpus_observed'` (the assertion has been observed in corpus evidence above some threshold), `'human_confirmed'` (a human reviewer has explicitly confirmed it). Seeded rows always start `'unverified'`.
+
+4. **Query results carry a grounding axis.** `ValidationResult.grounding` (and, when the executor lands, `MatchCandidate.grounding`) takes one of `'evidence-grounded'`, `'prior-grounded'`, `'mixed'`, or `null`. The grounding axis is **orthogonal to match-mode** — it answers "is the resolution backed by corpus evidence" rather than "how do we resolve the node". The capability validator's rule 13 (`_rule_13_registry_grounding`) inspects backing registry rows for any concept node referenced with polarity or inverse and emits a `RULE13_PRIOR_GROUNDED` warning when any backing claim is `'unverified'`. The warning is **additive, not blocking**: status remains `supported`; only `grounding` flips to `'prior-grounded'`. Aligns with DEC-007 (results distinguish match types) and DEC-015 (AI explains rather than silently decides).
+
+The seed-script discipline that realizes this commitment: every row inserted at seed time lands `origin='curated'`, `verification_state='unverified'`, `confidence=NULL`. Nothing in the seed flips to `'corpus_observed'` or `'human_confirmed'` — those transitions are downstream slice work.
 
 <!-- REQ:08.ingestion-pipeline -->
 ## Ingestion Pipeline — MVP
@@ -167,30 +185,57 @@ CREATE TABLE tokens (
 );
 
 <!-- REQ:08.concept-table -->
--- Concept registry
+-- Concept registry. Polarity is NOT a column here — it's a claim with
+-- provenance and evidence (see polarity_claims). See REQ:08.registry-epistemics.
 CREATE TABLE concepts (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
-    polarity VARCHAR(5) DEFAULT NULL,  -- '+', '-', or NULL (neutral)
-    description TEXT
+    id                  SERIAL PRIMARY KEY,
+    name                VARCHAR(100) NOT NULL UNIQUE,
+    description         TEXT,
+    origin              VARCHAR(20) NOT NULL DEFAULT 'curated',
+    verification_state  VARCHAR(20) NOT NULL DEFAULT 'unverified'
 );
 
 <!-- REQ:08.concept-lemma-table -->
--- Concept-to-lemma mappings
+-- Concept-to-lemma mappings. confidence defaults to NULL (no estimate),
+-- never 1.0 — see REQ:08.registry-epistemics.
 CREATE TABLE concept_lemmas (
-    concept_id INTEGER REFERENCES concepts(id),
-    lemma TEXT NOT NULL,
-    language VARCHAR(5) DEFAULT 'grc',
-    confidence FLOAT DEFAULT 1.0,
-    PRIMARY KEY (concept_id, lemma, language)
+    id                  SERIAL PRIMARY KEY,
+    concept_id          INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    lemma               TEXT NOT NULL,
+    language            VARCHAR(5) NOT NULL DEFAULT 'grc',
+    confidence          FLOAT DEFAULT NULL,
+    origin              VARCHAR(20) NOT NULL DEFAULT 'curated',
+    verification_state  VARCHAR(20) NOT NULL DEFAULT 'unverified',
+    UNIQUE (lemma, language, concept_id)
 );
 
-<!-- REQ:08.concept-inverse-table -->
--- Polarity inverse relationships
-CREATE TABLE concept_inverses (
-    concept_id INTEGER REFERENCES concepts(id),
-    inverse_concept_id INTEGER REFERENCES concepts(id),
-    PRIMARY KEY (concept_id, inverse_concept_id)
+<!-- REQ:08.polarity-claims-table -->
+-- A claim that a concept has a particular polarity. One row per (concept, pole).
+-- Each claim carries provenance and evidence — it is not a property of the concept.
+CREATE TABLE polarity_claims (
+    id                  SERIAL PRIMARY KEY,
+    concept_id          INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    polarity            VARCHAR(2) NOT NULL,  -- '+', '-', '±'
+    origin              VARCHAR(20) NOT NULL DEFAULT 'curated',
+    evidence_count      INTEGER NOT NULL DEFAULT 0,
+    verification_state  VARCHAR(20) NOT NULL DEFAULT 'unverified',
+    confidence          FLOAT DEFAULT NULL,
+    UNIQUE (concept_id, polarity)
+);
+
+<!-- REQ:08.inverse-claims-table -->
+-- A claim that concept A is the inverse of concept B (asymmetric pair).
+-- Each claim carries provenance and evidence.
+CREATE TABLE inverse_claims (
+    id                  SERIAL PRIMARY KEY,
+    concept_id          INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    inverse_concept_id  INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    origin              VARCHAR(20) NOT NULL DEFAULT 'curated',
+    evidence_count      INTEGER NOT NULL DEFAULT 0,
+    verification_state  VARCHAR(20) NOT NULL DEFAULT 'unverified',
+    confidence          FLOAT DEFAULT NULL,
+    UNIQUE (concept_id, inverse_concept_id),
+    CHECK (concept_id <> inverse_concept_id)
 );
 ```
 
@@ -198,7 +243,9 @@ CREATE TABLE concept_inverses (
 - `tokens(book, chapter, verse, position)` — verse-scoped sequence search
 - `tokens(lemma)` — lemma lookup
 - `tokens(global_position)` — cross-verse sequence search
-- `concept_lemmas(lemma)` — reverse lookup from lemma to concepts
+- `concept_lemmas(lemma, language)` — reverse lookup from lemma to concepts
+- `polarity_claims(concept_id)` — fetch claims for a given concept
+- `inverse_claims(concept_id)` — fetch inverse pairs for a given concept
 
 ## Scope Boundaries
 
@@ -229,6 +276,6 @@ CREATE TABLE concept_inverses (
 - Volatility: Low (this is a scoping decision, unlikely to change once made)
 
 ## References
-- Decisions: DEC-020
+- Decisions: DEC-020, DEC-024 (registry epistemics), DEC-026 (BB book codes), DEC-038–DEC-048 (ingestion entrypoint)
 - Assumptions: ASM-003, ASM-005
 - Prior docs: 04_node-ontology.md, 06_capability-validator.md
