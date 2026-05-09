@@ -82,18 +82,18 @@ def execute(
     Raises :class:`ConceptNotMapped` if a concept node resolves to no
     lemmas in the registry (concept absent or not seeded).
     """
-    sequence = _validate_plan_shape(plan, scope)
+    sequence = validate_plan_shape(plan, scope)
 
     # The validated MVP shape guarantees every step is a NodeRef.
     steps: list[NodeRef] = [step for step in sequence.steps]  # type: ignore[misc]
 
     language = scope.language or "grc"
     resolved_lemmas: list[list[str]] = [
-        _resolve_step_lemmas(step, language, concept_registry) for step in steps
+        resolve_step_lemmas(step, language, concept_registry) for step in steps
     ]
 
     # Validate book abbreviations up front so we fail loudly before any SQL.
-    base_where = _build_scope_where(scope)
+    base_where = build_scope_where(scope)
 
     has_concept_step = any(step.type == NodeType.CONCEPT for step in steps)
     match_type: Literal["exact", "conceptual"] = (
@@ -104,7 +104,7 @@ def execute(
         # Step 0: seed with all candidates whose lemma is in the resolved set.
         step0_lemmas = resolved_lemmas[0]
         if not step0_lemmas:
-            # Defensive: _resolve_step_lemmas raises ConceptNotMapped on
+            # Defensive: resolve_step_lemmas raises ConceptNotMapped on
             # empty CONCEPT resolution and a LEMMA step always returns one
             # element, so this branch is only reachable if a future caller
             # mutates resolved_lemmas. Keep the early-return for safety.
@@ -204,7 +204,7 @@ def _token_columns() -> list:
     ]
 
 
-def _validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExpr:
+def validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExpr:
     """Enforce the MVP contract; return the validated SequenceExpr.
 
     Raises :class:`UnsupportedPlanShape` on any violation. The validator
@@ -311,7 +311,7 @@ def _validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExp
     return sequence
 
 
-def _resolve_step_lemmas(
+def resolve_step_lemmas(
     step: NodeRef,
     language: str,
     concept_registry: "ConceptRegistry | None",
@@ -334,13 +334,13 @@ def _resolve_step_lemmas(
         if not lemmas:
             raise ConceptNotMapped(step.value)
         return lemmas
-    # Unreachable — _validate_plan_shape rejects other node types.
+    # Unreachable — validate_plan_shape rejects other node types.
     raise UnsupportedPlanShape(  # pragma: no cover
         f"unexpected node type in resolution: {step.type.value!r}"
     )
 
 
-def _build_scope_where(scope: ScopeConstraint) -> list:
+def build_scope_where(scope: ScopeConstraint) -> list:
     """Build the base WHERE clauses for the given scope.
 
     Returns a list of SQLAlchemy ColumnElement clauses that callers ``.where()``

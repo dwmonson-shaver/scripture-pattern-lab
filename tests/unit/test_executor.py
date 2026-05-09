@@ -166,7 +166,7 @@ def test_raises_registry_required_on_concept_without_registry() -> None:
     # Engine connect() will be invoked AFTER resolution attempts,
     # but RegistryRequired raises during resolution. We still need a
     # context-manager-compatible mock for safety — but the connect()
-    # context never enters because we raise from _resolve_step_lemmas.
+    # context never enters because we raise from resolve_step_lemmas.
     engine = _make_engine()
     with pytest.raises(RegistryRequired) as excinfo:
         execute(plan, plan.scope, engine, concept_registry=None)
