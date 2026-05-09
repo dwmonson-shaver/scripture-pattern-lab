@@ -9,6 +9,8 @@ from src.engine.models import (
     Contextualization,
     ExpansionDirection,
     ExpansionDirective,
+    ExplainedResult,
+    ExplainedResultSet,
     GapConstraint,
     InverseExpr,
     MatchCandidate,
@@ -929,3 +931,134 @@ class TestRetrievalResult:
         )
         restored = RetrievalResult.model_validate_json(rr.model_dump_json())
         assert restored == rr
+
+
+class TestExplainedResult:
+    def test_construct_minimal(self) -> None:
+        er = ExplainedResult(
+            reference="1Cor 13:13",
+            text_display="πίστις, ἐλπίς, ἀγάπη",
+            match_type="conceptual",
+            explanation="The lemmas faith, hope, and love appear in this order at 1Cor 13:13.",
+        )
+        assert er.reference == "1Cor 13:13"
+        assert er.match_type == "conceptual"
+        assert er.score is None
+
+    def test_construct_with_score(self) -> None:
+        er = ExplainedResult(
+            reference="1Cor 13:13",
+            text_display="πίστις",
+            match_type="exact",
+            score=0.92,
+            explanation="exact lemma match",
+        )
+        assert er.score == 0.92
+
+    def test_match_type_literal_validated(self) -> None:
+        with pytest.raises(ValidationError):
+            ExplainedResult(
+                reference="X",
+                text_display="X",
+                match_type="other",  # type: ignore[arg-type]
+                explanation="x",
+            )
+
+    def test_frozen(self) -> None:
+        er = ExplainedResult(
+            reference="X",
+            text_display="X",
+            match_type="exact",
+            explanation="x",
+        )
+        with pytest.raises(ValidationError):
+            er.score = 1.0
+
+
+class TestExplainedResultSet:
+    def test_construct_minimal(self) -> None:
+        ers = ExplainedResultSet(
+            query_shown="faith > hope > love",
+            validation_notes=[],
+            results=[],
+            summary="No matches found in the corpus.",
+        )
+        assert ers.nl_source is None
+        assert ers.contextualization is None
+        assert ers.results == []
+        assert ers.validation_notes == []
+
+    def test_construct_with_nl_source_and_validation_notes(self) -> None:
+        ers = ExplainedResultSet(
+            query_shown="lemma:πίστις > lemma:ἐλπίς",
+            nl_source="how often does faith come before hope?",
+            validation_notes=["warning: UNSUPPORTED_EXPANSION at sequence.expansion"],
+            results=[],
+            summary="The pattern appears N times.",
+        )
+        assert ers.nl_source.startswith("how often")
+        assert len(ers.validation_notes) == 1
+
+    def test_construct_with_results_and_contextualization(self) -> None:
+        ctx = Contextualization(
+            observed_count=2,
+            node_baselines=[],
+            alternative_orderings=[],
+            alternative_orderings_capped=False,
+        )
+        ers = ExplainedResultSet(
+            query_shown="faith > hope > love",
+            validation_notes=[],
+            results=[
+                ExplainedResult(
+                    reference="1Cor 13:13",
+                    text_display="πίστις, ἐλπίς, ἀγάπη",
+                    match_type="conceptual",
+                    explanation="all three concepts at 1Cor 13:13",
+                ),
+            ],
+            contextualization=ctx,
+            summary="The pattern appears 2 times.",
+        )
+        assert ers.contextualization is not None
+        assert ers.contextualization.observed_count == 2
+        assert len(ers.results) == 1
+
+    def test_summary_required(self) -> None:
+        with pytest.raises(ValidationError):
+            ExplainedResultSet(
+                query_shown="x",
+                validation_notes=[],
+                results=[],
+                # summary missing
+            )  # type: ignore[call-arg]
+
+    def test_frozen(self) -> None:
+        ers = ExplainedResultSet(
+            query_shown="x",
+            validation_notes=[],
+            results=[],
+            summary="x",
+        )
+        with pytest.raises(ValidationError):
+            ers.summary = "other"
+
+    def test_json_round_trip(self) -> None:
+        ers = ExplainedResultSet(
+            query_shown="faith > hope > love",
+            nl_source=None,
+            validation_notes=["info: x"],
+            results=[
+                ExplainedResult(
+                    reference="1Cor 13:13",
+                    text_display="πίστις, ἐλπίς, ἀγάπη",
+                    match_type="conceptual",
+                    score=None,
+                    explanation="three lemmas adjacent at 1Cor 13:13",
+                ),
+            ],
+            contextualization=None,
+            summary="The pattern appears 2 times.",
+        )
+        restored = ExplainedResultSet.model_validate_json(ers.model_dump_json())
+        assert restored == ers

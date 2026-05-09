@@ -480,3 +480,34 @@ class RetrievalResult(BaseModel):
     candidates: list[MatchCandidate]
     stages_used: list[str]
     contextualization: Contextualization | None = None
+
+
+# -- ExplainedResult / ExplainedResultSet -------------------------------------
+#
+# Per canonical-09 §9 (REQ:09.result-explainer): the user-facing prose envelope
+# returned by ``src/nlp/explainer.py::explain``. The MVP explainer is
+# deterministic / template-based for all match types (DEC-061 amends the
+# canonical "LLM explanation for conceptual matches" sentence — LLM-backed
+# prose is deferred to a named bucket). ``score`` is optional because the
+# scoring layer has not shipped; populated when scoring lands.
+
+
+class ExplainedResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    reference: str
+    text_display: str
+    match_type: Literal["exact", "variant", "conceptual"]
+    score: float | None = None
+    explanation: str
+
+
+class ExplainedResultSet(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    query_shown: str
+    nl_source: str | None = None
+    validation_notes: list[str]
+    results: list[ExplainedResult]
+    contextualization: Contextualization | None = None
+    summary: str
