@@ -35,24 +35,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     `app.state.registry` are left as `None`. The dependency providers
     will then raise 503 on any request that hits them — but tests can
     install `dependency_overrides` to bypass that.
-    """
-    url = os.environ.get("DATABASE_URL")
-    if url:
-        engine = build_engine_from_env()
-        app.state.engine = engine
-        app.state.registry = ConceptRegistry(engine)
-        logger.info("lifespan startup: engine + registry constructed")
-    else:
-        app.state.engine = None
-        app.state.registry = None
-        logger.warning(
-            "lifespan startup: DATABASE_URL unset; engine + registry left as None"
-        )
 
+    The local `engine` reference is captured outside the try/finally so
+    that if any startup step after `build_engine_from_env()` raises
+    (e.g., a future registry pre-warm), `engine.dispose()` still runs.
+    """
+    engine = None
     try:
+        url = os.environ.get("DATABASE_URL")
+        if url:
+            engine = build_engine_from_env()
+            registry = ConceptRegistry(engine)
+            app.state.engine = engine
+            app.state.registry = registry
+            logger.info("lifespan startup: engine + registry constructed")
+        else:
+            app.state.engine = None
+            app.state.registry = None
+            logger.warning(
+                "lifespan startup: DATABASE_URL unset; engine + registry left as None"
+            )
         yield
     finally:
-        engine = getattr(app.state, "engine", None)
         if engine is not None:
             engine.dispose()
             logger.info("lifespan shutdown: engine disposed")

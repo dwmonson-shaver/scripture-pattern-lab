@@ -10,6 +10,12 @@ from src.app.main import create_app
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    # Not used as a context manager: lifespan is intentionally not
+    # triggered. /health is liveness-only (DEC-G10) and must return
+    # 200 even before the engine is constructed; bypassing the
+    # lifespan keeps these tests focused on the route's no-DB
+    # contract rather than on lifespan semantics (covered separately
+    # in test_app_main.py).
     monkeypatch.delenv("DATABASE_URL", raising=False)
     return TestClient(create_app())
 

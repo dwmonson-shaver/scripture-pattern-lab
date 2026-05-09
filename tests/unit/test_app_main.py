@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -85,13 +84,13 @@ class TestDependencyProviders:
     def test_overrides_supersede_state_lookup(
         self, app_with_overrides: FastAPI
     ) -> None:
-        captured: dict = {}
+        captured: dict[str, str] = {}
 
         @app_with_overrides.get("/_probe")
         def _probe(
-            engine=Depends(get_engine),
-            registry=Depends(get_concept_registry),
-        ):
+            engine: Engine = Depends(get_engine),
+            registry: ConceptRegistry = Depends(get_concept_registry),
+        ) -> dict[str, bool]:
             captured["engine_repr"] = repr(engine)
             captured["registry_type"] = type(registry).__name__
             return {"ok": True}
@@ -107,7 +106,7 @@ class TestDependencyProviders:
     ) -> None:
         # No overrides installed; state.engine is None per lifespan.
         @app_no_db.get("/_probe")
-        def _probe(engine=Depends(get_engine)):
+        def _probe(engine: Engine = Depends(get_engine)) -> dict[str, bool]:
             return {"ok": True}
 
         with TestClient(app_no_db) as client:
@@ -120,7 +119,9 @@ class TestDependencyProviders:
         self, app_no_db: FastAPI
     ) -> None:
         @app_no_db.get("/_probe")
-        def _probe(registry=Depends(get_concept_registry)):
+        def _probe(
+            registry: ConceptRegistry = Depends(get_concept_registry),
+        ) -> dict[str, bool]:
             return {"ok": True}
 
         with TestClient(app_no_db) as client:

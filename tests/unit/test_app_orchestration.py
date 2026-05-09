@@ -21,6 +21,7 @@ from src.engine.models import (
 )
 from src.engine.parser import ParseError
 from src.ontology.registry import ConceptRegistry
+from src.validation.validator import ValidationFinding, ValidationResult
 
 
 @pytest.fixture
@@ -64,7 +65,7 @@ class TestPipelineExceptionsPropagate:
     def test_unsupported_plan_shape_propagates(
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
-        def boom(*args, **kwargs):
+        def boom(*args: object, **kwargs: object) -> None:
             raise UnsupportedPlanShape("boom", path="$.sequence.steps[0]")
 
         monkeypatch.setattr("src.app.orchestration.retrieve", boom)
@@ -75,7 +76,7 @@ class TestPipelineExceptionsPropagate:
     def test_concept_not_mapped_propagates(
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
-        def boom(*args, **kwargs):
+        def boom(*args: object, **kwargs: object) -> None:
             raise ConceptNotMapped("foo")
 
         monkeypatch.setattr("src.app.orchestration.retrieve", boom)
@@ -86,7 +87,7 @@ class TestPipelineExceptionsPropagate:
     def test_registry_required_propagates(
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
-        def boom(*args, **kwargs):
+        def boom(*args: object, **kwargs: object) -> None:
             raise RegistryRequired("faith")
 
         monkeypatch.setattr("src.app.orchestration.retrieve", boom)
@@ -178,3 +179,55 @@ class TestHappyPathWithMockedRetrieve:
         assert len(resp.result.candidates) == 1
         assert resp.result.candidates[0].reference == "Mat 1:1"
         assert len(resp.explanation.results) == 1
+
+
+class TestPartialValidationPath:
+    """When validate() returns status='partial', the orchestrator must
+    proceed with validation.executable_plan and surface the partial
+    findings on the response envelope (so HTTP consumers can render
+    warnings)."""
+
+    def test_partial_status_threads_findings_into_response(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        # Stub validate() to return status="partial" with one warning.
+        warning = ValidationFinding(
+            severity="warning",
+            code="PARTIAL_REDUCTION",
+            path="$.sequence.steps[1]",
+            message="reduced expansion directive",
+            remediation=None,
+        )
+
+        def stub_validate(plan, *args: object, **kwargs: object) -> ValidationResult:
+            return ValidationResult(
+                status="partial",
+                executable_plan=plan,
+                findings=[warning],
+                engine_version="0.1.0",
+                grounding=None,
+            )
+
+        empty_result = RetrievalResult(
+            candidates=[],
+            stages_used=["pattern_engine"],
+            contextualization=Contextualization(
+                observed_count=0,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+                null_distribution=None,
+            ),
+        )
+
+        monkeypatch.setattr("src.app.orchestration.validate", stub_validate)
+        monkeypatch.setattr(
+            "src.app.orchestration.retrieve", lambda *a, **kw: empty_result
+        )
+
+        resp = run_dsl_query("πίστις", fake_engine, empty_registry)
+
+        assert resp.validation.status == "partial"
+        assert len(resp.validation.findings) == 1
+        assert resp.validation.findings[0].code == "PARTIAL_REDUCTION"
+        assert resp.result is empty_result
