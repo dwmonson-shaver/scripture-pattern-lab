@@ -147,7 +147,14 @@ class MatchCandidate:
 
 **Interface**:
 ```python
-def retrieve(plan: QueryPlan, *, contextualize: bool = False) -> RetrievalResult
+def retrieve(
+    plan: QueryPlan,
+    scope: ScopeConstraint,
+    engine: Engine,
+    *,
+    contextualize: bool = False,
+    registry: ConceptRegistry | None = None,
+) -> RetrievalResult
 
 class RetrievalResult:
     candidates: list[MatchCandidate]
@@ -188,7 +195,7 @@ def contextualize(
     scope: ScopeConstraint,
     candidates: list[MatchCandidate],
     engine: Engine,
-    registry: ConceptRegistry,
+    registry: ConceptRegistry | None = None,
 ) -> Contextualization
 
 class NodeBaseline:
@@ -220,7 +227,7 @@ class Contextualization:
 
 **Invariants**:
 - (a) Every result set produced with `contextualize=True` carries node-level baseline counts for every constituent node.
-- (b) Every result set carries alternative-ordering counts for the same node-set, capped at `min(N!, 24)` permutations; for N ≥ 5, the cap-fallback is identity + reverse + N pairwise swaps.
+- (b) Every result set carries alternative-ordering counts for the same node-set, capped at `min(N!, 24)` permutations; for N ≥ 5, the cap-fallback is identity + reverse + (N − 1) adjacent pairwise swaps, truncated at 24.
 - (c) A null-distribution slot is reserved on the envelope; MVP always sets it to `None` (sampling protocol pending future `/research` and `/design`).
 - (d) The explainer (§9) must surface contextualization in user-facing output, not just the raw observed count.
 
