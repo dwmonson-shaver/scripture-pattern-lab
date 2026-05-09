@@ -1,10 +1,17 @@
 """Capability validator — checks QueryPlans against engine capabilities.
 
 Deterministic component (no AI). Implements 12 sequential validation rules
-from docs/canonical/06_capability-validator.md.
+from docs/canonical/06_capability-validator.md plus a 13th additive
+"registry grounding" rule (REQ:08.registry-epistemics) that labels a
+QueryPlan as ``evidence-grounded`` / ``prior-grounded`` / ``mixed`` based
+on the verification state of any concept-registry rows it touches.
 
 Interface per docs/canonical/09_backend-service-boundaries.md:
-    def validate(plan: QueryPlan, registry: CapabilityRegistry) -> ValidationResult
+    def validate(
+        plan: QueryPlan,
+        capability_registry: CapabilityRegistry,
+        concept_registry: ConceptRegistry | None = None,
+    ) -> ValidationResult
 """
 
 from __future__ import annotations
@@ -18,12 +25,14 @@ from src.engine.models import (
     GroupExpr,
     InverseExpr,
     NodeRef,
+    NodeType,
     OperatorType,
     OptionalExpr,
     OrderOperator,
     QueryPlan,
     SequenceExpr,
 )
+from src.ontology.registry import ConceptRegistry
 from src.validation.registry import CapabilityRegistry
 
 # ---------------------------------------------------------------------------
@@ -44,7 +53,14 @@ class ValidationFinding(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    """Result of validating a QueryPlan against the capability registry."""
+    """Result of validating a QueryPlan against the capability registry.
+
+    The optional ``grounding`` axis (REQ:08.registry-epistemics, decision #6)
+    is orthogonal to ``status`` and ``match_mode``: it answers "is the
+    resolution backed by corpus evidence" for any concept-registry-backed
+    nodes in the plan. ``None`` means rule 13 was not run (no
+    ``concept_registry`` was passed) or no concept nodes were inspected.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -52,6 +68,7 @@ class ValidationResult(BaseModel):
     executable_plan: QueryPlan | None
     findings: list[ValidationFinding]
     engine_version: str
+    grounding: Literal["evidence-grounded", "prior-grounded", "mixed"] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -515,14 +532,177 @@ _RULES = [
 ]
 
 
-def validate(plan: QueryPlan, registry: CapabilityRegistry) -> ValidationResult:
+# ---------------------------------------------------------------------------
+# Rule 13: registry grounding (REQ:08.registry-epistemics)
+# ---------------------------------------------------------------------------
+#
+# Lives outside the _RULES list because its signature differs (it takes a
+# ConceptRegistry as a third argument and returns a (findings, grounding)
+# tuple instead of just findings). Per design decision #5, this rule is
+# additive: it never pushes status to `unsupported` or `partial`. Per
+# decision #6, the grounding axis is orthogonal to match_mode.
+
+
+def _rule_13_registry_grounding(
+    plan: QueryPlan,
+    concept_registry: ConceptRegistry,
+) -> tuple[
+    list[ValidationFinding],
+    Literal["evidence-grounded", "prior-grounded", "mixed"] | None,
+]:
+    """Walk the plan; for every concept ``NodeRef`` (including those nested
+    inside an ``InverseExpr``), look up backing registry rows. Emit a
+    ``RULE13_PRIOR_GROUNDED`` warning when any backing claim is unverified.
+
+    Returns ``(findings, grounding)`` where ``grounding`` is:
+      - ``None`` if no concept nodes were inspected (the registry had no
+        rows for any of them, or the plan had no concept nodes at all);
+      - ``"evidence-grounded"`` if every inspected concept is
+        corpus-observed or human-confirmed;
+      - ``"prior-grounded"`` if every inspected concept is unverified;
+      - ``"mixed"`` if both kinds were observed.
+    """
+    findings: list[ValidationFinding] = []
+    verified_seen = False
+    unverified_seen = False
+
+    inside_inverse = isinstance(plan.sequence, InverseExpr)
+    concept_refs = [
+        (path, node)
+        for path, node in _collect_node_refs(plan.sequence)
+        if node.type == NodeType.CONCEPT
+    ]
+
+    for path, node in concept_refs:
+        # Determine whether the concept exists in the registry at all. If it
+        # doesn't, we silently skip — no claim means nothing to flag.
+        concepts = concept_registry.get_by_lemma(node.value)
+        concept_in_registry = bool(concepts) or _concept_known_by_name(
+            concept_registry, node.value
+        )
+        if not concept_in_registry:
+            continue
+
+        polarity = node.polarity if node.polarity in ("+", "-") else None
+        is_prior = concept_registry.is_prior_grounded(node.value, polarity)
+        if is_prior:
+            unverified_seen = True
+            findings.append(
+                ValidationFinding(
+                    severity="warning",
+                    code="RULE13_PRIOR_GROUNDED",
+                    path=path,
+                    message=(
+                        f"Concept '{node.value}' is backed by an unverified "
+                        "registry claim; results are prior-grounded, not "
+                        "corpus-evidence-grounded."
+                    ),
+                )
+            )
+        else:
+            verified_seen = True
+
+        # Inverse-context: a concept appearing inside an InverseExpr also
+        # depends on the inverse-claim graph. If any inverse claim is
+        # unverified, emit an additional warning. Only inspected when the
+        # concept resolves to at least one Concept row in the registry.
+        if inside_inverse and concepts:
+            for concept in concepts:
+                inverse_claims = concept_registry.get_inverse_claims(concept.id)
+                if not inverse_claims:
+                    continue
+                if any(
+                    claim.verification_state == "unverified"
+                    for claim in inverse_claims
+                ):
+                    unverified_seen = True
+                    findings.append(
+                        ValidationFinding(
+                            severity="warning",
+                            code="RULE13_PRIOR_GROUNDED",
+                            path=path,
+                            message=(
+                                f"Inverse claim for concept '{node.value}' "
+                                "is unverified; inverse() resolution is "
+                                "prior-grounded."
+                            ),
+                        )
+                    )
+                else:
+                    verified_seen = True
+
+    if not verified_seen and not unverified_seen:
+        grounding: (
+            Literal["evidence-grounded", "prior-grounded", "mixed"] | None
+        ) = None
+    elif verified_seen and unverified_seen:
+        grounding = "mixed"
+    elif unverified_seen:
+        grounding = "prior-grounded"
+    else:
+        grounding = "evidence-grounded"
+
+    return findings, grounding
+
+
+def _concept_known_by_name(
+    concept_registry: ConceptRegistry, name: str
+) -> bool:
+    """Best-effort check that a concept exists in the registry by name.
+
+    ``ConceptRegistry`` exposes ``get_by_lemma`` (lemma → concepts) and
+    ``is_prior_grounded`` (name → bool). For rule 13 we want to skip
+    concepts that are entirely absent from the registry (so we don't flag
+    every ad-hoc concept the user types). ``is_prior_grounded`` returns
+    ``False`` both for "absent" and for "present but verified" — we use
+    ``get_polarity_claims`` after a name lookup as a tiebreaker.
+
+    Implementation detail: with no engine attached (``ConceptRegistry.empty``)
+    every method returns empty; this helper returns ``False`` and the caller
+    silently skips. With an engine attached, we query for the concept by
+    name and return ``True`` iff a row exists.
+    """
+    if concept_registry.engine is None:
+        return False
+    from sqlalchemy import select
+
+    from src.ontology.registry import concepts_table
+
+    stmt = select(concepts_table.c.id).where(concepts_table.c.name == name)
+    with concept_registry.engine.connect() as connection:
+        return connection.execute(stmt).scalar_one_or_none() is not None
+
+
+def validate(
+    plan: QueryPlan,
+    capability_registry: CapabilityRegistry,
+    concept_registry: ConceptRegistry | None = None,
+) -> ValidationResult:
     """Validate a QueryPlan against the capability registry.
 
-    Returns a ValidationResult with status, executable plan, and findings.
+    The first parameter is the engine-capability registry (renamed from
+    ``registry`` for clarity; existing positional callers are unaffected).
+    The optional ``concept_registry`` engages rule 13 (registry grounding):
+    when ``None`` is passed, rule 13 is skipped and ``grounding`` is
+    ``None`` on the result. When provided, rule 13 runs after the existing
+    twelve rules; its findings are appended and the resulting grounding
+    label is set on the ``ValidationResult``.
+
+    Returns a ValidationResult with status, executable plan, findings, and
+    optional grounding label.
     """
     findings: list[ValidationFinding] = []
     for rule in _RULES:
-        findings.extend(rule(plan, registry))
+        findings.extend(rule(plan, capability_registry))
+
+    grounding: (
+        Literal["evidence-grounded", "prior-grounded", "mixed"] | None
+    ) = None
+    if concept_registry is not None:
+        rule13_findings, grounding = _rule_13_registry_grounding(
+            plan, concept_registry
+        )
+        findings.extend(rule13_findings)
 
     errors = [f for f in findings if f.severity == "error"]
     warnings = [f for f in findings if f.severity == "warning"]
@@ -532,34 +712,54 @@ def validate(plan: QueryPlan, registry: CapabilityRegistry) -> ValidationResult:
             status="supported",
             executable_plan=plan,
             findings=findings,
-            engine_version=registry.version,
+            engine_version=capability_registry.version,
+            grounding=grounding,
         )
 
     if not errors and warnings:
-        # Warnings only (e.g., unsupported expansion) — partial
-        reduced = _reduce_plan(plan, registry)
+        # Warnings only (e.g., unsupported expansion or rule-13 prior-grounded)
+        # — status is `partial` only when reduction happened, otherwise
+        # `supported`. Rule 13 alone (a warning that doesn't change the
+        # plan) should leave the plan supported with grounding set; a
+        # non-rule-13 warning still triggers reduction. Distinguish by
+        # whether any non-rule-13 warnings exist.
+        non_rule13_warnings = [
+            f for f in warnings if f.code != "RULE13_PRIOR_GROUNDED"
+        ]
+        if not non_rule13_warnings:
+            return ValidationResult(
+                status="supported",
+                executable_plan=plan,
+                findings=findings,
+                engine_version=capability_registry.version,
+                grounding=grounding,
+            )
+        reduced = _reduce_plan(plan, capability_registry)
         if reduced is None:
             reduced = plan
         return ValidationResult(
             status="partial",
             executable_plan=reduced,
             findings=findings,
-            engine_version=registry.version,
+            engine_version=capability_registry.version,
+            grounding=grounding,
         )
 
     # Has errors — try partial reduction
-    reduced = _reduce_plan(plan, registry)
+    reduced = _reduce_plan(plan, capability_registry)
     if reduced is not None:
         return ValidationResult(
             status="partial",
             executable_plan=reduced,
             findings=findings,
-            engine_version=registry.version,
+            engine_version=capability_registry.version,
+            grounding=grounding,
         )
 
     return ValidationResult(
         status="unsupported",
         executable_plan=None,
         findings=findings,
-        engine_version=registry.version,
+        engine_version=capability_registry.version,
+        grounding=grounding,
     )
