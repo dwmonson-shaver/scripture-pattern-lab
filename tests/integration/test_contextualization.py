@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, text
 
+from src.engine.executor import execute
 from src.engine.models import (
     NodeRef,
     NodeType,
@@ -28,7 +29,10 @@ from src.engine.models import (
 )
 from src.ingestion.db import get_engine
 from src.ontology.registry import ConceptRegistry
-from src.retrieval.contextualization import compute_node_baselines
+from src.retrieval.contextualization import (
+    compute_alternative_orderings,
+    compute_node_baselines,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGEST_SCRIPT = REPO_ROOT / "scripts" / "db" / "ingest_corpus.py"
@@ -185,3 +189,52 @@ def test_book_scope_filter_reduces_count(
     )[0]
 
     assert scoped.count <= unscoped.count
+
+
+# ---------------------------------------------------------------------------
+# Alternative-ordering counts against the seeded corpus
+# ---------------------------------------------------------------------------
+
+
+def test_faith_hope_love_alternative_orderings(
+    loaded_full_corpus_with_registry: tuple[Engine, ConceptRegistry],
+) -> None:
+    """3-concept sequence yields 6 orderings; observed ordering matches execute()."""
+    engine, registry = loaded_full_corpus_with_registry
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.CONCEPT, value="faith"),
+            NodeRef(type=NodeType.CONCEPT, value="hope"),
+            NodeRef(type=NodeType.CONCEPT, value="love"),
+        ],
+        operators=[
+            OrderOperator(type=OperatorType.PRECEDENCE),
+            OrderOperator(type=OperatorType.PRECEDENCE),
+        ],
+    )
+    plan = _make_plan(seq)
+
+    orderings, capped = compute_alternative_orderings(
+        plan, plan.scope, engine, registry=registry
+    )
+
+    assert capped is False
+    assert len(orderings) == 6  # 3! permutations
+
+    # Identity ordering is in the list and marked observed
+    identity = [o for o in orderings if o.permutation == [0, 1, 2]]
+    assert len(identity) == 1
+    assert identity[0].is_observed is True
+    assert identity[0].sequence_label == "faith > hope > love"
+
+    # Identity count must equal what execute() returns directly for the same plan
+    expected_observed = len(execute(plan, plan.scope, engine, concept_registry=registry))
+    assert identity[0].count == expected_observed
+
+    # All counts are non-negative integers
+    for o in orderings:
+        assert o.count >= 0
+
+    # Exactly one ordering is the observed one; the other 5 are alternatives
+    assert sum(1 for o in orderings if o.is_observed) == 1
+    assert sum(1 for o in orderings if not o.is_observed) == 5
