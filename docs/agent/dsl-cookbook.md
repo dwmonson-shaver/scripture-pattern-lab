@@ -153,7 +153,15 @@ export DATABASE_URL="postgresql://USER:PASS@HOST:5432/DB"
 scripts/query.py "faith > hope > love"
 ```
 
-The password is redacted (`***`) in the diagnostic startup line. If `DATABASE_URL` is unset, you get a `RuntimeError`.
+If the script is not marked executable (`chmod +x`), prefix with `python`:
+
+```bash
+python scripts/query.py "faith > hope > love"
+```
+
+The password is redacted (`***`) in the diagnostic startup line.
+
+**If `DATABASE_URL` is unset**, you get a Python `RuntimeError` traceback — this falls under exit code `1` (uncaught exception), not the user-error code `2`. Recovery: ask the user how to connect (docker-compose? direct local Postgres? `.env` sourcing?). Do not invent a connection string; the project does not commit one.
 
 The `--limit N` flag caps how many candidate verses are printed (default 20). It does not affect the contextualization envelope, which always describes the full result set.
 
