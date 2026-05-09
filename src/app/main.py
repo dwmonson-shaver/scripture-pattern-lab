@@ -21,6 +21,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from src.app.routes import health as health_routes
+from src.app.routes import query as query_routes
 from src.ingestion.db import get_engine as build_engine_from_env
 from src.ontology.registry import ConceptRegistry
 
@@ -79,7 +80,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     fastapi_app.include_router(health_routes.router)
-    # Query route registered in G5.
+    fastapi_app.include_router(query_routes.router)
     return fastapi_app
 
 
