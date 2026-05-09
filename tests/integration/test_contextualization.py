@@ -33,6 +33,7 @@ from src.retrieval.contextualization import (
     compute_alternative_orderings,
     compute_node_baselines,
 )
+from src.retrieval.retrieve import retrieve
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGEST_SCRIPT = REPO_ROOT / "scripts" / "db" / "ingest_corpus.py"
@@ -238,3 +239,76 @@ def test_faith_hope_love_alternative_orderings(
     # Exactly one ordering is the observed one; the other 5 are alternatives
     assert sum(1 for o in orderings if o.is_observed) == 1
     assert sum(1 for o in orderings if not o.is_observed) == 5
+
+
+# ---------------------------------------------------------------------------
+# retrieve() pipeline (D5)
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_default_off_yields_no_contextualization(
+    loaded_full_corpus_with_registry: tuple[Engine, ConceptRegistry],
+) -> None:
+    """Engine-layer default-off: retrieve() returns RetrievalResult with no envelope."""
+    engine, registry = loaded_full_corpus_with_registry
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.CONCEPT, value="faith"),
+            NodeRef(type=NodeType.CONCEPT, value="hope"),
+            NodeRef(type=NodeType.CONCEPT, value="love"),
+        ],
+        operators=[
+            OrderOperator(type=OperatorType.PRECEDENCE),
+            OrderOperator(type=OperatorType.PRECEDENCE),
+        ],
+    )
+    plan = _make_plan(seq)
+
+    result = retrieve(plan, plan.scope, engine, registry=registry)
+
+    assert result.candidates  # the slice's flagship sequence yields matches
+    assert result.stages_used == ["symbolic"]
+    assert result.contextualization is None
+
+
+def test_retrieve_with_contextualize_attaches_envelope(
+    loaded_full_corpus_with_registry: tuple[Engine, ConceptRegistry],
+) -> None:
+    """contextualize=True populates baselines + alt-orderings; null_distribution stays None."""
+    engine, registry = loaded_full_corpus_with_registry
+    seq = SequenceExpr(
+        steps=[
+            NodeRef(type=NodeType.CONCEPT, value="faith"),
+            NodeRef(type=NodeType.CONCEPT, value="hope"),
+            NodeRef(type=NodeType.CONCEPT, value="love"),
+        ],
+        operators=[
+            OrderOperator(type=OperatorType.PRECEDENCE),
+            OrderOperator(type=OperatorType.PRECEDENCE),
+        ],
+    )
+    plan = _make_plan(seq)
+
+    result = retrieve(
+        plan, plan.scope, engine, contextualize=True, registry=registry
+    )
+
+    assert result.candidates  # flagship sequence yields matches
+    assert result.contextualization is not None
+    ctx = result.contextualization
+
+    # Observed count matches what was returned by the executor
+    assert ctx.observed_count == len(result.candidates)
+    # All three constituent baselines populated
+    assert [nb.node_value for nb in ctx.node_baselines] == ["faith", "hope", "love"]
+    # 3-step yields 3! = 6 orderings, uncapped
+    assert len(ctx.alternative_orderings) == 6
+    assert ctx.alternative_orderings_capped is False
+    # Identity ordering matches observed
+    identity = [
+        o for o in ctx.alternative_orderings if o.permutation == [0, 1, 2]
+    ]
+    assert len(identity) == 1
+    assert identity[0].count == ctx.observed_count
+    # Null-distribution stays None in MVP per OQ #3
+    assert ctx.null_distribution is None

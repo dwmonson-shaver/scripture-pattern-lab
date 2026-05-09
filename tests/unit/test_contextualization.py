@@ -37,6 +37,7 @@ from src.retrieval.contextualization import (
     _format_sequence_label,
     compute_alternative_orderings,
     compute_node_baselines,
+    contextualize,
 )
 
 
@@ -474,3 +475,63 @@ class TestComputeAlternativeOrderings:
         plan = _make_plan(InverseExpr(inner=inner))
         with pytest.raises(UnsupportedPlanShape):
             compute_alternative_orderings(plan, plan.scope, MagicMock())
+
+
+# ---------------------------------------------------------------------------
+# Top-level orchestrator
+# ---------------------------------------------------------------------------
+
+
+class TestContextualize:
+    def test_observed_count_taken_from_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seq = SequenceExpr(
+            steps=[NodeRef(type=NodeType.LEMMA, value="πίστις")],
+            operators=[],
+        )
+        plan = _make_plan(seq)
+        monkeypatch.setattr(
+            "src.retrieval.contextualization.execute",
+            _stub_execute({"πίστις": 100}),
+        )
+        engine = _make_engine_returning(243)  # baseline COUNT(*) for πίστις
+
+        observed = [
+            MatchCandidate(
+                tokens=[],
+                reference=f"Stub {i}:0",
+                match_type="exact",
+                alignment=[],
+            )
+            for i in range(7)  # arbitrary observed-count distinct from baseline
+        ]
+        ctx = contextualize(plan, plan.scope, observed, engine)
+
+        assert ctx.observed_count == 7
+        assert ctx.null_distribution is None
+        assert ctx.alternative_orderings_capped is False
+        assert len(ctx.node_baselines) == 1
+        assert ctx.node_baselines[0].count == 243
+        assert len(ctx.alternative_orderings) == 1  # 1! = 1
+
+    def test_capped_flag_propagates_from_alt_orderings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 5-step sequence triggers fallback (capped=True)
+        seq = SequenceExpr(
+            steps=[NodeRef(type=NodeType.LEMMA, value=f"l{i}") for i in range(5)],
+            operators=[OrderOperator(type=OperatorType.PRECEDENCE) for _ in range(4)],
+        )
+        plan = _make_plan(seq)
+        monkeypatch.setattr(
+            "src.retrieval.contextualization.execute",
+            _stub_execute({}),
+        )
+        # 5 baseline COUNT(*) calls return 0 each
+        engine = _make_engine_returning(0, 0, 0, 0, 0)
+
+        ctx = contextualize(plan, plan.scope, [], engine)
+
+        assert ctx.alternative_orderings_capped is True
+        assert len(ctx.alternative_orderings) == 6  # identity + reverse + 4 swaps

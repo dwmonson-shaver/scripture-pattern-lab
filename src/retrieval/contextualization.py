@@ -28,6 +28,8 @@ from src.engine.executor import (
 )
 from src.engine.models import (
     AlternativeOrderingCount,
+    Contextualization,
+    MatchCandidate,
     NodeBaseline,
     NodeRef,
     QueryPlan,
@@ -187,3 +189,41 @@ def _fallback_permutations(n: int) -> list[list[int]]:
 def _format_sequence_label(steps: list[NodeRef]) -> str:
     """Render a node sequence as ``faith > hope > love`` for display."""
     return " > ".join(step.value for step in steps)
+
+
+# ---------------------------------------------------------------------------
+# Top-level orchestrator
+# ---------------------------------------------------------------------------
+
+
+def contextualize(
+    plan: QueryPlan,
+    scope: ScopeConstraint,
+    candidates: list[MatchCandidate],
+    engine: Engine,
+    registry: "ConceptRegistry | None" = None,
+) -> Contextualization:
+    """Compose per-node baselines + alt-ordering counts into a Contextualization.
+
+    Per canonical-09 §8: contextualization runs after retrieval and before
+    scoring. It does not modify per-match scores. ``observed_count`` is
+    taken from the candidates the caller already retrieved, so this
+    function does not re-execute the original ordering by itself —
+    although ``compute_alternative_orderings`` does re-execute the identity
+    permutation for consistency with the alt-ordering set, and the two
+    counts should agree.
+
+    Null-distribution remains a schema slot only in MVP (per design OQ #3
+    resolution); the field is always ``None``.
+    """
+    baselines = compute_node_baselines(plan, scope, engine, registry=registry)
+    alternative_orderings, capped = compute_alternative_orderings(
+        plan, scope, engine, registry=registry
+    )
+    return Contextualization(
+        observed_count=len(candidates),
+        node_baselines=baselines,
+        alternative_orderings=alternative_orderings,
+        alternative_orderings_capped=capped,
+        null_distribution=None,
+    )
