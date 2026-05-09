@@ -238,28 +238,40 @@ class Contextualization:
 <!-- REQ:09.result-explainer -->
 ### 9. Result Builder & Explainer
 **Location**: `src/nlp/explainer.py`
-**Responsibility**: Transform scored matches into user-facing results with explanations. Uses an LLM to generate natural-language explanations of why each result matched and what its limitations are. [DEC-015]
+**Responsibility**: Transform a `RetrievalResult` into user-facing results with deterministic prose explanations grounded in the actual corpus counts. The explainer is the contract realization for canonical-09 §8 invariant (d) — it surfaces contextualization in user-facing output. [DEC-015, DEC-061]
 
 **Interface**:
 ```python
-def explain(matches: list[ScoredMatch], plan: QueryPlan, validation: ValidationResult) -> ExplainedResultSet
+def explain(
+    result: RetrievalResult,
+    plan: QueryPlan,
+    validation: ValidationResult,
+) -> ExplainedResultSet
 
 class ExplainedResultSet:
-    query_shown: str            # The DSL that was executed
-    nl_source: str | None       # Original NL if applicable
-    validation_notes: list[str] # Any capability limitations
-    results: list[ExplainedResult]
-    contextualization: Contextualization | None  # Populated when retrieve() ran with contextualize=True; None otherwise
+    query_shown: str                              # The DSL that was executed
+    nl_source: str | None = None                  # Original NL if applicable
+    validation_notes: list[str]                   # Validator findings as raw strings; empty when status=supported
+    results: list[ExplainedResult]                # One entry per MatchCandidate in result.candidates
+    contextualization: Contextualization | None = None  # Mirrors result.contextualization
+    summary: str                                  # Slice-level prose (≤ 5 lines per invariant (e))
 
 class ExplainedResult:
-    reference: str
-    text_display: str           # Highlighted passage text
-    match_type: str
-    score: float
-    explanation: str            # Why this matched
+    reference: str                                # e.g., "1Cor 13:13"
+    text_display: str                             # Comma-joined matched lemmas in corpus order
+    match_type: Literal["exact", "variant", "conceptual"]
+    score: float | None = None                    # Populated when scoring lands; None in MVP
+    explanation: str                              # One-paragraph deterministic prose
 ```
 
-**MVP implementation**: Template-based explanation for exact/variant matches. LLM explanation for conceptual matches or when results need qualification.
+**MVP implementation (DEC-061)**: Template-based explanation for ALL match types — including conceptual. The earlier canonical sentence "LLM explanation for conceptual matches or when results need qualification" is deferred. The deferral is tracked in a named bucket; trigger is "Slice H ships an LLM dependency for translation OR the deterministic explainer prose is judged inadequate against a real research question." Rationale: adding an LLM client solely for prose generation is overkill — the user has not yet seen a deterministic baseline against which to evaluate LLM upside, and Slice H (NL→DSL translator) is the natural owner of "first LLM dep in the project."
+
+**Invariants**:
+- (a) The signature consumes a `RetrievalResult` (not the canonical-pre-Slice-F `list[ScoredMatch]`). `ScoredMatch` is reserved for a future scoring slice; until then, `ExplainedResult.score` is `None`.
+- (b) Every prose claim derives from fields on `result`, `plan`, or `validation` — never invented (DEC-024 corpus-is-ground-truth). Caller contract: `result.contextualization.observed_count` MUST equal `len(result.candidates)`; the explainer reads both fields and a divergence will produce internally-contradictory prose.
+- (c) The explainer is purely deterministic and synchronous — no I/O, no LLM client, no environment-variable reads, no async (per DEC-061; verifiable via `grep -L "anthropic\|openai\|httpx\|asyncio" src/nlp/explainer.py`).
+- (d) `validation_notes` is populated from `ValidationResult.findings` formatted as raw `"severity: code at path: message"` strings — same form `_print_findings` emits.
+- (e) **Cap policy** (Bucket 4 closure): the explainer caps resolved-lemma display at 5 items with `"+N more"` suffix and sequence labels at 64 chars with ellipsis. The structured `_print_contextualization` block in `scripts/query.py` remains unbounded — that block is the data-fidelity view; the prose layer is where presentation discipline applies.
 
 <!-- REQ:09.ingestion -->
 ### 10. Corpus Ingestion (non-request-path)
