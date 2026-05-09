@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Engine,
     Float,
     ForeignKey,
     Integer,
@@ -25,6 +26,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    select,
 )
 
 # ---------------------------------------------------------------------------
@@ -200,3 +202,109 @@ class InverseClaim(BaseModel):
     evidence_count: int = 0
     verification_state: VerificationState = "unverified"
     confidence: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# ConceptRegistry — read-only view over the four registry tables
+# ---------------------------------------------------------------------------
+
+
+class ConceptRegistry:
+    """Read-only view over the registry tables. Query-side only — never
+    imports ``src/ingestion``. Per DEC-025, the seed script (Phase 6) imports
+    the ``Table`` mirrors directly, not this reader.
+
+    All methods issue ``select(...)`` only; no inserts, updates, or deletes.
+    Each call opens its own short-lived ``engine.connect()`` context. When the
+    registry is constructed via :meth:`empty`, every method short-circuits to
+    ``[]`` / ``False`` without touching a database — used by validator-rule-13
+    unit tests that need a registry handle but no DB.
+    """
+
+    def __init__(self, engine: Engine | None) -> None:
+        self.engine: Engine | None = engine
+
+    @classmethod
+    def empty(cls) -> ConceptRegistry:
+        """Return an in-memory empty registry that requires no engine.
+
+        All read methods return empty results / False. Suitable for unit tests
+        that exercise validator paths needing a ``ConceptRegistry`` handle but
+        not real registry data.
+        """
+        return cls(None)
+
+    def get_by_lemma(self, lemma: str, language: str = "grc") -> list[Concept]:
+        """Return parent ``Concept`` rows for every ``concept_lemmas`` row
+        whose (lemma, language) match. Empty list if none match or if the
+        registry is empty."""
+        if self.engine is None:
+            return []
+        stmt = (
+            select(concepts_table)
+            .select_from(
+                concepts_table.join(
+                    concept_lemmas_table,
+                    concepts_table.c.id == concept_lemmas_table.c.concept_id,
+                )
+            )
+            .where(concept_lemmas_table.c.lemma == lemma)
+            .where(concept_lemmas_table.c.language == language)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(stmt).all()
+        return [Concept.model_validate(row._mapping) for row in rows]
+
+    def get_polarity_claims(self, concept_id: int) -> list[PolarityClaim]:
+        """Return all polarity claims for ``concept_id`` (any polarity)."""
+        if self.engine is None:
+            return []
+        stmt = select(polarity_claims_table).where(
+            polarity_claims_table.c.concept_id == concept_id
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(stmt).all()
+        return [PolarityClaim.model_validate(row._mapping) for row in rows]
+
+    def get_inverse_claims(self, concept_id: int) -> list[InverseClaim]:
+        """Return all inverse claims where ``concept_id`` is the left side."""
+        if self.engine is None:
+            return []
+        stmt = select(inverse_claims_table).where(
+            inverse_claims_table.c.concept_id == concept_id
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(stmt).all()
+        return [InverseClaim.model_validate(row._mapping) for row in rows]
+
+    def is_prior_grounded(
+        self, concept_name: str, polarity: Polarity | None
+    ) -> bool:
+        """Return True iff any backing polarity claim for the given concept
+        (and optional polarity filter) has ``verification_state='unverified'``.
+
+        Used by validator rule 13 (Phase 5). When the concept is not in the
+        registry, returns False — no claim means nothing to flag.
+
+        For Phase 4, only polarity claims are inspected. The inverse-claims
+        case will be folded in alongside rule 13's inverse-usage interface in
+        Phase 5; the docstring on the design spec calls that interface "TBD".
+        """
+        if self.engine is None:
+            return False
+        concept_stmt = select(concepts_table.c.id).where(
+            concepts_table.c.name == concept_name
+        )
+        with self.engine.connect() as connection:
+            concept_id = connection.execute(concept_stmt).scalar_one_or_none()
+            if concept_id is None:
+                return False
+            claim_stmt = select(polarity_claims_table.c.verification_state).where(
+                polarity_claims_table.c.concept_id == concept_id
+            )
+            if polarity is not None:
+                claim_stmt = claim_stmt.where(
+                    polarity_claims_table.c.polarity == polarity
+                )
+            states = connection.execute(claim_stmt).scalars().all()
+        return any(state == "unverified" for state in states)
