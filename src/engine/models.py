@@ -11,7 +11,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Tag
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    NonNegativeFloat,
+    NonNegativeInt,
+    Tag,
+)
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -391,16 +398,18 @@ class NodeBaseline(BaseModel):
 
     Lemma nodes resolve to themselves; concept nodes resolve to all lemmas in
     the registry mapping (per REQ:04.matching-rules). ``count`` is a scoped
-    SELECT COUNT(*) against the tokens table — always >= 0.
+    SELECT COUNT(*) against the tokens table; ``node_index`` is the 0-based
+    position in the original sequence — both non-negative invariants are
+    encoded in the schema (Codex D-D1D2-002).
     """
 
     model_config = ConfigDict(frozen=True)
 
-    node_index: int
+    node_index: NonNegativeInt
     node_type: NodeType
     node_value: str
     resolved_lemmas: list[str]
-    count: int
+    count: NonNegativeInt
 
 
 class AlternativeOrderingCount(BaseModel):
@@ -408,14 +417,15 @@ class AlternativeOrderingCount(BaseModel):
 
     The original ordering is included in the list with ``is_observed=True``
     so consumers can render it alongside its siblings without comparing
-    permutations themselves.
+    permutations themselves. ``permutation`` indices and ``count`` are
+    schema-enforced non-negative.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    permutation: list[int]
+    permutation: list[NonNegativeInt]
     sequence_label: str
-    count: int
+    count: NonNegativeInt
     is_observed: bool
 
 
@@ -426,14 +436,17 @@ class NullDistribution(BaseModel):
     resolution: the sampling protocol needs its own design pass — what
     counts as a "comparable-frequency" lemma, how comparability is defined,
     and how the seed propagates). Exposed as ``Contextualization.null_distribution``;
-    always ``None`` until a future slice ships the sampling code.
+    always ``None`` until a future slice ships the sampling code. ``mean``
+    is unconstrained (counts can have any non-negative mean but allowing
+    floats here keeps the schema flexible for future computed statistics);
+    ``sample_size`` and ``std`` are schema-enforced non-negative.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    sample_size: int
+    sample_size: NonNegativeInt
     mean: float
-    std: float
+    std: NonNegativeFloat
     seed: int
 
 
@@ -447,7 +460,7 @@ class Contextualization(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    observed_count: int
+    observed_count: NonNegativeInt
     node_baselines: list[NodeBaseline]
     alternative_orderings: list[AlternativeOrderingCount]
     alternative_orderings_capped: bool

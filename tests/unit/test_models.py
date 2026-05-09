@@ -680,6 +680,26 @@ class TestNodeBaseline:
         assert nb.node_type == NodeType.LEMMA
         assert nb.resolved_lemmas == ["πίστις"]
 
+    def test_negative_count_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NodeBaseline(
+                node_index=0,
+                node_type=NodeType.LEMMA,
+                node_value="πίστις",
+                resolved_lemmas=["πίστις"],
+                count=-1,
+            )
+
+    def test_negative_node_index_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NodeBaseline(
+                node_index=-1,
+                node_type=NodeType.LEMMA,
+                node_value="πίστις",
+                resolved_lemmas=["πίστις"],
+                count=0,
+            )
+
 
 class TestAlternativeOrderingCount:
     def test_construct_observed(self) -> None:
@@ -723,6 +743,24 @@ class TestAlternativeOrderingCount:
         restored = AlternativeOrderingCount.model_validate_json(alt.model_dump_json())
         assert restored == alt
 
+    def test_negative_count_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AlternativeOrderingCount(
+                permutation=[0, 1, 2],
+                sequence_label="faith > hope > love",
+                count=-1,
+                is_observed=True,
+            )
+
+    def test_negative_permutation_index_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AlternativeOrderingCount(
+                permutation=[0, -1, 2],
+                sequence_label="faith > ? > love",
+                count=0,
+                is_observed=False,
+            )
+
 
 class TestNullDistribution:
     def test_construct(self) -> None:
@@ -741,6 +779,14 @@ class TestNullDistribution:
         nd = NullDistribution(sample_size=100, mean=5.0, std=1.5, seed=42)
         restored = NullDistribution.model_validate_json(nd.model_dump_json())
         assert restored == nd
+
+    def test_negative_sample_size_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NullDistribution(sample_size=-1, mean=0.0, std=0.0, seed=0)
+
+    def test_negative_std_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NullDistribution(sample_size=10, mean=0.0, std=-0.5, seed=0)
 
 
 class TestContextualization:
@@ -816,6 +862,15 @@ class TestContextualization:
         )
         restored = Contextualization.model_validate_json(ctx.model_dump_json())
         assert restored == ctx
+
+    def test_negative_observed_count_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Contextualization(
+                observed_count=-1,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+            )
 
 
 class TestRetrievalResult:

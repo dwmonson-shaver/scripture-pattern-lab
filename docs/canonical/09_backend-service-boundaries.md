@@ -325,10 +325,14 @@ When scale or team structure demands it, the natural extraction boundaries are:
    b. If partial → reduce plan, include warnings in response
    c. If supported → continue
 6. Pattern engine executes the (possibly reduced) QueryPlan against Postgres
-7. Retrieval pipeline returns MatchCandidates
-8. Scoring ranks candidates
-9. Explainer produces user-facing results with explanations
-10. API returns ExplainedResultSet as JSON
+7. Retrieval pipeline assembles RetrievalResult (candidates + stages_used)
+8. Contextualization computes per-node baselines, alternative-ordering counts,
+   and reserved null-distribution slot; embeds Contextualization on
+   RetrievalResult (skipped when retrieve() was called with contextualize=False)
+9. Scoring ranks candidates within the result set
+10. Explainer surfaces both per-match scores and the result-set Contextualization
+    in user-facing output
+11. API returns ExplainedResultSet as JSON
 ```
 
 For `POST /api/v1/query/dsl`, steps 3 is skipped (DSL is provided directly).
@@ -370,7 +374,8 @@ src/
 ├── ontology/
 │   └── registry.py           # Concept and domain registry access
 ├── retrieval/
-│   └── pipeline.py           # Multi-stage retrieval orchestration
+│   ├── pipeline.py           # Multi-stage retrieval orchestration (retrieve())
+│   └── contextualization.py  # Per-node baselines + alternative-ordering counts
 ├── scoring/
 │   └── ranker.py             # Scoring and ranking
 └── validation/
