@@ -254,7 +254,7 @@ class ExplainedResultSet:
     validation_notes: list[str]                   # Validator findings as raw strings; empty when status=supported
     results: list[ExplainedResult]                # One entry per MatchCandidate in result.candidates
     contextualization: Contextualization | None = None  # Mirrors result.contextualization
-    summary: str                                  # Slice-level prose (≤ 5 lines per invariant (e))
+    summary: str                                  # Slice-level prose (≤ 5 lines; see MVP implementation note below)
 
 class ExplainedResult:
     reference: str                                # e.g., "1Cor 13:13"
