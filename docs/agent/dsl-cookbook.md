@@ -335,9 +335,122 @@ The CLI output has two top-level sections after the diagnostic stderr line: the 
 
 ## Failure Modes and Recovery
 
+Every observable failure mode of the CLI is listed here with its exact recognition signature (the string you will see in stderr or stdout) and the concrete recovery action. If you encounter something not on this list, that's a cookbook gap — report it.
+
+### `parse error` — DSL syntax problem
+
+**Recognition (stderr, exit code 2):**
 ```
-[E3 placeholder]
+parse error: <message> (at position <N>)
+  <your DSL string>
+        ^
 ```
+
+The caret `^` points at the offending character.
+
+**Common causes:**
+- Missing colon after a directive: `lang grc` instead of `lang:grc`
+- Stray operator: `faith > > hope` (two `>` in a row)
+- Unbalanced bracket/paren/brace: `(faith > hope` (no closing `)`)
+- Empty query: `""` (whitespace-only also fails)
+- Unknown expansion direction: `=> sideways:2` (only `forward`, `backward`, `expand`, `both` are accepted by the parser)
+
+**Recovery:**
+1. Read the message and the position marker.
+2. Re-check syntax against the "Authoring DSL Queries" section. Most parse errors are typos or misremembering operator syntax.
+3. Re-author the DSL with explicit prefixes (`concept:` / `lemma:`) if you suspect ambiguity in token boundaries.
+
+### `Status: unsupported` — validator rejected the query
+
+**Recognition (stderr + exit code 2):**
+```
+validator returned unsupported — cannot execute
+  error: <CODE> at <path>: <message>
+```
+
+**Common error codes (full list per `docs/canonical/06_capability-validator.md`):**
+
+| Code | Cause | Recovery |
+|---|---|---|
+| `UNSUPPORTED_NODE_TYPE` | Used `token:`, `root:`, `morph:`, `domain:`, or `*` wildcard | Restrict to `concept:` and `lemma:` only |
+| `UNSUPPORTED_OPERATOR` | Used `>>` or `~` | Use `>` (with optional gap) instead |
+| `UNSUPPORTED_POLARITY` | Used `+`, `-`, or `±` | Drop the polarity prefix; future slice will enable polarity |
+| `UNSUPPORTED_INVERSE` | Used `inverse(...)` | Reformulate as the explicit inverse sequence (e.g., for `inverse(faith > love)` try `unbelief > hatred`) — see the seeded inverse-claims pairs in canonical-08 |
+| `UNSUPPORTED_COMPOUND_NODE` | Used `lemma:X+morph:Y` | Drop the `+morph:` filter |
+| `UNSUPPORTED_MATCH_MODE` | Used a `mode:` value not in `exact \| variant \| conceptual \| hybrid` | Drop the explicit `mode:` directive — parser will infer correctly |
+| `UNKNOWN_CORPUS` | Used `corpus:` not in `["nt"]` | Use `corpus:nt` only (MVP corpus) |
+| `UNKNOWN_LANGUAGE` | Used `lang:` not in `["grc"]` | Use `lang:grc` only (MVP language) |
+| `SEQUENCE_TOO_LONG` | More than 10 nodes | Break into multiple shorter queries |
+| `EMPTY_SEQUENCE` / `MALFORMED_AST` | Edge case from parser | Re-author from scratch; report if the syntax looks valid |
+
+### `Status: partial` — validator reduced the query (still ran)
+
+**Recognition (stderr + exit code 0):**
+```
+validator returned partial — proceeding with reduced executable plan
+  warning: <CODE> at <path>: <message>
+```
+
+**What happened:** The validator stripped unsupported features and ran a smaller executable plan. The most common cause is `UNSUPPORTED_EXPANSION` (the `=> forward:N` etc. directive).
+
+**Recovery:** Read the printed findings to know what was dropped. The reduced plan still produced valid results — but the answer reflects the reduced query, not your original intent. Decide whether the reduction is acceptable. If not, reformulate without the dropped feature.
+
+### `concept not mapped` — concept name unknown
+
+**Recognition (stderr + exit code 3):**
+```
+concept not mapped: '<concept-name>' has no lemma rows in the registry
+```
+
+**Cause:** You used a `concept:` (or bare-word) node whose name is not in the 20-concept seeded list.
+
+**Recovery:**
+1. Check the seeded concepts table above. Pick a synonym if available.
+2. If your concept truly isn't seeded, fall back to direct `lemma:` queries with the Greek lemma you have in mind.
+3. If you don't know the Greek lemma, ask the user — adding new concepts is a registry-extension task, not a query-time recovery.
+
+### `RegistryRequired` — concept used but registry not connected
+
+**Recognition (stderr + exit code 3):**
+```
+RegistryRequired: concept registry is required to resolve concept node '<name>' but none was supplied
+```
+
+**Cause:** This shouldn't happen via the CLI in normal operation — the CLI always wires the registry. If you see it, it's a bug in the CLI invocation, not your query.
+
+**Recovery:** Report the problem to the user; do not retry. This signals a regression in the CLI bootstrap path.
+
+### `UnsupportedPlanShape` — executor's second wall
+
+**Recognition (stderr + exit code 2):**
+```
+UnsupportedPlanShape: <message>
+  path: <jsonpath>
+```
+
+**Cause:** A query that passed the parser AND the validator was still rejected by the executor. This is rare but possible — the executor checks shape invariants the validator does not (e.g., `validate_plan_shape` enforces stricter rules on operators, scope unit, book abbreviations).
+
+**Recovery:**
+1. Read the `path:` to see which AST node was unsupported (e.g., `$.scope.unit`, `$.sequence.steps[2]`, `$.scope.books[1]`).
+2. Adjust the corresponding DSL part. Common: `within:` set to anything other than `verse`; book abbreviation typo.
+
+### `Found 0 matches` — corpus is silent on this query
+
+**Recognition (stdout + exit code 0):**
+```
+Found 0 matches (showing first 0):
+
+Contextualization (REQ:09.contextualization):
+  Observed count: 0
+  ...
+```
+
+**This is NOT an error.** Exit code is 0. It means the corpus simply does not contain the pattern you asked for in the scope you specified.
+
+**What to do:**
+1. Read the contextualization. If baselines are LARGE but observed is 0, the constituents exist but never co-occur in this order in this scope — that's a real research finding, not a failure.
+2. If baselines are SMALL or 0, the constituents are too rare. Widen the scope (drop `book:`) or check for typos in lemma syntax.
+3. Don't fabricate a positive answer. The corpus is ground truth. If it's silent, report that it's silent.
 
 ---
 
