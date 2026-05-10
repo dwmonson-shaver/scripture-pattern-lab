@@ -28,6 +28,7 @@ from src.app.dependencies import (
     get_translation_context,
 )
 from src.app.main import create_app
+from src.app.orchestration import ValidationUnsupported
 from src.app.schemas import QueryNLResponse, TranslationMetadata
 from src.engine.models import (
     ConceptNotMapped,
@@ -37,13 +38,14 @@ from src.engine.models import (
     RetrievalResult,
     UnsupportedPlanShape,
 )
+from src.engine.parser import ParseError
 from src.nlp.llm_client import LLMClient, LLMUnavailable
 from src.nlp.translator import (
     NLCompileError,
     TranslationContext,
 )
 from src.ontology.registry import ConceptRegistry
-from src.validation.validator import ValidationResult
+from src.validation.validator import ValidationFinding, ValidationResult
 
 
 def _stub_translation_context() -> TranslationContext:
@@ -188,6 +190,54 @@ class TestErrorMappingTranslatorSide:
 
 
 class TestErrorMappingDownstreamPipeline:
+    def test_parse_error_returns_422(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Translator emits "DSL" that fails the parser → ParseError propagates
+        # from run_nl_query → route maps to 422 parse_error.
+        def boom(*args: object, **kwargs: object) -> None:
+            raise ParseError("Unexpected token at position 5", pos=5, source="bad dsl")
+
+        monkeypatch.setattr("src.app.routes.nl.run_nl_query", boom)
+        resp = client.post("/api/v1/query/nl", json={"nl_query": "any"})
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["detail"]["error"] == "parse_error"
+        assert body["detail"]["details"]["position"] == 5
+
+    def test_validation_unsupported_returns_422(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Translator emits DSL that parses but is rejected by the validator
+        # (e.g., inverse() in MVP). ValidationUnsupported propagates from
+        # run_nl_query → route maps to 422 validation_unsupported with the
+        # findings list embedded.
+        finding = ValidationFinding(
+            severity="error",
+            code="UNSUPPORTED_INVERSE",
+            path="$.sequence",
+            message="inverse() is not supported in MVP",
+            remediation=None,
+        )
+        validation = ValidationResult(
+            status="unsupported",
+            executable_plan=None,
+            findings=[finding],
+            engine_version="0.1.0",
+            grounding=None,
+        )
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise ValidationUnsupported(validation)
+
+        monkeypatch.setattr("src.app.routes.nl.run_nl_query", boom)
+        resp = client.post("/api/v1/query/nl", json={"nl_query": "any"})
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["detail"]["error"] == "validation_unsupported"
+        assert len(body["detail"]["details"]["findings"]) == 1
+        assert body["detail"]["details"]["findings"][0]["code"] == "UNSUPPORTED_INVERSE"
+
     def test_unsupported_plan_shape_returns_422(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:

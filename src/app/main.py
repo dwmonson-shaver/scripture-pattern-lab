@@ -6,10 +6,17 @@ startup, builds the `Engine`, `ConceptRegistry`, `LLMClient`, and
 handlers obtain them via `Depends()` providers in
 `src/app/dependencies.py`.
 
-Each env var's absence degrades independently: missing DATABASE_URL
+Independent-degradation contract (H-H3H4-001 clarification):
+The two env vars degrade independently *on absence*. Missing DATABASE_URL
 makes /api/v1/query/dsl + /api/v1/query/nl return 503; missing
 ANTHROPIC_API_KEY only makes /api/v1/query/nl return 503 (the DSL
-route is still serviceable).
+route is still serviceable). *Construction failures* (e.g.,
+`build_engine_from_env()` raises because Postgres is unreachable) are
+intentionally fail-fast: the lifespan startup raises, and uvicorn does
+not start serving. We do not catch construction errors and continue —
+that would mask deployment problems behind a runtime 503. If you want
+construction-time independent degradation, that is a separate design
+decision.
 
 Run in production with:
     uvicorn src.app.main:app --host 0.0.0.0 --port 8000
