@@ -60,13 +60,13 @@ The backend is decomposed into logical components with clear boundaries, but the
 **Location**: `src/app/`
 **Responsibility**: HTTP routing, request validation, authentication (future), rate limiting (future).
 
-**MVP routes**:
-- `POST /api/v1/query/nl` — Accept natural language, translate to DSL, validate, execute
-- `POST /api/v1/query/dsl` — Accept raw DSL, validate, execute
-- `POST /api/v1/query/validate` — Accept DSL, return validation result without executing
-- `GET /api/v1/capabilities` — Return current capability registry
-- `GET /api/v1/concepts` — Return concept registry (for UI autocomplete)
-- `GET /api/v1/health` — Health check
+**MVP routes** (all six shipped as of Slice I close, 2026-05-09):
+- `POST /api/v1/query/nl` — Accept natural language, translate to DSL, validate, execute (Slice H)
+- `POST /api/v1/query/dsl` — Accept raw DSL, validate, execute (Slice G)
+- `POST /api/v1/query/validate` — Accept DSL, return ValidationResult without executing. **Slice I.** Per DEC-079, all `validation.status` values (supported/partial/unsupported) return HTTP 200; the only 422 path is `parse_error` on malformed DSL. Response shape: `QueryValidateResponse{query, validation}` — mirrors QueryDSLResponse minus the unused `result` and `explanation` fields.
+- `GET /api/v1/capabilities` — Return current capability registry. **Slice I.** Per DEC-075, response_model is `CapabilityRegistry` directly (no envelope wrapping). UI clients can branch on the `version` field for forward compat.
+- `GET /api/v1/concepts` — Return concept registry. **Slice I.** Optional `language` query param (default `"grc"`). Per DEC-076, flat list of `ConceptSummary{name, description, verification_state, lemma_count, lemmas}` with embedded lemma lists. Not paginated at MVP scale (Bucket 9 trigger when registry grows past ~500 rows). Concepts with no lemmas in the requested language still appear with `lemmas=[]` (forward-compat invariant for multi-language registry growth).
+- `GET /api/v1/health` — Health check (Slice G; liveness only per DEC-066).
 
 **Input/output format**: JSON. Requests and responses use typed schemas.
 

@@ -783,3 +783,81 @@
 - Files: src/app/main.py (lifespan); src/app/dependencies.py (providers); src/app/routes/nl.py (consumer); docs/canonical/09_backend-service-boundaries.md §2 (codifies)
 - Spec refs: REQ:09.nl-to-dsl; REQ:09.api-gateway (DI parity)
 - Cross-refs: DEC-G2 (Slice G DI architecture — DEC-074 mirrors it for the LLM seam); H-H3H4-001 (independent-degradation contract clarification).
+
+## DEC-075 — `GET /api/v1/capabilities` returns `CapabilityRegistry` directly (no envelope)
+- Status: Accepted
+- Question: Slice I lights up the deferred capabilities endpoint. Should the response wrap the existing `CapabilityRegistry` Pydantic model in a new envelope, or return the model itself?
+- Decision: Return `CapabilityRegistry.mvp()` directly. Route declares `response_model=CapabilityRegistry`. No new schema class.
+- Rationale: (a) The existing model is already a frozen Pydantic v2 with JSON-native fields (13 string/list/int/bool fields, no nested models). Wrapping invents work without value. (b) UI clients can branch on `version` for forward compat — the field is in the model itself. (c) Consistency with Slice G's design philosophy: compose existing project models verbatim, no re-derivation.
+- Alternatives considered: (a) `CapabilitiesResponse{capability_registry: CapabilityRegistry}` envelope. Rejected — a one-field wrapper that consumers must traverse. (b) Flatten internal flags into a curated public-facing surface. Rejected — internal flags are honest; the UI can interpret them.
+- Confidence: High.
+- Made-by: orchestrator-mode.
+- Commit: `d5e7681` (I1).
+- Files: src/app/routes/capabilities.py; src/app/main.py; tests/unit/test_app_routes_capabilities.py
+- Spec refs: REQ:09.api-gateway
+- Cross-refs: DEC-063 (Slice G envelope precedent: compose existing models verbatim).
+
+## DEC-076 — `/api/v1/concepts` flat list with embedded lemmas; no pagination at MVP scale
+- Status: Accepted
+- Question: Slice I lights up the concepts endpoint. Should the response embed lemma lists per concept (one round-trip) or return concept stubs that the client looks up separately (N+1)? Should it paginate?
+- Decision: Flat list of `ConceptSummary{name, description, verification_state, lemma_count, lemmas: list[str]}`. Lemmas embedded inline. `lemma_count` redundant with `len(lemmas)` but kept for UI ergonomics. NO pagination at MVP scale; Bucket 9 tracks the sharpened pagination trigger.
+- Rationale: (a) MVP seed has ~30 concepts × ~2-5 lemmas each = ~150 inline strings. Response payload well under 10KB. One round-trip vs N+1 is the obvious win. (b) `lemma_count` separate field lets UI render counts without traversing the array. (c) Concepts with no lemmas in the requested language are surfaced with `lemmas=[]` (not dropped) — forward-compat invariant for multi-language registry growth, locked by `test_language_filter_with_no_matches_keeps_concept_with_empty_lemmas`. (d) Pagination would add request/response complexity (cursor/offset, total count, partial pages) without benefit at MVP scale.
+- Alternatives considered: (a) Paginate by default (limit/offset). Rejected — premature; Bucket 9 fires when actually needed. (b) Stub list with N+1 client lookups. Rejected — round-trip cost dominates payload size at MVP scale. (c) GraphQL-style field selection. Rejected — overkill for one endpoint.
+- Confidence: High at MVP scale; Bucket 9 carries the trigger for re-evaluation.
+- Made-by: orchestrator-mode.
+- Commit: `43a2ca2` (I2).
+- Files: src/app/routes/concepts.py; src/app/schemas.py (ConceptsResponse); src/ontology/registry.py (ConceptSummary, list_all_concepts); tests/unit/test_app_routes_concepts.py; tests/unit/test_ontology_registry.py (ConceptSummary + SQL-path tests)
+- Spec refs: REQ:09.api-gateway
+- Cross-refs: DEC-066 (Slice G deferral being closed); Bucket 9 (pagination trigger).
+
+## DEC-077 — `ConceptRegistry.list_all_concepts(language)` reader; SQL aggregation in Python
+- Status: Accepted
+- Question: `/api/v1/concepts` needs a method that returns all concepts with their lemma lists. The existing `ConceptRegistry` has no such reader. Should aggregation happen in SQL (Postgres `array_agg`) or Python?
+- Decision: Add `list_all_concepts(language: str = "grc") -> list[ConceptSummary]` that issues a single `SELECT concepts LEFT JOIN concept_lemmas ORDER BY concepts.name, concept_lemmas.lemma` and aggregates in Python. LEFT JOIN ensures concepts with no lemmas in the requested language still appear (with `lemmas=[]`). Returns `[]` on `engine=None` (consistent with the other reader methods).
+- Rationale: (a) MVP scale (~30 concepts) makes Python aggregation trivial; the SQL+row processing is one-shot, not per-request critical-path. (b) `array_agg` adds Postgres-specific SQL that complicates the SQLAlchemy Core mirror; staying in vanilla SQL keeps the reader portable to SQLite for unit tests if that's ever needed. (c) Python aggregation makes the language filter trivial — drop lemmas not in the requested language while keeping the parent concept. SQL would need a more complex CASE/FILTER clause. (d) Mirrors the reader pattern of the other ConceptRegistry methods (single `engine.connect()` context, single `select(...)` with optional `where()`, list comprehension over rows).
+- Alternatives considered: (a) Postgres `array_agg(concept_lemmas.lemma)`. Rejected for MVP — SQL complexity not justified by the row count. Reconsider when Bucket 9's trigger fires. (b) Two SELECTs (concepts then per-concept lemmas). Rejected — N+1 query pattern. (c) Drop concepts with no lemmas. Rejected — breaks the forward-compat invariant.
+- Confidence: High at MVP scale.
+- Made-by: orchestrator-mode.
+- Commit: `43a2ca2` (I2 method); `786ac6c` (I3b SQL-path tests).
+- Files: src/ontology/registry.py; tests/unit/test_ontology_registry.py
+- Spec refs: REQ:08.registry-epistemics (registry reader extension); REQ:09.api-gateway (HTTP consumer)
+- Cross-refs: DEC-076 (response shape this method feeds); I-MID-001 (Codex flag that drove the 4 SQL-path tests).
+
+## DEC-078 — `POST /api/v1/query/validate` envelope: `QueryValidateResponse{query, validation}`
+- Status: Accepted
+- Question: How should the validate endpoint's response be shaped? Reuse `ValidationResult` directly, wrap it like `QueryDSLResponse`, or invent a third shape?
+- Decision: New `QueryValidateResponse{query: str, validation: ValidationResult}` envelope. Mirrors `QueryDSLResponse`'s shape (echoes input + carries structured output) but omits `result` and `explanation` — neither runs on this path.
+- Rationale: (a) Consistency with `/query/dsl` and `/query/nl` (both echo input via `query` field + carry structured output). UI clients have a predictable response pattern. (b) Echoing `query` is the transparency rule (DEC-024 + DEC-G7) — the response shows what was actually validated. (c) Omitting `result`/`explanation` is honest — keeping them as null fields would mislead consumers into thinking the engine ran. (d) Reusing `ValidationResult` directly (as `response_model=ValidationResult`) was tempting but loses the input echo.
+- Alternatives considered: (a) `response_model=ValidationResult` (no envelope). Rejected — no input echo; consumers can't correlate response with request without round-trip context. (b) Subclass `QueryDSLResponse` with optional `result`/`explanation` fields set to null. Rejected — perpetually-null fields invite confusion. (c) Combine validate output into `QueryDSLResponse` with `executed: bool` flag. Rejected — adds a boolean to a response that should structurally not have execution data.
+- Confidence: High.
+- Made-by: orchestrator-mode.
+- Commit: `88556be` (I3).
+- Files: src/app/schemas.py; src/app/routes/validate.py; tests/unit/test_app_routes_validate.py (TestValidateNoExecutionFields locks the keys-are-exactly-{query,validation} invariant)
+- Spec refs: REQ:09.api-gateway
+- Cross-refs: DEC-063 (Slice G envelope philosophy); DEC-079 (HTTP semantics for this route).
+
+## DEC-079 — `validation.status='unsupported'` returns HTTP 200 (not 422)
+- Status: Accepted
+- Question: When `/query/validate` reaches a validation outcome of `unsupported`, should the route translate that into a 422 (consistent with how `/query/dsl` treats validator-rejected plans) or return 200 with the verdict in the body?
+- Decision: Return HTTP 200 for ALL `validation.status` values (supported, partial, unsupported). The only 422 path on `/query/validate` is `parse_error` raised on syntactically malformed DSL. Caller branches on `body.validation.status`, NOT on HTTP code, when consuming this endpoint.
+- Rationale: (a) Validate's contract is "tell me everything you found" — it's a query, not a command. Returning 422 on unsupported would force consumers to handle the same information in two places (HTTP code + body) with no benefit. (b) Semantic split: HTTP error = the request itself was malformed; HTTP 200 = the request was processed and here's what we found. `unsupported` is processing output, not a malformed request. (c) The `/query/dsl` route raises `ValidationUnsupported` from `run_dsl_query` because it CAN'T proceed to execute — that's a real error in the DSL pipeline. `/query/validate` doesn't have that constraint; the validator's output IS the response. (d) Symmetric with REST best practice: GET-shaped queries return 200 with structured findings; only malformed input merits a 4xx.
+- Alternatives considered: (a) 422 on unsupported, mirroring `/query/dsl`. Rejected — different semantics; consuming `/validate` differently from `/dsl` for the same DSL is the whole point. (b) New 4xx code like 419 "Validation Failed". Rejected — non-standard, surprises consumers, doesn't add information.
+- Confidence: High. The contract is locked at three layers: route handler (one 422 path = ParseError only), unit test (TestValidateUnsupportedReturnsTwoHundredNotFourTwentyTwo regression guard), integration test (test_validate_unsupported_returns_200_not_422 against live registry).
+- Made-by: orchestrator-mode.
+- Commit: `88556be` (I3 route + helper + regression guard); `95f9eab` (I4 live regression guard).
+- Files: src/app/routes/validate.py; src/app/orchestration.py (run_validate_only never raises ValidationUnsupported); tests/unit/test_app_routes_validate.py; tests/unit/test_app_orchestration.py; tests/integration/test_app_endpoint_followup.py
+- Spec refs: REQ:09.api-gateway (status table extension implicit; DEC-079 distinguishes /validate from /dsl semantics)
+- Cross-refs: DEC-070 (Slice H translator failure mapping — symmetric "5xx vs 4xx" reasoning applied here as "200 vs 4xx"); DEC-G6/DEC-G7 (Slice G's request-shape-is-error vs request-was-processed split).
+
+## DEC-080 — `run_validate_only(dsl, registry)` orchestration helper
+- Status: Accepted
+- Question: Should the validate endpoint call `parse + validate` inline in the route handler, or factor out an orchestration helper like Slice G's `run_dsl_query` and Slice H's `run_nl_query`?
+- Decision: Add `run_validate_only(dsl, registry) -> ValidationResult` to `src/app/orchestration.py`. Composes `parse + validate(plan, CapabilityRegistry.mvp(), concept_registry=registry)`. Returns the ValidationResult unchanged. Raises `ParseError` on malformed DSL; never raises `ValidationUnsupported` (DEC-079 contract).
+- Rationale: (a) Mirrors `run_dsl_query` / `run_nl_query` shape — single seam where deeper-layer functions are imported, which gives unit tests a clean monkeypatch target (`monkeypatch.setattr("src.app.routes.validate.run_validate_only", boom)`). (b) Keeps the route handler thin — under 30 lines including the try/except chain. (c) Future extension: if `/query/validate` ever needs to do more than parse+validate (e.g., resolve concepts to give the caller a preview of what would execute), the helper is the place to add it without bloating the route.
+- Alternatives considered: (a) Inline in route handler. Rejected — duplicates the parse/validate composition; creates two seams (the route and the imports inside the route module) that future tests would have to monkey-patch separately. (b) Reuse `run_dsl_query` and discard `result`/`explanation`. Rejected — wastes the executor and registry call for an endpoint that explicitly doesn't need them.
+- Confidence: High.
+- Made-by: orchestrator-mode.
+- Commit: `88556be` (I3).
+- Files: src/app/orchestration.py; src/app/routes/validate.py; tests/unit/test_app_orchestration.py (TestRunValidateOnly + sentinel test that retrieve/explain are NOT called)
+- Spec refs: REQ:09.api-gateway
+- Cross-refs: DEC-062 (Slice G factory + lifespan + DI architecture); run_dsl_query + run_nl_query precedents.
