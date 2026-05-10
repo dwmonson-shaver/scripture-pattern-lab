@@ -15,7 +15,7 @@ import os
 import anthropic
 
 
-class LLMUnavailable(Exception):
+class LLMUnavailable(Exception):  # noqa: N818
     """Raised when the LLM API is unreachable, unauthenticated, or rate-limited.
 
     Wraps any anthropic.APIError subclass that the route layer should treat as

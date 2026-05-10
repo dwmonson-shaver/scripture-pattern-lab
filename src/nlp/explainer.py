@@ -205,9 +205,9 @@ def _format_alt_orderings_phrase(
 
     if top.count == 0:
         return (
-            f"All alternative orderings of these nodes return 0 matches in "
-            f"the same scope — the observed direction is the only one that "
-            f"fires."
+            "All alternative orderings of these nodes return 0 matches in "
+            "the same scope — the observed direction is the only one that "
+            "fires."
         )
     if top.count == observed_count:
         return (
@@ -255,7 +255,7 @@ def _truncate_lemmas(lemmas: list[str], cap: int = _LEMMA_CAP) -> str:
 
 
 def _truncate_sequence_label(label: str, max_chars: int = _SEQUENCE_LABEL_MAX) -> str:
-    """64-char cap with ellipsis. Whole-string truncation; preserves operator semantics by ellipsizing on a token boundary when possible."""
+    """64-char cap with ellipsis; ellipsizes on a token boundary when possible."""
     if len(label) <= max_chars:
         return label
     # Try to truncate at a ' > ' boundary so we don't cut mid-token.
