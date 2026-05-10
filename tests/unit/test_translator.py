@@ -119,20 +119,23 @@ class TestTranslateOutputParsing:
         with pytest.raises(NLCompileError, match="empty DSL"):
             translate("vague query", _ctx(), client)
 
-    def test_missing_confidence_defaults_to_one(self) -> None:
+    def test_missing_confidence_defaults_to_zero(self) -> None:
+        # H-CLOSE-003: when the LLM doesn't volunteer a Confidence: line,
+        # default to 0.0 rather than 1.0. We don't claim confidence the
+        # LLM didn't claim (DEC-024 corpus-is-ground-truth charter).
         client = FakeLLMClient(canned_response="DSL: faith\n")
         result = translate("q", _ctx(), client)
-        assert result.confidence == 1.0
+        assert result.confidence == 0.0
 
-    def test_malformed_confidence_defaults_to_one(self) -> None:
+    def test_malformed_confidence_defaults_to_zero(self) -> None:
         client = FakeLLMClient(canned_response="DSL: faith\nConfidence: not-a-number\n")
         result = translate("q", _ctx(), client)
-        assert result.confidence == 1.0
+        assert result.confidence == 0.0
 
-    def test_out_of_range_confidence_defaults_to_one(self) -> None:
+    def test_out_of_range_confidence_defaults_to_zero(self) -> None:
         client = FakeLLMClient(canned_response="DSL: faith\nConfidence: 1.5\n")
         result = translate("q", _ctx(), client)
-        assert result.confidence == 1.0
+        assert result.confidence == 0.0
 
     def test_missing_alternatives_defaults_to_empty_list(self) -> None:
         client = FakeLLMClient(canned_response="DSL: faith\n")

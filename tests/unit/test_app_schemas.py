@@ -163,6 +163,16 @@ class TestQueryNLRequest:
         with pytest.raises(ValidationError):
             QueryNLRequest(nl_query="")
 
+    def test_rejects_over_max_length(self) -> None:
+        # H-CLOSE-002: 2000-char cap on nl_query input bounds the unbounded
+        # input that would otherwise reach the LLM unchecked.
+        with pytest.raises(ValidationError):
+            QueryNLRequest(nl_query="a" * 2001)
+
+    def test_accepts_at_max_length(self) -> None:
+        req = QueryNLRequest(nl_query="a" * 2000)
+        assert len(req.nl_query) == 2000
+
     def test_frozen(self) -> None:
         req = QueryNLRequest(nl_query="x")
         with pytest.raises(ValidationError):

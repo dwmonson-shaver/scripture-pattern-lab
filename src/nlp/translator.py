@@ -33,11 +33,19 @@ class TranslationContext(BaseModel):
 
 
 class TranslationResult(BaseModel):
-    """Translator output. dsl is the load-bearing field; rest are metadata."""
+    """Translator output. dsl is the load-bearing field; rest are metadata.
+
+    confidence default is 0.0 — when the LLM doesn't volunteer a Confidence:
+    line, we treat the translation as zero-confidence rather than max
+    (H-CLOSE-003). Honest signal per DEC-024 (corpus-is-ground-truth):
+    don't claim certainty the LLM didn't claim. Confidence is informational
+    per DEC-072 — never gates execution — so the value's calibration is
+    a transparency claim, not a control claim.
+    """
 
     model_config = ConfigDict(frozen=True)
     dsl: str
-    confidence: float = 1.0
+    confidence: float = 0.0
     alternatives: list[str] = Field(default_factory=list)
     explanation: str = ""
 
@@ -117,15 +125,22 @@ def _parse_output(*, nl_query: str, raw_output: str) -> TranslationResult:
 
 
 def _extract_confidence(raw_output: str) -> float:
+    """Parse the LLM's `Confidence:` line.
+
+    Returns 0.0 (not 1.0) when the line is missing, malformed, or out of
+    range — treating "I don't know what the LLM thinks" as zero confidence
+    rather than max confidence (H-CLOSE-003 / DEC-024 corpus-is-ground-truth
+    charter).
+    """
     match = _CONFIDENCE_LINE.search(raw_output)
     if match is None:
-        return 1.0
+        return 0.0
     try:
         value = float(match.group(1))
     except ValueError:
-        return 1.0
+        return 0.0
     if value < 0.0 or value > 1.0:
-        return 1.0
+        return 0.0
     return value
 
 

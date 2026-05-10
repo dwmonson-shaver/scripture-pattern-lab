@@ -674,3 +674,112 @@
 - Files: src/app/routes/health.py; src/app/main.py (router registration)
 - Spec refs: REQ:09.api-gateway (only 2 of 6 routes shipped this slice; remainder in follow-up + Slice H)
 - Cross-refs: DEC-051 (Slice C rescope precedent: defer endpoints whose response shape isn't yet concrete); follow-up slice will scope `capabilities` / `concepts` / `query/validate` together.
+
+## DEC-067 — `LLMClient` is a concrete class, not `typing.Protocol`
+- Status: Accepted
+- Question: Slice H introduces the project's first external-service abstraction. The codebase has zero `typing.Protocol` usage today (all IoC is via `monkeypatch.setattr` against module-bound imports). Should `LLMClient` be a `Protocol` (modern idiom for IoC interfaces) or a concrete base class?
+- Decision: Concrete base class with one abstract method `complete(system_prompt, user_message) -> str`. Sole concrete child for MVP: `AnthropicLLMClient`. Tests stub via `MagicMock(spec=LLMClient)` or plain subclasses; production uses `app.dependency_overrides[get_llm_client]` for unit-shape and lifespan-built clients for integration.
+- Rationale: (a) Project pattern is concrete classes + `monkeypatch.setattr("module.NAME", stub)` against the import-binding inside the module under test — `tests/unit/test_app_orchestration.py` is the canonical example. Introducing the first Protocol-typed seam would set a new architectural precedent without a forcing function. (b) Pydantic v2 frozen models, deterministic exception classes, and FastAPI's `Depends()` resolution all work cleanly with concrete classes; nothing in the codebase needs structural typing today. (c) Adding a second provider (OpenAI, etc.) means subclassing — no architectural change, no Protocol-vs-ABC migration cost. (d) `MagicMock(spec=LLMClient)` works identically against concrete and Protocol-typed seams; tests don't gain anything from Protocol.
+- Alternatives considered: (a) `Protocol` typing. Rejected — would set a new precedent; project has zero existing Protocol usage; no concrete benefit. (b) ABC with `@abstractmethod`. Rejected — ABC plus `NotImplementedError` is what we already have; the abstractmethod decoration adds nothing the runtime doesn't already enforce.
+- Confidence: High. Decision aligns with all 5 prior IoC seams in the codebase (validate, retrieve, explain, parse, plus orchestration internal stubbing).
+- Made-by: orchestrator-mode (low-stakes / high-confidence; pattern match against existing IoC).
+- Commit: `3c8afda` (H1 LLMClient seam).
+- Files: src/nlp/llm_client.py; tests/unit/test_llm_client.py
+- Spec refs: REQ:09.nl-to-dsl
+- Cross-refs: DEC-052 (boundary precedent: concrete imports over abstractions); DEC-068 (live_llm marker companion to this seam).
+
+## DEC-068 — New `live_llm` pytest marker; default `pytest` excludes it
+- Status: Accepted
+- Question: Slice H's exit-gate test runs against the live Anthropic API and consumes tokens. CI must not run it on every commit. What's the gating mechanism?
+- Decision: New pytest marker `live_llm: tests that require ANTHROPIC_API_KEY and a live LLM API; excluded by default`. Default `addopts = "-m 'not integration and not live_llm'"`. The exit-gate test in `tests/integration/test_app_nl_route_live_llm.py` declares `pytestmark = [pytest.mark.integration, pytest.mark.live_llm]` (both markers) plus explicit env-var assertions in the fixture (`assert os.environ.get("ANTHROPIC_API_KEY")` and `assert os.environ.get("DATABASE_URL")`).
+- Rationale: (a) Mirrors the `integration` + `DATABASE_URL` pattern from Slice G — same shape, same default-excluded posture, same explicit runtime assertion. (b) Default `pytest` stays runnable in CI without API tokens; live verification is opt-in with `pytest -m live_llm`. (c) Two markers (not one combined `live_or_integration`) preserves orthogonality: a future test that needs only a live LLM (no DB) can use `live_llm` alone.
+- Alternatives considered: (a) `pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"))`. Rejected — tests would silently skip in CI without surfacing why; markers are more discoverable. (b) Separate `tests/live_llm/` directory with no marker. Rejected — diverges from existing `tests/{unit,integration}` structure.
+- Confidence: High. Pattern proven in Slice G's `integration` marker.
+- Made-by: orchestrator-mode.
+- Commit: `3c8afda` (H1 pyproject.toml marker registration).
+- Files: pyproject.toml; tests/integration/test_app_nl_route_live_llm.py (consumer)
+- Spec refs: REQ:09.nl-to-dsl
+- Cross-refs: DEC-067 (LLMClient seam — `live_llm` is its companion testing posture).
+
+## DEC-069 — `QueryNLResponse(QueryDSLResponse)` subclass envelope
+- Status: Accepted
+- Question: The NL route must surface the compiled DSL string + translator metadata. Two options: (a) re-use `QueryDSLResponse` and put translator metadata in an optional sibling field; (b) define `QueryNLResponse` that wraps `QueryDSLResponse` + adds metadata.
+- Decision: `class QueryNLResponse(QueryDSLResponse): translation: TranslationMetadata`. Pydantic v2 subclass that inherits the four DSL-route fields verbatim and adds one new required field. The `query` field carries the *compiled* DSL (what the corpus actually saw); the original NL query lives in the request body, not the response.
+- Rationale: (a) Subclass extension is the simplest possible composition — no wrapper indirection, no second-tier `dsl_response: QueryDSLResponse` field. (b) Pydantic v2 subclasses serialize cleanly via `model_dump_json`; subclass relation enables `isinstance` checks (`isinstance(resp, QueryDSLResponse)` is True for a `QueryNLResponse`). (c) The `translation` field is required (not Optional) on the NL response — the route is contractually a *compiled* response. The DSL route's response stays unchanged. (d) FastAPI's `response_model=QueryNLResponse` correctly narrows serialization to subclass fields.
+- Alternatives considered: (a) Wrapper: `QueryNLResponse{dsl_response: QueryDSLResponse, translation: TranslationMetadata}`. Rejected — adds a layer of indirection consumers must traverse for every field. (b) Add optional `translation: TranslationMetadata | None = None` to `QueryDSLResponse` directly and emit `null` on the DSL route. Rejected — pollutes the DSL response with NL-route concerns; consumers of the DSL route would have to acknowledge a perpetually-null field.
+- Confidence: High. Subclass pattern is idiomatic Pydantic v2.
+- Made-by: orchestrator-mode (medium-stakes; surfaced for slice review per DEC autonomy memory).
+- Commit: `4448d59` (H3 schemas).
+- Files: src/app/schemas.py; src/app/orchestration.py (run_nl_query assembly); tests/unit/test_app_schemas.py
+- Spec refs: REQ:09.api-gateway (response envelope); REQ:09.nl-to-dsl
+- Cross-refs: DEC-063 (Slice G response envelope — DEC-069 extends it).
+
+## DEC-070 — HTTP error mapping for translator failures (canonical-09 §1 status table extension)
+- Status: Accepted
+- Question: Canonical-09 §1's status code table covers DSL-pipeline exceptions but is silent on LLM-side failures. Slice H must extend it. How are LLM errors classified?
+- Decision: Three new rows in the §1 status code table:
+  - `LLMUnavailable` (network, auth, rate-limit, 5xx server) → 503 `llm_unavailable`
+  - LLM client missing (lifespan didn't construct, ANTHROPIC_API_KEY unset) → 503 `llm_unavailable`
+  - Translation context missing → 503 `translation_context_unavailable`
+  - `NLCompileError` (LLM output couldn't be parsed as DSL) → 422 `nl_compile_error`
+  4xx anthropic.* errors (BadRequestError, NotFoundError, UnprocessableEntityError, ConflictError) propagate raw and become 500 `internal_error` — they're translator-side request bugs, not availability faults (H-H1H2-001).
+- Rationale: (a) 5xx vs 4xx semantic split: 5xx means "the LLM API or our infrastructure failed; retry shortly," 4xx means "we built a bad request to the LLM API; this is a code bug." The route layer must distinguish so callers don't retry-spam on translator bugs. (b) The narrowed except chain in `AnthropicLLMClient.complete` enforces the split at the seam: only availability + auth + 5xx wrap as `LLMUnavailable`. (c) The 422 `nl_compile_error` is distinct from 422 `parse_error`: `nl_compile_error` means the LLM emitted output that couldn't be extracted as a DSL string; `parse_error` means the extracted DSL string failed the project's DSL parser. Different remediation: `nl_compile_error` → reword the NL query; `parse_error` → translator emitted DSL the parser doesn't accept (rare; would indicate a translator bug or cookbook drift).
+- Alternatives considered: (a) Wrap all `anthropic.APIError` as `LLMUnavailable`. Rejected per H-H1H2-001 mid-slice review — conflates availability faults with code bugs. (b) Single `nl_route_error` umbrella code covering both translator and downstream errors. Rejected — loses signal; consumers want to distinguish "LLM gave us bad output" from "DSL pipeline rejected good output."
+- Confidence: High. The 5xx/4xx split is a well-understood HTTP semantic; the `nl_compile_error` vs `parse_error` distinction is grounded in the orchestration boundary.
+- Made-by: orchestrator-mode (low-stakes / high-confidence; extends an established §1 table).
+- Commit: `0dda204` (H4 route handler maps exceptions); `b0f097f` (H2b narrows except chain per H-H1H2-001); `43a71e6` (H6 canonical-09 §1 codifies the new rows).
+- Files: src/app/routes/nl.py; src/nlp/llm_client.py; src/nlp/translator.py; docs/canonical/09_backend-service-boundaries.md §1
+- Spec refs: REQ:09.api-gateway (status table extension); REQ:09.nl-to-dsl (translator failure semantics)
+- Cross-refs: DEC-064 (Slice G's status code mapping table that DEC-070 extends).
+
+## DEC-071 — System prompt assembled at module import from `docs/agent/dsl-cookbook.md`
+- Status: Accepted
+- Question: Canonical-09 §2 says the LLM receives the capability + concept registry as context. Two implementation paths: (a) static system prompt assembled once at startup from the cookbook + a translator framing; (b) programmatic registry serialization injected at request time.
+- Decision: Static assembly. `src/nlp/prompts/system_prompt.py` reads `docs/agent/dsl-cookbook.md` at module import and prepends a compile-only translator framing. Cached as module constant `SYSTEM_PROMPT`. Cookbook edits require app restart to take effect.
+- Rationale: (a) Slice E shipped the cookbook (500 lines) specifically as the LLM-facing surface. Re-using it is the cheapest move that respects the existing investment. (b) Static prompt enables Anthropic prompt caching trivially — `cache_control` block on the system prompt + per-request user message keeps marginal cost low. (c) Cookbook drift between sessions is tolerable for MVP — the cookbook is human-curated and changes infrequently. (d) Programmatic serialization (option b) is a bigger lift: it requires designing the registry-summary schema, deciding what fraction of the registry to embed, handling growth as the registry adds rows. Premature for MVP. (e) The cookbook's "Coming Soon" / unsupported-features section is critical — it tells the LLM what NOT to emit. Re-deriving that list from the capability registry is non-trivial.
+- Alternatives considered: (b) Programmatic serialization. Rejected — premature; revisit if the cookbook proves inadequate against real research questions (OQ-H1). (c) Hybrid: cookbook + small dynamic block listing currently-verified concepts. Rejected — adds complexity for marginal benefit; the cookbook's concept-registry section is already informative.
+- Confidence: Medium-high. The cookbook's 500-line size is acceptable for MVP system prompts; revisit if context-window or cache-hit-rate becomes a problem.
+- Made-by: orchestrator-mode (low-stakes / re-uses prior work).
+- Commit: `18a8d1a` (H2 system_prompt module).
+- Files: src/nlp/prompts/system_prompt.py; src/nlp/translator.py (consumer); docs/canonical/09_backend-service-boundaries.md §2 (codifies)
+- Spec refs: REQ:09.nl-to-dsl
+- Cross-refs: DEC-060 (Slice E agent-facing-docs directory boundary — cookbook lives in `docs/agent/`); OQ-H1 (slice review: is the static cookbook embedding sufficient?).
+
+## DEC-072 — No confidence-threshold gate; confidence is informational, not control
+- Status: Accepted
+- Question: The translator emits `confidence: float`. Should the system gate execution on a confidence threshold (reject low-confidence translations as 422)?
+- Decision: No threshold gate. The translator emits its self-reported confidence; the route surfaces it in `translation.confidence`; the caller decides whether to execute, re-prompt, or display alternatives. The system never silently filters or rejects based on confidence.
+- Rationale: (a) Per DEC-024 + project epistemic charter: the system tests priors, it does not pre-empt them. A confidence gate would silently substitute the system's judgment for the user's. (b) LLMs report confidence inconsistently; threshold gating would calibrate to LLM-reported values that aren't trustworthy. (c) The honest user-facing affordance is the `alternatives` list — if confidence is low, surfaces alternatives, let the caller pick. (d) Future iteration: the explainer could flag low-confidence translations in prose, but the route's HTTP response stays informational.
+- Alternatives considered: (a) Reject confidence < 0.5 with 422. Rejected — silent rejection is opaque; user gets no recourse without understanding the threshold. (b) Filter alternatives by confidence. Rejected — same problem. (c) Issue a `validation.findings` warning at low confidence. Possible future addition but beyond Slice H scope; the surface today is the `confidence` value itself.
+- Confidence: High. Aligns with DEC-024 and the corpus-is-ground-truth charter.
+- Made-by: orchestrator-mode.
+- Commit: `18a8d1a` (H2 translator); `43a71e6` (H6 canonical-09 §2 codifies).
+- Files: src/nlp/translator.py; docs/canonical/09_backend-service-boundaries.md §2
+- Spec refs: REQ:09.nl-to-dsl
+- Cross-refs: DEC-024 (corpus is ground truth — output-side companion); H-CLOSE-003 (defaulting confidence to 0.0 on missing-from-LLM is the structural-honesty companion to "no threshold gate" — never claim certainty the LLM didn't claim).
+
+## DEC-073 — Alternatives surfaced in response, NOT used internally for retry
+- Status: Accepted
+- Question: The translator returns `alternatives: list[str]` (alternative DSL interpretations). Should the system auto-execute alternatives in parallel and surface a combined result, or surface alternatives as data for the caller to inspect?
+- Decision: Alternatives are surfaced verbatim in `translation.alternatives`. Each is a DSL string. The caller can re-submit any alternative via `POST /api/v1/query/dsl` if they want to explore it. The system does NOT auto-execute alternatives.
+- Rationale: (a) Auto-executing alternatives silently expands the search beyond what the user asked for. (b) Alternatives are a transparency affordance, not a retry mechanism — surfacing them honors canonical-09 §2 constraint #3 ("must surface ambiguity rather than silently resolve it"). (c) Token + DB cost concerns: each alternative would multiply executor cost without user authorization. (d) The user's research workflow benefits from seeing alternatives explicitly: "here are 3 ways your question could compile to DSL; pick one and re-submit."
+- Alternatives considered: (a) Auto-execute alternatives in parallel; merge result sets. Rejected — silently broadens the search. (b) Auto-execute the highest-confidence alternative if primary fails to match. Rejected — fallback chain becomes unpredictable.
+- Confidence: High.
+- Made-by: orchestrator-mode.
+- Commit: `4448d59` (H3 schemas surface `alternatives`); `43a71e6` (H6 canonical-09 §2 codifies).
+- Files: src/app/schemas.py; src/nlp/translator.py; docs/canonical/09_backend-service-boundaries.md §2
+- Spec refs: REQ:09.nl-to-dsl (constraint #3 ambiguity-surfacing)
+- Cross-refs: DEC-072 (companion: confidence-as-information, not control).
+
+## DEC-074 — `LLMClient` and `TranslationContext` lifespan-scoped; `get_llm_client` provider raises 503 if state None
+- Status: Accepted
+- Question: Where do the `LLMClient` and `TranslationContext` instances live? When are they constructed and destroyed?
+- Decision: Both are process-scoped resources constructed once during the FastAPI `lifespan` async context manager and stashed on `app.state.llm_client` / `app.state.translation_context`. Lifespan reads `ANTHROPIC_API_KEY` independently from `DATABASE_URL` — the DSL route stays serviceable when only `ANTHROPIC_API_KEY` is missing. Construction failures (e.g., import-time anthropic.Anthropic() raises) are intentionally fail-fast — the lifespan startup raises and uvicorn refuses to serve. The `get_llm_client(request)` and `get_translation_context(request)` providers raise 503 (`llm_unavailable` / `translation_context_unavailable`) when state is `None`. Tests bypass via `app.dependency_overrides`.
+- Rationale: (a) Mirrors `get_engine` / `get_concept_registry` exactly (DEC-G2, Slice G). Same shape, same failure mode, same canonical-09 §1 envelope. Consistency is the point. (b) Independent degradation: missing `ANTHROPIC_API_KEY` shouldn't take the DSL route offline. The lifespan branches explicitly on each env var. (c) Fail-fast on construction errors: hiding deployment problems behind runtime 503s makes them harder to diagnose. The `try/finally` block in lifespan disposes the engine on shutdown but doesn't catch construction errors — they propagate, uvicorn refuses to start, the operator sees the actual problem (H-H3H4-001 docstring clarification).
+- Alternatives considered: (a) Construct LLMClient lazily on first request. Rejected — would add cold-start latency to the first NL request, and would couple request handling to a side-effecting construction step. (b) Read ANTHROPIC_API_KEY at request time inside the route. Rejected — defeats the lifespan-scoped pattern; would re-construct the client per request. (c) Catch construction errors in lifespan and degrade to None. Rejected — masks deployment problems.
+- Confidence: High. The pattern is the natural extension of Slice G's DI architecture.
+- Made-by: orchestrator-mode.
+- Commit: `0dda204` (H4 lifespan + providers); `e289499` (H4b independent-degradation contract clarification).
+- Files: src/app/main.py (lifespan); src/app/dependencies.py (providers); src/app/routes/nl.py (consumer); docs/canonical/09_backend-service-boundaries.md §2 (codifies)
+- Spec refs: REQ:09.nl-to-dsl; REQ:09.api-gateway (DI parity)
+- Cross-refs: DEC-G2 (Slice G DI architecture — DEC-074 mirrors it for the LLM seam); H-H3H4-001 (independent-degradation contract clarification).

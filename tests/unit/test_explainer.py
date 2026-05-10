@@ -8,8 +8,6 @@ tested in isolation at known boundaries.
 
 from __future__ import annotations
 
-import pytest
-
 from src.engine.models import (
     AlternativeOrderingCount,
     Contextualization,

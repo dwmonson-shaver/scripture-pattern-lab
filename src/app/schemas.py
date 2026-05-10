@@ -61,7 +61,10 @@ class QueryNLRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    nl_query: str = Field(min_length=1)
+    # 2000 chars accommodates real research questions (longest seen in practice
+    # is ~200 chars) while bounding adversarial / accidentally-pasted-prose
+    # inputs that would otherwise propagate to the LLM unchecked. H-CLOSE-002.
+    nl_query: str = Field(min_length=1, max_length=2000)
 
 
 class QueryNLResponse(QueryDSLResponse):
