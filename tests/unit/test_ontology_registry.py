@@ -306,3 +306,107 @@ class TestListAllConceptsEmptyRegistry:
     def test_empty_returns_empty_list(self) -> None:
         from src.ontology.registry import ConceptRegistry
         assert ConceptRegistry.empty().list_all_concepts() == []
+
+
+def _mock_engine_returning(rows: list) -> object:  # noqa: ANN401
+    """Chain-mock SQLAlchemy engine.connect().execute().all() → rows.
+
+    Mirrors the pattern in tests/unit/test_contextualization.py.
+    """
+    from unittest.mock import MagicMock
+
+    engine = MagicMock()
+    connection = MagicMock()
+    connection_cm = MagicMock()
+    connection_cm.__enter__.return_value = connection
+    connection_cm.__exit__.return_value = False
+    engine.connect.return_value = connection_cm
+
+    result = MagicMock()
+    result.all.return_value = rows
+    connection.execute.return_value = result
+    return engine
+
+
+def _row(name: str, description: str | None, vstate: str, lemma: str | None,
+         language: str | None) -> object:  # noqa: ANN401
+    """Mock a SQLAlchemy Row whose .name / .description / etc. match the SELECT."""
+    from unittest.mock import MagicMock
+    r = MagicMock()
+    r.name = name
+    r.description = description
+    r.verification_state = vstate
+    r.lemma = lemma
+    r.language = language
+    return r
+
+
+class TestListAllConceptsSqlPath:
+    """Table-backed unit tests for list_all_concepts using MagicMock chaining
+    (no live DB). I-MID-001 closure: cover the SQL path that the empty-registry
+    test alone could not exercise.
+    """
+
+    def test_concept_with_no_lemma_rows_appears_with_empty_lemmas(self) -> None:
+        from src.ontology.registry import ConceptRegistry
+        # Single concept, no JOINed lemma row: LEFT JOIN emits a row with
+        # NULL lemma + NULL language.
+        rows = [
+            _row("solitude", "no lemmas yet", "unverified", None, None),
+        ]
+        registry = ConceptRegistry(engine=_mock_engine_returning(rows))
+        result = registry.list_all_concepts()
+        assert len(result) == 1
+        assert result[0].name == "solitude"
+        assert result[0].lemmas == []
+        assert result[0].lemma_count == 0
+        assert result[0].verification_state == "unverified"
+
+    def test_multilanguage_lemmas_filtered_by_language(self) -> None:
+        from src.ontology.registry import ConceptRegistry
+        # Same concept in two languages; default language=grc filter must
+        # drop the heb lemma without dropping the concept.
+        rows = [
+            _row("faith", "trust", "unverified", "πίστις", "grc"),
+            _row("faith", "trust", "unverified", "אמונה", "heb"),
+        ]
+        registry = ConceptRegistry(engine=_mock_engine_returning(rows))
+        result = registry.list_all_concepts(language="grc")
+        assert len(result) == 1
+        assert result[0].lemmas == ["πίστις"]
+        assert result[0].lemma_count == 1
+
+    def test_language_filter_with_no_matches_keeps_concept_with_empty_lemmas(
+        self,
+    ) -> None:
+        from src.ontology.registry import ConceptRegistry
+        # Concept has only heb lemmas; grc filter must NOT drop the concept —
+        # it must surface with lemmas=[]. Forward-compat invariant for
+        # multi-language registry growth.
+        rows = [
+            _row("hesed", "loyalty", "unverified", "חסד", "heb"),
+        ]
+        registry = ConceptRegistry(engine=_mock_engine_returning(rows))
+        result = registry.list_all_concepts(language="grc")
+        assert len(result) == 1
+        assert result[0].name == "hesed"
+        assert result[0].lemmas == []
+        assert result[0].lemma_count == 0
+
+    def test_aggregates_multiple_concepts(self) -> None:
+        from src.ontology.registry import ConceptRegistry
+        rows = [
+            _row("faith", "trust", "unverified", "πίστις", "grc"),
+            _row("faith", "trust", "unverified", "πιστεύω", "grc"),
+            _row("hope", "expectation", "corpus_observed", "ἐλπίς", "grc"),
+        ]
+        registry = ConceptRegistry(engine=_mock_engine_returning(rows))
+        result = registry.list_all_concepts()
+        names = [c.name for c in result]
+        assert names == ["faith", "hope"]
+        faith = next(c for c in result if c.name == "faith")
+        assert faith.lemma_count == 2
+        assert faith.lemmas == ["πίστις", "πιστεύω"]
+        hope = next(c for c in result if c.name == "hope")
+        assert hope.lemma_count == 1
+        assert hope.verification_state == "corpus_observed"
