@@ -112,7 +112,11 @@ must cover all of them. Unmapped exceptions fall through to 500.
 | `RegistryRequired` from executor             | 503 Service Unavailable          | `registry_required`       | `concept_name`              |
 | Engine missing (lifespan didn't construct)   | 503 Service Unavailable          | `engine_unavailable`      | (none)                      |
 | Registry missing (lifespan didn't construct) | 503 Service Unavailable          | `registry_unavailable`    | (none)                      |
-| Any uncaught exception                       | 500 Internal Server Error        | `internal_error`          | (none — message is generic; full traceback logged server-side) |
+| `LLMUnavailable` from `src/nlp/llm_client.py` (network, auth, rate-limit, 5xx server) | 503 Service Unavailable | `llm_unavailable` | `reason` |
+| LLM client missing (lifespan didn't construct, ANTHROPIC_API_KEY unset) | 503 Service Unavailable | `llm_unavailable` | (none) |
+| Translation context missing (lifespan didn't construct) | 503 Service Unavailable | `translation_context_unavailable` | (none) |
+| `NLCompileError` from `src/nlp/translator.py` (LLM output couldn't be parsed as DSL) | 422 Unprocessable Content | `nl_compile_error` | `nl_query`, `attempted_output`, `reason` |
+| Any uncaught exception                       | 500 Internal Server Error        | `internal_error`          | (none — message is generic; full traceback logged server-side. Includes 4xx anthropic.* errors that propagate raw — DEC-070 distinguishes "LLM unavailable" from "we wrote a bad request to the LLM API.") |
 
 `partial` and `supported` validation statuses both return HTTP 200
 with `validation.findings` carrying any reduction warnings; the
@@ -136,27 +140,118 @@ thread-safe across `connect()` calls.
 
 <!-- REQ:09.nl-to-dsl -->
 ### 2. NL-to-DSL Service
-**Location**: `src/nlp/`
+**Location**: `src/nlp/translator.py` (compile logic) + `src/nlp/llm_client.py`
+(LLMClient seam) + `src/nlp/prompts/system_prompt.py` (cached system prompt).
 **Responsibility**: Translate natural language queries into DSL syntax using an LLM.
 
 **Interface**:
 ```python
-def translate(nl_query: str, context: TranslationContext) -> TranslationResult
+def translate(
+    nl_query: str,
+    context: TranslationContext,
+    llm_client: LLMClient,
+) -> TranslationResult
 
-class TranslationResult:
-    dsl: str                    # Generated DSL string
-    confidence: float           # Model's confidence in the translation
-    alternatives: list[str]     # Alternative DSL interpretations if ambiguous
-    explanation: str            # Why the model chose this translation
+class TranslationResult(BaseModel):  # frozen Pydantic v2
+    dsl: str                    # Generated DSL string (load-bearing field)
+    confidence: float = 1.0     # Self-assessed translation fidelity (DEC-072)
+    alternatives: list[str] = []  # Alternative DSL interpretations if ambiguous
+    explanation: str = ""       # Translator's prose justification
+
+class TranslationContext(BaseModel):  # frozen Pydantic v2
+    capability_registry_summary: str
+    concept_registry_summary: str
 ```
 
-**Constraints**:
-- Must produce valid DSL syntax (parseable by the DSL parser)
-- Must not invent DSL features that don't exist
-- Must surface ambiguity rather than silently resolve it
-- The LLM receives the current capability registry as context [DEC-003][DEC-006]
+**LLMClient seam** (DEC-067): `LLMClient` is a concrete base class (not
+`typing.Protocol`) with one method, `complete(system_prompt: str,
+user_message: str) -> str`. The sole concrete child for MVP is
+`AnthropicLLMClient`. Adding another provider means subclassing — no
+architectural change. Tests stub the seam via `monkeypatch.setattr` on
+the import-binding in the module under test, matching the project's
+existing IoC pattern.
 
-**MVP implementation**: Single LLM call with a system prompt containing DSL grammar, capability registry, and concept registry. No fine-tuning, no multi-turn refinement.
+**Failure-mode wrapping** (DEC-070, H-H1H2-001): `AnthropicLLMClient.complete`
+catches and wraps as `LLMUnavailable` only the *availability* + *auth* +
+*5xx-server* exceptions: `APIConnectionError`, `APITimeoutError`,
+`RateLimitError`, `AuthenticationError`, `PermissionDeniedError`,
+`InternalServerError`. Other `anthropic.APIError` subclasses
+(`BadRequestError`, `NotFoundError`, `UnprocessableEntityError`,
+`ConflictError`) are translator-side request bugs, not availability
+issues; they propagate raw and the route returns 500 `internal_error`.
+
+**Constraints**:
+- Must produce valid DSL syntax (parseable by the DSL parser).
+- Must not invent DSL features that don't exist (the system prompt embeds
+  `docs/agent/dsl-cookbook.md` which documents the full executable surface
+  + the unsupported "Coming Soon" forms).
+- Must surface ambiguity via `alternatives` rather than silently resolve
+  it. (Verified by `test_nl_query_for_unsupported_form_surfaces_alternatives`.)
+- The LLM receives the current capability registry + concept registry as
+  context [DEC-003][DEC-006].
+- No confidence-threshold gate (DEC-072): `confidence` is surfaced; the
+  caller decides whether to execute. Filtering by confidence pre-empts
+  user judgment without corpus-grounded basis (corpus-is-ground-truth
+  charter, DEC-024).
+
+**MVP implementation**: Single LLM call with a static system prompt
+assembled at module import time from `docs/agent/dsl-cookbook.md` plus a
+compile-only translator framing (DEC-071). No fine-tuning, no multi-turn
+refinement. LLM provider: Anthropic Claude (DEC-067 confirms the MVP
+technology stack pin).
+
+**Output format protocol**: The system prompt instructs the LLM to emit
+a structured response:
+```
+DSL: <one DSL string on a single line>
+Confidence: <float in [0.0, 1.0]>
+Alternatives:
+- <optional alt 1>
+- <optional alt 2>
+Explanation: <one short sentence>
+```
+The translator extracts these fields with line-anchored regex. Missing
+or empty `DSL:` line raises `NLCompileError`; missing optional fields
+default to `confidence=1.0`, `alternatives=[]`, `explanation=""`. (Note:
+the "default to 1.0 on missing" choice is recorded as an open question
+for slice review — see thoughts/design-slice-h-nl-translator-2026-05-09.md
+OQ-H4.)
+
+**Dependency injection**: `LLMClient` and `TranslationContext` are
+process-scoped resources constructed once during the FastAPI `lifespan`
+async context manager (DEC-074). Lifespan reads `ANTHROPIC_API_KEY` and
+`DATABASE_URL` independently — missing `ANTHROPIC_API_KEY` only disables
+the NL route; the DSL route stays serviceable. Construction errors are
+fail-fast (deployment problems should not be masked behind runtime 503).
+Route handlers obtain the resources via `Depends(get_llm_client)` /
+`Depends(get_translation_context)`.
+
+**Concurrency**: same as §1 — sync `def` route handler, FastAPI offloads
+to a thread pool. The Anthropic SDK has a sync interface that works
+inside the thread pool offload.
+
+**Testing**: unit tests mock `anthropic.Anthropic` at the SDK seam
+(`unittest.mock.patch("src.nlp.llm_client.anthropic.Anthropic")`); they
+do not consume API tokens. The slice exit gate
+`tests/integration/test_app_nl_route_live_llm.py` runs against the live
+LLM and is gated by both `integration` and `live_llm` markers, plus
+runtime env-var assertions for `DATABASE_URL` and `ANTHROPIC_API_KEY`.
+Default `pytest` excludes both markers.
+
+**Response envelope**: `POST /api/v1/query/nl` returns `QueryNLResponse`
+which subclasses `QueryDSLResponse` (DEC-069) and adds one field:
+```python
+class QueryNLResponse(QueryDSLResponse):
+    translation: TranslationMetadata  # confidence, alternatives, explanation
+
+class TranslationMetadata(BaseModel):  # frozen
+    confidence: float
+    alternatives: list[str]
+    explanation: str
+```
+The `query` field carries the *compiled* DSL (what the corpus actually
+saw), not the original NL — original NL is in the request body
+(transparency rule, REQ:01).
 
 <!-- REQ:09.dsl-parser -->
 ### 3. DSL Parser
