@@ -17,9 +17,11 @@ from __future__ import annotations
 
 from sqlalchemy.engine import Engine
 
-from src.app.schemas import QueryDSLResponse
+from src.app.schemas import QueryDSLResponse, QueryNLResponse, TranslationMetadata
 from src.engine.parser import parse
 from src.nlp.explainer import explain
+from src.nlp.llm_client import LLMClient
+from src.nlp.translator import TranslationContext, translate
 from src.ontology.registry import ConceptRegistry
 from src.retrieval.retrieve import retrieve
 from src.validation.registry import CapabilityRegistry
@@ -91,4 +93,49 @@ def run_dsl_query(
         validation=validation,
         result=result,
         explanation=explained,
+    )
+
+
+def run_nl_query(
+    nl_query: str,
+    engine: Engine,
+    registry: ConceptRegistry,
+    llm_client: LLMClient,
+    context: TranslationContext,
+) -> QueryNLResponse:
+    """Compile NL→DSL and then run the full DSL pipeline.
+
+    Composes `translate()` (REQ:09.nl-to-dsl, canonical-09 §2) with
+    `run_dsl_query()`. Translator-side exceptions propagate unchanged:
+
+    - `LLMUnavailable` from the LLM client → route maps to 503 (DEC-070).
+    - `NLCompileError` from the translator → route maps to 422
+      `nl_compile_error` (DEC-070).
+
+    Downstream pipeline exceptions (`ParseError`,
+    `ValidationUnsupported`, `UnsupportedPlanShape`, `ConceptNotMapped`,
+    `RegistryRequired`) propagate from `run_dsl_query()` unchanged.
+
+    Returns a `QueryNLResponse` whose `query` field is the *compiled*
+    DSL string (not the original NL — the original lives in the
+    request body).
+    """
+    translation_result = translate(nl_query, context, llm_client)
+
+    dsl_response = run_dsl_query(
+        dsl=translation_result.dsl,
+        engine=engine,
+        registry=registry,
+    )
+
+    return QueryNLResponse(
+        query=dsl_response.query,
+        validation=dsl_response.validation,
+        result=dsl_response.result,
+        explanation=dsl_response.explanation,
+        translation=TranslationMetadata(
+            confidence=translation_result.confidence,
+            alternatives=translation_result.alternatives,
+            explanation=translation_result.explanation,
+        ),
     )

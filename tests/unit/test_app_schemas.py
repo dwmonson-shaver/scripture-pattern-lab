@@ -3,7 +3,14 @@
 import pytest
 from pydantic import ValidationError
 
-from src.app.schemas import ErrorResponse, QueryDSLRequest, QueryDSLResponse
+from src.app.schemas import (
+    ErrorResponse,
+    QueryDSLRequest,
+    QueryDSLResponse,
+    QueryNLRequest,
+    QueryNLResponse,
+    TranslationMetadata,
+)
 from src.engine.models import ExplainedResultSet, RetrievalResult
 from src.validation.validator import ValidationResult
 
@@ -142,3 +149,90 @@ class TestQueryDSLResponse:
         )
         restored = QueryDSLResponse.model_validate_json(resp.model_dump_json())
         assert restored == resp
+
+
+# -- NL-route schemas (Slice H) -----------------------------------------
+
+
+class TestQueryNLRequest:
+    def test_construct(self) -> None:
+        req = QueryNLRequest(nl_query="what does Paul say about love?")
+        assert req.nl_query == "what does Paul say about love?"
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            QueryNLRequest(nl_query="")
+
+    def test_frozen(self) -> None:
+        req = QueryNLRequest(nl_query="x")
+        with pytest.raises(ValidationError):
+            req.nl_query = "y"
+
+
+class TestTranslationMetadata:
+    def test_construct(self) -> None:
+        meta = TranslationMetadata(
+            confidence=0.85,
+            alternatives=["faith > hope", "hope > love"],
+            explanation="three-step concept sequence",
+        )
+        assert meta.confidence == 0.85
+        assert meta.alternatives == ["faith > hope", "hope > love"]
+        assert meta.explanation == "three-step concept sequence"
+
+    def test_frozen(self) -> None:
+        meta = TranslationMetadata(confidence=1.0, alternatives=[], explanation="")
+        with pytest.raises(ValidationError):
+            meta.confidence = 0.5
+
+
+class TestQueryNLResponseInheritance:
+    @staticmethod
+    def _stub_validation() -> ValidationResult:
+        return ValidationResult(
+            status="supported",
+            executable_plan=None,
+            findings=[],
+            engine_version="0.1.0",
+            grounding="prior-grounded",
+        )
+
+    def test_inherits_dsl_response_fields(self) -> None:
+        # QueryNLResponse(QueryDSLResponse) — must accept the same query,
+        # validation, result, explanation fields verbatim.
+        from src.engine.models import Contextualization
+
+        empty = RetrievalResult(
+            candidates=[],
+            stages_used=[],
+            contextualization=Contextualization(
+                observed_count=0,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+                null_distribution=None,
+            ),
+        )
+        explanation = ExplainedResultSet(
+            query_shown="faith",
+            nl_source=None,
+            validation_notes=[],
+            results=[],
+            contextualization=None,
+            summary="empty",
+        )
+        meta = TranslationMetadata(confidence=0.9, alternatives=[], explanation="")
+
+        resp = QueryNLResponse(
+            query="faith",
+            validation=self._stub_validation(),
+            result=empty,
+            explanation=explanation,
+            translation=meta,
+        )
+
+        assert resp.query == "faith"
+        assert resp.translation is meta
+        assert resp.translation.confidence == 0.9
+        # Subclass relation:
+        assert isinstance(resp, QueryDSLResponse)
