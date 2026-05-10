@@ -1,9 +1,15 @@
 """FastAPI app factory + lifespan for the Scripture Pattern Lab service.
 
-The lifespan reads `DATABASE_URL` once at process startup, builds the
-`Engine` and `ConceptRegistry`, and stashes them on `app.state`. The
-route handlers obtain them via `Depends()` providers in
+The lifespan reads `DATABASE_URL` and `ANTHROPIC_API_KEY` once at process
+startup, builds the `Engine`, `ConceptRegistry`, `LLMClient`, and
+`TranslationContext`, and stashes them on `app.state`. The route
+handlers obtain them via `Depends()` providers in
 `src/app/dependencies.py`.
+
+Each env var's absence degrades independently: missing DATABASE_URL
+makes /api/v1/query/dsl + /api/v1/query/nl return 503; missing
+ANTHROPIC_API_KEY only makes /api/v1/query/nl return 503 (the DSL
+route is still serviceable).
 
 Run in production with:
     uvicorn src.app.main:app --host 0.0.0.0 --port 8000
@@ -21,8 +27,11 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from src.app.routes import health as health_routes
+from src.app.routes import nl as nl_routes
 from src.app.routes import query as query_routes
 from src.ingestion.db import get_engine as build_engine_from_env
+from src.nlp.llm_client import build_anthropic_client_from_env
+from src.nlp.translator import TranslationContext
 from src.ontology.registry import ConceptRegistry
 
 logger = logging.getLogger(__name__)
@@ -56,6 +65,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning(
                 "lifespan startup: DATABASE_URL unset; engine + registry left as None"
             )
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            app.state.llm_client = build_anthropic_client_from_env()
+            app.state.translation_context = TranslationContext(
+                capability_registry_summary=(
+                    "MVP capability registry — see docs/canonical/06_capability-validator.md "
+                    "for the executable subset."
+                ),
+                concept_registry_summary=(
+                    "Concept registry seeded from data/concepts/ — see "
+                    "docs/canonical/08_mvp-corpus-scope.md for verification states."
+                ),
+            )
+            logger.info("lifespan startup: llm_client + translation_context constructed")
+        else:
+            app.state.llm_client = None
+            app.state.translation_context = None
+            logger.warning(
+                "lifespan startup: ANTHROPIC_API_KEY unset; "
+                "llm_client + translation_context left as None"
+            )
         yield
     finally:
         if engine is not None:
@@ -81,6 +112,7 @@ def create_app() -> FastAPI:
     )
     fastapi_app.include_router(health_routes.router)
     fastapi_app.include_router(query_routes.router)
+    fastapi_app.include_router(nl_routes.router)
     return fastapi_app
 
 

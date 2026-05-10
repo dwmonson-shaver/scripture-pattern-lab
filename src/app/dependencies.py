@@ -12,6 +12,8 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.engine import Engine
 
 from src.app.schemas import ErrorResponse
+from src.nlp.llm_client import LLMClient
+from src.nlp.translator import TranslationContext
 from src.ontology.registry import ConceptRegistry
 
 
@@ -56,3 +58,48 @@ def get_concept_registry(request: Request) -> ConceptRegistry:
             ).model_dump(),
         )
     return registry
+
+
+def get_llm_client(request: Request) -> LLMClient:
+    """Return the process-scoped LLMClient stashed on app.state.llm_client.
+
+    Raises 503 `llm_unavailable` if the lifespan didn't construct one
+    (ANTHROPIC_API_KEY unset at startup). Tests typically override this
+    provider via `app.dependency_overrides[get_llm_client]`. (DEC-074.)
+    """
+    llm_client = getattr(request.app.state, "llm_client", None)
+    if llm_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="llm_unavailable",
+                message=(
+                    "LLM client is not configured. "
+                    "Set ANTHROPIC_API_KEY and restart the service."
+                ),
+            ).model_dump(),
+        )
+    return llm_client
+
+
+def get_translation_context(request: Request) -> TranslationContext:
+    """Return the process-scoped TranslationContext stashed on app.state.
+
+    The context is built once at startup from the live capability +
+    concept registries. Raises 503 if the lifespan didn't construct it
+    (which happens iff the LLM client also wasn't built — they share
+    the ANTHROPIC_API_KEY gate).
+    """
+    context = getattr(request.app.state, "translation_context", None)
+    if context is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="translation_context_unavailable",
+                message=(
+                    "Translation context is not configured. "
+                    "Set ANTHROPIC_API_KEY and restart the service."
+                ),
+            ).model_dump(),
+        )
+    return context

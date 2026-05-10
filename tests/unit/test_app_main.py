@@ -16,8 +16,13 @@ from src.ontology.registry import ConceptRegistry
 
 @pytest.fixture
 def app_no_db(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    """App with DATABASE_URL forcibly unset — lifespan leaves state None."""
+    """App with DATABASE_URL + ANTHROPIC_API_KEY forcibly unset.
+
+    Lifespan leaves engine, registry, llm_client, and translation_context
+    all as None on app.state.
+    """
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return create_app()
 
 
@@ -56,6 +61,47 @@ class TestLifespanWithoutDatabaseUrl:
         with TestClient(app_no_db):
             assert app_no_db.state.engine is None
             assert app_no_db.state.registry is None
+            assert app_no_db.state.llm_client is None
+            assert app_no_db.state.translation_context is None
+
+
+class TestLifespanWithAnthropicApiKey:
+    """Independent ANTHROPIC_API_KEY branch — DEC-074 + Slice H structure outline."""
+
+    def test_lifespan_constructs_llm_client_and_context_when_key_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stub-test-key")
+        # Stub the builder so we don't hit anthropic.Anthropic() at import time.
+        fake_llm = MagicMock(name="fake_llm_client")
+        monkeypatch.setattr(
+            "src.app.main.build_anthropic_client_from_env", lambda: fake_llm
+        )
+        app = create_app()
+        with TestClient(app):
+            assert app.state.llm_client is fake_llm
+            # TranslationContext is built with non-empty summaries.
+            ctx = app.state.translation_context
+            assert ctx is not None
+            assert ctx.capability_registry_summary
+            assert ctx.concept_registry_summary
+
+    def test_db_set_but_llm_unset_leaves_llm_state_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # DATABASE_URL and ANTHROPIC_API_KEY degrade independently.
+        fake_engine = MagicMock(spec=Engine, name="fake_engine")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://stub")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "src.app.main.build_engine_from_env", lambda: fake_engine
+        )
+        app = create_app()
+        with TestClient(app):
+            assert app.state.engine is fake_engine
+            assert app.state.llm_client is None
+            assert app.state.translation_context is None
 
 
 class TestLifespanWithDatabaseUrl:
