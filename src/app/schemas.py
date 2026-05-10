@@ -12,6 +12,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.engine.models import ExplainedResultSet, RetrievalResult
+from src.ontology.registry import ConceptSummary
 from src.validation.validator import ValidationResult
 
 
@@ -78,6 +79,19 @@ class QueryNLResponse(QueryDSLResponse):
     """
 
     translation: TranslationMetadata
+
+
+class ConceptsResponse(BaseModel):
+    """Response body for GET /api/v1/concepts.
+
+    Contains the seeded registry's concepts with embedded lemma lists per
+    DEC-076 (no pagination at MVP scale; revisit when registry grows past
+    Bucket 9's trigger).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    concepts: list[ConceptSummary]
 
 
 class ErrorResponse(BaseModel):

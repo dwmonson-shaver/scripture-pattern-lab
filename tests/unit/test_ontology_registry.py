@@ -260,3 +260,49 @@ class TestTableMirrors:
             set(inverse_claims_table.columns.keys())
             == EXPECTED_REGISTRY_TABLES["inverse_claims"]
         )
+
+
+# -- ConceptSummary + list_all_concepts (Slice I) ----------------------
+
+
+class TestConceptSummary:
+    def test_construct_minimal(self) -> None:
+        from src.ontology.registry import ConceptSummary
+        s = ConceptSummary(name="faith")
+        assert s.name == "faith"
+        assert s.lemma_count == 0
+        assert s.lemmas == []
+        assert s.verification_state == "unverified"
+
+    def test_construct_full(self) -> None:
+        from src.ontology.registry import ConceptSummary
+        s = ConceptSummary(
+            name="love",
+            description="agape",
+            verification_state="corpus_observed",
+            lemma_count=2,
+            lemmas=["ἀγάπη", "ἀγαπάω"],
+        )
+        assert s.lemma_count == 2
+        assert s.lemmas == ["ἀγάπη", "ἀγαπάω"]
+
+    def test_frozen(self) -> None:
+        from pydantic import ValidationError
+
+        from src.ontology.registry import ConceptSummary
+        s = ConceptSummary(name="faith")
+        with pytest.raises(ValidationError):
+            s.name = "hope"
+
+    def test_invalid_verification_state_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from src.ontology.registry import ConceptSummary
+        with pytest.raises(ValidationError):
+            ConceptSummary(name="faith", verification_state="invalid")  # type: ignore[arg-type]
+
+
+class TestListAllConceptsEmptyRegistry:
+    def test_empty_returns_empty_list(self) -> None:
+        from src.ontology.registry import ConceptRegistry
+        assert ConceptRegistry.empty().list_all_concepts() == []

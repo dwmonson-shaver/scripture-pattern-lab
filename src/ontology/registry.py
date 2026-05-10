@@ -229,6 +229,23 @@ class InverseClaim(BaseModel):
     confidence: float | None = None
 
 
+class ConceptSummary(BaseModel):
+    """Aggregate view of a concept + its lemma list, used by the HTTP layer
+    to render the seeded registry without a second round-trip per concept.
+
+    `lemma_count` is redundant with `len(lemmas)` — kept as a separate field
+    so UI clients can render counts without traversing the array.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    description: str | None = None
+    verification_state: VerificationState = "unverified"
+    lemma_count: int = 0
+    lemmas: list[str] = []
+
+
 # ---------------------------------------------------------------------------
 # ConceptRegistry — read-only view over the four registry tables
 # ---------------------------------------------------------------------------
@@ -330,6 +347,64 @@ class ConceptRegistry:
         with self.engine.connect() as connection:
             rows = connection.execute(stmt).all()
         return [InverseClaim.model_validate(row._mapping) for row in rows]
+
+    def list_all_concepts(self, language: str = "grc") -> list[ConceptSummary]:
+        """Return all concepts with their lemma lists for a given language.
+
+        Single SQL query: SELECT concepts LEFT JOIN concept_lemmas, ordered by
+        concept name. Aggregation is done in Python (MVP scale ~30 concepts).
+        Lemmas are included for the requested language only; concepts with no
+        lemmas in that language still appear with `lemmas=[]`.
+
+        Returns [] when the registry is empty (engine=None).
+        """
+        if self.engine is None:
+            return []
+        stmt = (
+            select(
+                concepts_table.c.name,
+                concepts_table.c.description,
+                concepts_table.c.verification_state,
+                concept_lemmas_table.c.lemma,
+                concept_lemmas_table.c.language,
+            )
+            .select_from(
+                concepts_table.outerjoin(
+                    concept_lemmas_table,
+                    concepts_table.c.id == concept_lemmas_table.c.concept_id,
+                )
+            )
+            .order_by(concepts_table.c.name, concept_lemmas_table.c.lemma)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(stmt).all()
+
+        # Aggregate: one entry per concept name; lemmas filtered by language.
+        accumulator: dict[str, dict[str, object]] = {}
+        for row in rows:
+            name = row.name
+            entry = accumulator.setdefault(
+                name,
+                {
+                    "name": name,
+                    "description": row.description,
+                    "verification_state": row.verification_state,
+                    "lemmas": [],
+                },
+            )
+            if row.lemma is not None and row.language == language:
+                entry["lemmas"].append(row.lemma)  # type: ignore[union-attr]
+
+        return [
+            ConceptSummary(
+                name=entry["name"],  # type: ignore[arg-type]
+                description=entry["description"],  # type: ignore[arg-type]
+                verification_state=entry["verification_state"],  # type: ignore[arg-type]
+                lemma_count=len(entry["lemmas"]),  # type: ignore[arg-type]
+                lemmas=entry["lemmas"],  # type: ignore[arg-type]
+            )
+            for entry in accumulator.values()
+        ]
 
     def is_prior_grounded(
         self, concept_name: str, polarity: Polarity | None
