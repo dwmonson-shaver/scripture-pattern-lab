@@ -135,6 +135,63 @@ class TestAnthropicErrorWrapping:
             with pytest.raises(LLMUnavailable, match="AuthenticationError"):
                 client.complete("s", "u")
 
+    def test_internal_server_error_wraps_as_llm_unavailable(self) -> None:
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            response = MagicMock()
+            response.status_code = 500
+            response.headers = {}
+            inner.messages.create.side_effect = anthropic.InternalServerError(
+                message="upstream 500", response=response, body=None
+            )
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(LLMUnavailable, match="InternalServerError"):
+                client.complete("s", "u")
+
+    def test_permission_denied_wraps_as_llm_unavailable(self) -> None:
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            response = MagicMock()
+            response.status_code = 403
+            response.headers = {}
+            inner.messages.create.side_effect = anthropic.PermissionDeniedError(
+                message="forbidden", response=response, body=None
+            )
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(LLMUnavailable, match="PermissionDeniedError"):
+                client.complete("s", "u")
+
+    @pytest.mark.parametrize(
+        ("exc_class", "name"),
+        [
+            (anthropic.BadRequestError, "BadRequestError"),
+            (anthropic.NotFoundError, "NotFoundError"),
+            (anthropic.UnprocessableEntityError, "UnprocessableEntityError"),
+            (anthropic.ConflictError, "ConflictError"),
+        ],
+    )
+    def test_4xx_request_bugs_propagate_raw_not_as_llm_unavailable(
+        self, exc_class, name: str
+    ) -> None:
+        # Per H-H1H2-001 (P2 finding) + DEC-070: 4xx errors are
+        # translator-side request bugs, not availability issues. They
+        # must propagate raw so the route returns 500 internal_error
+        # (not 503 llm_unavailable).
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            response = MagicMock()
+            response.status_code = 400
+            response.headers = {}
+            inner.messages.create.side_effect = exc_class(
+                message=f"{name} fault", response=response, body=None
+            )
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(exc_class):
+                client.complete("s", "u")
+
 
 class TestBuildFromEnv:
     def test_unset_env_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:

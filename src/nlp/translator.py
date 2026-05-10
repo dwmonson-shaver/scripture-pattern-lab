@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.nlp.llm_client import LLMClient
 from src.nlp.prompts.system_prompt import SYSTEM_PROMPT
@@ -38,7 +38,7 @@ class TranslationResult(BaseModel):
     model_config = ConfigDict(frozen=True)
     dsl: str
     confidence: float = 1.0
-    alternatives: list[str] = []
+    alternatives: list[str] = Field(default_factory=list)
     explanation: str = ""
 
 

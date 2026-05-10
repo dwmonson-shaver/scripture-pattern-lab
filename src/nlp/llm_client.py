@@ -6,6 +6,10 @@ project's existing monkeypatch.setattr("module.NAME", stub) idiom.
 
 For MVP, the sole concrete child is AnthropicLLMClient. Adding another provider
 means adding a new subclass; no architectural change required.
+
+Security note: api_key is stored on the inner anthropic.Anthropic client. Do
+NOT log `vars(self._client)` or include the client in tracebacks via __repr__
+overrides — the SDK exposes the api_key publicly on the instance.
 """
 
 from __future__ import annotations
@@ -69,9 +73,16 @@ class AnthropicLLMClient(LLMClient):
             anthropic.APITimeoutError,
             anthropic.RateLimitError,
             anthropic.AuthenticationError,
+            anthropic.PermissionDeniedError,
+            anthropic.InternalServerError,
         ) as exc:
-            raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
-        except anthropic.APIError as exc:
+            # Availability + auth + server-side faults → 503 LLMUnavailable.
+            # Excluded on purpose: BadRequestError, NotFoundError,
+            # UnprocessableEntityError, ConflictError — these are
+            # translator-side request bugs, not availability issues; they
+            # propagate as raw exceptions and the route handler returns 500
+            # (DEC-070 distinguishes "API unavailable" from "we wrote bad
+            # request to the API"; H-H1H2-001).
             raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
 
         parts = [block.text for block in response.content if block.type == "text"]
