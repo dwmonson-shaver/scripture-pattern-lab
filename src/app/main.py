@@ -33,6 +33,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from src.app.routes import capabilities as capabilities_routes
 from src.app.routes import health as health_routes
 from src.app.routes import nl as nl_routes
 from src.app.routes import query as query_routes
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     fastapi_app.include_router(health_routes.router)
     fastapi_app.include_router(query_routes.router)
     fastapi_app.include_router(nl_routes.router)
+    fastapi_app.include_router(capabilities_routes.router)
     return fastapi_app
 
 
