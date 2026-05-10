@@ -38,6 +38,7 @@ from src.app.routes import concepts as concepts_routes
 from src.app.routes import health as health_routes
 from src.app.routes import nl as nl_routes
 from src.app.routes import query as query_routes
+from src.app.routes import validate as validate_routes
 from src.ingestion.db import get_engine as build_engine_from_env
 from src.nlp.llm_client import build_anthropic_client_from_env
 from src.nlp.translator import TranslationContext
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     fastapi_app.include_router(nl_routes.router)
     fastapi_app.include_router(capabilities_routes.router)
     fastapi_app.include_router(concepts_routes.router)
+    fastapi_app.include_router(validate_routes.router)
     return fastapi_app
 
 

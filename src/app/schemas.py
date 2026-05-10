@@ -81,6 +81,31 @@ class QueryNLResponse(QueryDSLResponse):
     translation: TranslationMetadata
 
 
+class QueryValidateRequest(BaseModel):
+    """Request body for POST /api/v1/query/validate."""
+
+    model_config = ConfigDict(frozen=True)
+
+    dsl: str = Field(min_length=1, max_length=10000)
+
+
+class QueryValidateResponse(BaseModel):
+    """Response body for POST /api/v1/query/validate.
+
+    Mirrors `QueryDSLResponse` shape (echoes the input + carries
+    structured output) but omits `result` and `explanation` — the
+    /validate path does not execute the engine. Per DEC-079, all
+    `validation.status` values (supported/partial/unsupported) return
+    HTTP 200; the only 422 path on this route is `parse_error` raised
+    on malformed DSL.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    query: str
+    validation: ValidationResult
+
+
 class ConceptsResponse(BaseModel):
     """Response body for GET /api/v1/concepts.
 

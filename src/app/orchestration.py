@@ -139,3 +139,21 @@ def run_nl_query(
             explanation=translation_result.explanation,
         ),
     )
+
+
+def run_validate_only(dsl: str, registry: ConceptRegistry) -> ValidationResult:
+    """Run parse + validate, no retrieve, no explain.
+
+    The HTTP companion to `POST /api/v1/query/validate`. Returns a
+    `ValidationResult` carrying the verdict (supported / partial /
+    unsupported) and any findings. Raises `ParseError` if the DSL is
+    syntactically malformed; never raises `ValidationUnsupported`
+    (DEC-079: validate's contract is "always return the verdict" —
+    `unsupported` is information, not an error).
+    """
+    plan = parse(dsl)
+    return validate(
+        plan,
+        CapabilityRegistry.mvp(),
+        concept_registry=registry,
+    )

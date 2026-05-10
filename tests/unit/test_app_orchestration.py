@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.app.orchestration import ValidationUnsupported, run_dsl_query, run_nl_query
+from src.app.orchestration import (
+    ValidationUnsupported,
+    run_dsl_query,
+    run_nl_query,
+    run_validate_only,
+)
 from src.app.schemas import QueryDSLResponse, QueryNLResponse, TranslationMetadata
 from src.engine.models import (
     ConceptNotMapped,
@@ -408,3 +413,45 @@ class TestRunNLQueryDownstreamFailures:
                 llm_client=_FakeLLMClient(canned=""),
                 context=_ctx(),
             )
+
+
+# -- run_validate_only (Slice I) ----------------------------------------
+
+
+class TestRunValidateOnly:
+    def test_supported_path_returns_validation_result(
+        self, empty_registry
+    ) -> None:
+        result = run_validate_only("πίστις > ἐλπίς", empty_registry)
+        assert result.status in ("supported", "partial")
+        assert isinstance(result.findings, list)
+
+    def test_parse_error_propagates(self, empty_registry) -> None:
+        with pytest.raises(ParseError):
+            run_validate_only("faith > > > hope", empty_registry)
+
+    def test_unsupported_returns_result_not_raises(self, empty_registry) -> None:
+        # DEC-079: validator-rejected plan must NOT raise from
+        # run_validate_only — it returns a ValidationResult with
+        # status='unsupported'. (Distinct from run_dsl_query which
+        # raises ValidationUnsupported.)
+        result = run_validate_only("inverse(faith)", empty_registry)
+        assert result.status == "unsupported"
+        assert any(f.code == "UNSUPPORTED_INVERSE" for f in result.findings)
+
+    def test_no_retrieve_or_explain_called(
+        self, monkeypatch, empty_registry
+    ) -> None:
+        # Verify run_validate_only doesn't call retrieve() or explain()
+        # by setting them to raise — if either is called, test fails.
+        def boom(*a: object, **kw: object) -> None:
+            raise AssertionError(
+                "run_validate_only must not call retrieve/explain"
+            )
+
+        monkeypatch.setattr("src.app.orchestration.retrieve", boom)
+        monkeypatch.setattr("src.app.orchestration.explain", boom)
+        # Real lemma DSL — validator runs without registry; retrieve and
+        # explain are not called by run_validate_only.
+        result = run_validate_only("πίστις", empty_registry)
+        assert result is not None
