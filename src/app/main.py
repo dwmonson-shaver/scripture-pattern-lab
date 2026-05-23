@@ -18,6 +18,13 @@ that would mask deployment problems behind a runtime 503. If you want
 construction-time independent degradation, that is a separate design
 decision.
 
+Bearer-token auth (Slice J1):
+The factory reads SPL_BEARER_TOKEN at construction time and wires a
+BearerAuthMiddleware. When the env var is unset (local dev, existing
+test fixtures), the middleware is a no-op; when set, every route
+except /api/v1/health requires `Authorization: Bearer <token>` with
+constant-time comparison. The Worker proxy is the canonical client.
+
 Run in production with:
     uvicorn src.app.main:app --host 0.0.0.0 --port 8000
 
@@ -33,6 +40,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from src.app.auth import BearerAuthMiddleware
 from src.app.routes import capabilities as capabilities_routes
 from src.app.routes import concepts as concepts_routes
 from src.app.routes import health as health_routes
@@ -119,6 +127,10 @@ def create_app() -> FastAPI:
             "platform for Judeo-Christian scripture."
         ),
         lifespan=lifespan,
+    )
+    fastapi_app.add_middleware(
+        BearerAuthMiddleware,
+        expected_token=os.environ.get("SPL_BEARER_TOKEN") or None,
     )
     fastapi_app.include_router(health_routes.router)
     fastapi_app.include_router(query_routes.router)
