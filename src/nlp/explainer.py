@@ -136,7 +136,7 @@ def _summary_prose(
     candidates: list[MatchCandidate],
     ctx: Contextualization | None,
 ) -> str:
-    """Compose the ≤ 6-line slice-level prose summary."""
+    """Compose the ≤ 5-line slice-level prose summary."""
     label = _truncate_sequence_label(sequence_label)
     n = len(candidates)
     lines: list[str] = []
