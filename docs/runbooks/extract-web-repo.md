@@ -12,6 +12,7 @@ This runbook is part of **Slice J1**. It runs after the slice closes, when the f
 - You have a personal Cloudflare account (free plan is fine).
 - You have admin on a personal GitHub account where the new repo can live.
 - Render deploy is done (per `docs/runbooks/render-deploy.md`) so the `NUXT_BACKEND_URL` and `NUXT_BACKEND_TOKEN` exist.
+- **SBL Greek font file is in place.** `web/public/fonts/SBLGreek.woff2` is **not** committed to the parent repo (only the README placeholder). Without it, the Step 6 smoke check ("rendered in SBL Greek") will silently fall back to a CSS default font — the deploy will look successful when the asset is actually missing. Follow `web/public/fonts/README.md` to download from SBL and convert via `pyftsubset`, then commit the `.woff2` to `web/` **before** running the extraction in Step 2.
 
 ---
 
@@ -44,10 +45,14 @@ git subtree split --prefix=web -b web-export
 git push git@github.com:<your-account>/scripture-pattern-lab-web.git web-export:main
 ```
 
+The export branch will contain exactly the J1-slice commits that touched `web/`, with each commit re-rooted as if `web/` were the repo root. (Dry-run confirmed: at the Slice J1 close SHA, this is 5 commits — J1.1 through J1.4 plus close-review closures. Confirms the user's expectation before pushing.)
+
 Pros: PRs that touched `web/` are still traceable through `git log`.
 Cons: scripture-pattern-lab's full history (including non-web commits referenced from web-touching ones) does not transfer — only the re-rooted web subset.
 
-### Option B — Fresh init (drops history)
+### Option B — Fresh init (fallback only; DEC-088 chose Option A)
+
+DEC-088 selected Option A (history-preserving subtree split). Option B is kept here as a fallback if subtree split later proves problematic. **Default to Option A.** Use Option B only if (a) you decide history doesn't matter and want a clean slate, or (b) subtree split fails for an unexpected reason.
 
 The new repo starts at a single "Initial commit" with the current state of `web/`. Faster, cleaner if history doesn't matter.
 
@@ -78,7 +83,7 @@ In the new repo's Settings → Secrets and variables → Actions:
 | `CLOUDFLARE_ACCOUNT_ID` | Top-right of the Workers dashboard |
 | `NUXT_BACKEND_URL` | `https://scripture-pattern-lab-api.onrender.com` (from your Render web service) |
 
-`NUXT_BACKEND_URL` is needed at build time so `npm run gen:types` can fetch the backend's OpenAPI schema and generate `types/backend.ts`.
+`NUXT_BACKEND_URL` is needed at build time so `npm run gen:types` can fetch the backend's OpenAPI schema and generate `types/backend.ts`. **Note:** `NUXT_BACKEND_URL` is ALSO needed as a Worker runtime secret (set in Step 4). Same value, two different consumers (build-time type generation vs. runtime proxy dispatch). Don't skip the runtime set just because you set the build-time one here.
 
 ---
 
@@ -86,8 +91,14 @@ In the new repo's Settings → Secrets and variables → Actions:
 
 These are server-only secrets the deployed Worker reads via `useRuntimeConfig()`. They are different from the GitHub repo secrets above — those are CI-time secrets; these are runtime secrets.
 
+**First:** clone the new repo down separately (outside `scripture-pattern-lab/`), then `cd` into it. `wrangler` reads the local `wrangler.toml` to know which CF account/Worker to target, so running it from the wrong directory will set secrets against the wrong Worker.
+
 ```bash
-# From the scripture-pattern-lab-web clone:
+# In a sibling directory, e.g. ~/Documents/Claude-Personal/:
+git clone git@github.com:<your-account>/scripture-pattern-lab-web.git
+cd scripture-pattern-lab-web
+
+# Now set the runtime secrets:
 npx wrangler secret put NUXT_BACKEND_URL
 # enter: https://scripture-pattern-lab-api.onrender.com
 
@@ -138,6 +149,8 @@ Smoke check: run the flagship query, confirm `1Cor 13:13` appears with `πίστ
 
 Once the new repo is live and the deploy is verified, the parent repo no longer needs the subdir.
 
+**Soft cutover recommended.** Do NOT run the removal immediately after the first deploy. Keep `web/` in the parent repo until at least one substantive frontend change has been merged into the new repo and re-deployed cleanly. This confirms the new repo is self-sufficient (no hidden cross-references back into the parent) before you burn the source-of-truth bridge. Once that's verified:
+
 ```bash
 # From scripture-pattern-lab root:
 git rm -r web
@@ -145,7 +158,7 @@ git commit -m "Slice J1 followup: remove web/ subdir after extraction to scriptu
 git push
 ```
 
-The slice's history is preserved in `git log` on both repos (each holds its own subset).
+The slice's history is preserved in `git log` on both repos (each holds its own subset). Note: the `web/.github/workflows/deploy.yml` workflow is dormant in the parent repo (GitHub only auto-runs workflows in the root `.github/workflows/`, not nested subdirs), so there's no stale workflow to clean up separately after this removal.
 
 ---
 
