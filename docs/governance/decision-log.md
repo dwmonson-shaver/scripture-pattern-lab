@@ -896,3 +896,107 @@
 - Files: docs/vision/long-term-architecture.md (the principle is cited in the vision doc); docs/governance/decision-log.md (this entry); future src/ enforcement points referenced when slices land.
 - Spec refs: Will be cited by future REQ markers around the curator and LLM-augmented explainer. Not yet tied to a specific REQ.
 - Cross-refs: DEC-003 (NL compiles to DSL, never bypass — DEC-081 generalizes), DEC-006 (system says when it cannot do something — boundary case of DEC-081), DEC-024 (corpus is ground truth — the epistemic backbone DEC-081 enforces), DEC-061 (deterministic-first explainer; LLM augmentation deferred to Bucket 7 — Bucket 7 must conform to DEC-081 if it ever ships), DEC-067 (concrete LLMClient seam — the seam where DEC-081 is enforceable), DEC-070 (HTTP error mapping for translator failures — codifies that translator errors are 5xx/4xx, not silently masked), DEC-072 (no confidence-threshold gate — companion: no autonomous LLM authority).
+
+## DEC-082 — Frontend stack: Nuxt 3 + Vue 3 + TypeScript + Vuetify 3 on Cloudflare Workers (personal CF account)
+- Status: Accepted
+- Question: What stack does the scripture-pattern-lab frontend use, and where is it deployed?
+- Decision: **Nuxt 3 + Vue 3 (Composition API, `<script setup lang="ts">`) + TypeScript strict + Vuetify 3 + Cloudflare Workers (user's personal CF free-plan account).** Derived in scaffolding terms from TovutiLMS/pattern-mapping but with all hub coupling stripped and zero deployment in Tovuti infrastructure. The frontend lives in its own GitHub repo (`scripture-pattern-lab-web` — see DEC-088) under the user's personal account.
+- Rationale: (a) Nuxt's Nitro server layer is the structural seam for the inter-service proxy (DEC-083) — same-origin in the browser, server-only secrets. SPA + browser-direct alternatives require CORS on the backend (which we explicitly forbid, DEC-090's predecessor) and ship the bearer token client-side (security failure). (b) Vuetify 3 ships a comprehensive Material component library + theme system with built-in light/dark; speed-to-MVP without a design-system tax. The aesthetic is consciously deferred for rebrand if/when it bites (no DEC; tracked as a polish backlog). (c) TypeScript strict mirrors the backend's Python type-hint discipline. (d) Cloudflare Workers free plan covers research-tool traffic; *.workers.dev gives a working URL without buying a domain.
+- Alternatives considered: (a) SvelteKit on CF Workers. Rejected — smaller ecosystem, user familiarity favors Vue. (b) Plain Vite + Vue SPA. Rejected — browser-direct-to-FastAPI requires CORS + client-side bearer token; both fail the security boundary. (c) Next.js on Vercel. Rejected — Vercel costs vs. CF free; React vs. Vue is orthogonal. (d) Tovuti App Hub deployment. Rejected — the project is personal/forkable (vision doc Tier 1); coupling it to employer infrastructure creates IP and continuity risks.
+- Confidence: High. Stack choice was deliberated extensively pre-slice; user confirmed each piece.
+- Made-by: orchestrator-mode in collaboration with user (Slice J1 pre-slice conversation, 2026-05-22).
+- Commit: `09ebd24` (Slice J1 Phase J1.1).
+- Files: web/package.json, web/nuxt.config.ts, web/vuetify.config.ts, web/wrangler.toml, web/tsconfig.json, web/eslint.config.mjs, web/app.vue, web/layouts/default.vue, web/composables/useThemeToggle.ts, web/.github/workflows/deploy.yml.
+- Spec refs: None (frontend is a consumer of canonical-09 §1 routes).
+- Cross-refs: DEC-081 (LLM-as-translator — the structural reason Nuxt's server layer matters); DEC-083 (Nitro proxy); DEC-088 (repo separation).
+
+## DEC-083 — Nitro server proxy at `/api/sp/*`: browser never sees backend URL or bearer token
+- Status: Accepted
+- Question: How does the browser communicate with the Render-hosted FastAPI backend? Direct (with CORS + client-side token) or via a server-side proxy in the Worker?
+- Decision: **Nuxt's Nitro server layer proxies every backend call through `/api/sp/*` routes on the Worker.** The browser only makes same-origin requests to the Worker; the Worker holds `NUXT_BACKEND_URL` and `NUXT_BACKEND_TOKEN` as server-only secrets (via `useRuntimeConfig()`) and forwards JSON POSTs with `Authorization: Bearer <token>` to Render. Upstream responses (success + error envelopes) pass through unchanged so the frontend dispatches UI off `body.detail.error` consistently.
+- Rationale: (a) Backend bearer token never reaches the browser — eliminates client-side token exposure entirely. (b) No CORS needed on the FastAPI service (DEC-090) — the backend can stay locked down to the Worker. (c) Pass-through error envelope means one error-handling discipline at the frontend, whether the failure originates in the proxy (`backend_unreachable`, `backend_misconfigured`) or the backend (parse_error, validation_unsupported, llm_unavailable). (d) The proxy is a discrete unit-testable seam (pure `proxyToBackend` function in `server/utils/backend.ts` with 9 Vitest tests; route handlers thin wrappers).
+- Alternatives considered: (a) Browser-direct to backend with CORS + client-side token. Rejected — token exposure is a hard security failure. (b) Browser-direct to backend with cookie session. Rejected — adds an auth surface we don't need and complicates the deterministic-API story. (c) CF Service Bindings between Worker and a CF-Container-hosted backend. Rejected for MVP (DEC-084 keeps the backend on Render); door-open for future CF migration.
+- Confidence: High.
+- Made-by: orchestrator-mode in collaboration with user (Slice J1 pre-slice + design phase).
+- Commit: `a645241` (Slice J1 Phase J1.2).
+- Files: web/server/utils/backend.ts, web/server/api/sp/query/nl.post.ts, web/tests/server/backend.test.ts, web/nuxt.config.ts (runtimeConfig keys).
+- Spec refs: None.
+- Cross-refs: DEC-082 (Nitro is part of the stack choice); DEC-085 (bearer middleware on the receiving end); DEC-090 (no CORS); DEC-081 (proxy is the structural enforcement of "no client-side LLM").
+
+## DEC-084 — Backend hosting: Render web service + Render Postgres
+- Status: Accepted
+- Question: Where does the FastAPI service + Postgres database live?
+- Decision: **Render web service (Starter plan, $7/mo) + Render Postgres add-on (Basic plan, $7/mo).** First-time deploy follows `docs/runbooks/render-deploy.md`. The user's personal Render account; deployment unrelated to any employer infrastructure.
+- Rationale: (a) One-vendor story is simplest at MVP — auto-deploys on git push, managed Postgres, internal DB URL routed via Render's private network. (b) Starter plan stays warm (Free plan cold-starts make the frontend feel broken). (c) FastAPI + Postgres is a well-known Render combo with no friction. (d) Cloudflare Containers (the alternative that would keep everything on CF) was evaluated and deferred: CF Containers is newer/less battle-tested, requires Workers Paid plan, and the architectural benefit (service bindings between Worker and container) doesn't materialize a meaningful difference at this scale. CF Containers stays as a documented future option (`docs/runbooks/extract-web-repo.md` and the structure outline reference the migration path).
+- Alternatives considered: (a) Fly.io + Neon Postgres. Rejected — two vendors; comparable cost; Render's UX wins at this scale. (b) AWS / GCP. Rejected — over-engineered for a research tool. (c) Tovuti infrastructure. Rejected per DEC-082 reasoning. (d) Local-only / no hosting. Rejected — the slice's exit gate requires a deployed URL the user can verify.
+- Confidence: High at MVP; medium long-term (CF Containers migration plausible if user gains admin or sets up own CF account container).
+- Made-by: orchestrator-mode in collaboration with user (Slice J1 pre-slice conversation).
+- Commit: `2d88117` (Slice J1 Phase J1.0 — runbook); future Render account creation is user-side bootstrap (Bucket J1-1).
+- Files: docs/runbooks/render-deploy.md.
+- Spec refs: None.
+- Cross-refs: DEC-083 (the proxy talks to whatever lives at NUXT_BACKEND_URL); DEC-085 (bearer auth between Worker and Render).
+
+## DEC-085 — Inter-service auth: bearer-token middleware on FastAPI; project-wide ErrorResponse 401 envelope
+- Status: Accepted
+- Question: How does the FastAPI service authenticate requests from the Worker proxy?
+- Decision: **`BearerAuthMiddleware` reads `SPL_BEARER_TOKEN` from env at app-construction time. When set, every route except `GET /api/v1/health` requires `Authorization: Bearer <token>` (case-insensitive scheme per RFC 7235; `secrets.compare_digest` for constant-time comparison). 401 responses use the project-wide `ErrorResponse{error, message, details}` envelope so the Worker proxy and frontend dispatch UI off `body.detail.error` uniformly. When `SPL_BEARER_TOKEN` is unset or empty, the middleware is a no-op (preserves existing local-dev + TestClient ergonomics).** Token rotation is manual (no automated cadence in S1); the runbook documents the swap procedure.
+- Rationale: (a) `/api/v1/health` is exempt because Render's healthcheck pings it without credentials; exposing it doesn't leak query semantics. (b) `secrets.compare_digest` prevents timing oracles. (c) No-op-when-unset preserves the 485 existing unit tests without modification — none of them set the env var, so the middleware doesn't fire. (d) Same `ErrorResponse` envelope as parse/validation/registry errors means the frontend `ErrorPanel` component has one dispatch surface; one rendering discipline, not two. (e) Empty-string-as-disabled is documented + logged as a WARNING (J1-CLOSE-009 closure) so a misconfigured `SPL_BEARER_TOKEN=""` doesn't silently expose all routes.
+- Alternatives considered: (a) OAuth / OIDC between services. Rejected — over-engineered for two-party MVP. (b) HMAC-signed requests. Rejected — bearer + HTTPS is simpler and sufficient for the threat model (the only adversary is "someone who got the token"; HMAC adds replay protection that's not load-bearing for read-mostly traffic). (c) Mutual TLS. Rejected — Render doesn't offer easy mTLS termination. (d) IP allowlist on Render. Rejected — Cloudflare Worker egress IPs are not stable.
+- Confidence: High. Threat model is "the Worker is the only legitimate client"; bearer + HTTPS + constant-time compare is the standard.
+- Made-by: orchestrator-mode (low-stakes; well-established pattern).
+- Commit: `2d88117` (Slice J1 Phase J1.0); `b522452` (slice-close closures, J1-CLOSE-009 log line).
+- Files: src/app/auth.py, src/app/main.py, tests/unit/test_app_auth.py.
+- Spec refs: None (security-implicit on canonical-09 §1 routes).
+- Cross-refs: DEC-G6/DEC-G7 (HTTP error mapping discipline that 401 follows); DEC-090 (no CORS — bearer is the only auth surface).
+
+## DEC-086 — Type generation: `openapi-typescript` from FastAPI's `/openapi.json`; generated file committed
+- Status: Accepted
+- Question: How does the frontend stay in sync with the backend's response shapes? Hand-typed interfaces vs. generated types?
+- Decision: **`openapi-typescript` generates `web/types/backend.ts` from `${NUXT_BACKEND_URL}/openapi.json` via the `npm run gen:types` script (also wired as `prebuild` so production builds regenerate on every push). The generated file is committed so PRs visibly show schema drift.** Hand-typed interfaces (currently in place as the Slice J1 placeholder) are replaced by the generated content on first user bootstrap.
+- Rationale: (a) **DEC-081 structural enforcement at the type layer.** If the backend doesn't declare a field in its OpenAPI schema, the frontend cannot import a type for it; cannot render it; cannot accidentally fabricate. The structural seam is mechanical, not disciplinary. (b) Committing the generated file means schema drift surfaces in PR diffs — a backend Pydantic change that breaks frontend assumptions is visible at review time, not at runtime. (c) Tradeoff: regeneration requires the backend's `/openapi.json` to be reachable at build time. The deploy workflow exposes `NUXT_BACKEND_URL` as a CI secret for this. (d) The Slice J1 placeholder hand-typed interfaces in `web/types/backend.ts` are wrong about a few fields (J1-CLOSE-001 closed in `b522452`); the placeholder is now structurally identical to what `openapi-typescript` will produce on first regeneration.
+- Alternatives considered: (a) Hand-typed indefinitely. Rejected — DEC-081 enforcement weakens to discipline alone; drift is silent. (b) Generated but not committed. Rejected — PRs lose the schema-drift signal; first-time clones need the backend running to typecheck. (c) Generated at runtime rather than build time. Rejected — adds a runtime dependency; runtime drift would surface as errors users see, not errors developers fix.
+- Confidence: High.
+- Made-by: orchestrator-mode (low-stakes; well-established pattern; user signed off on the DEC-081 framing pre-slice).
+- Commit: `a645241` (Slice J1 Phase J1.2: pipeline + script + placeholder); `ffc1f4f` (Phase J1.3: placeholder consumed); `b522452` (placeholder corrected to match backend Pydantic).
+- Files: web/package.json (gen:types + prebuild scripts), web/types/backend.ts (placeholder; regenerated on first deploy), web/.github/workflows/deploy.yml (gen:types step).
+- Spec refs: None.
+- Cross-refs: DEC-081 (load-bearing constraint this DEC enforces); DEC-089 (bundle-grep is the runtime enforcement layer; this DEC is the type-layer enforcement).
+
+## DEC-087 — Source-language rendering: self-hosted SBL Greek woff2 with `.text-grc` / `.text-heb` classes
+- Status: Accepted
+- Question: How does the frontend render polytonic Greek (and eventually Hebrew) text from the backend's citations?
+- Decision: **`SBLGreek.woff2` is self-hosted at `web/public/fonts/SBLGreek.woff2`, loaded via `@font-face` in `web/assets/styles/globals.css`, and applied via the `.text-grc` class. A `<GreekText>` component wraps the idiom for consistency. A parallel `.text-heb` class is declared with `direction: rtl` + system-font fallback, but no Hebrew font ships in S1 (NT-only corpus).** The font file is downloaded by the user from sbl-site.org per the runbook (`web/public/fonts/README.md` documents conversion to woff2).
+- Rationale: (a) Self-hosted is the right choice — third-party font CDNs are an availability dependency the project shouldn't have, and SBL Greek isn't on Google Fonts. (b) `font-display: swap` means initial paint isn't blocked by the font load. (c) The Hebrew hook exists so a future slice can drop in `SBLHebrew.woff2` without restructuring — the structural cost is one CSS rule. (d) `.text-grc` as a class (vs. setting font-family on a CSS selector that targets a specific component) lets the same class apply to any element rendering Greek — including ones the backend's `text_display` field passes through.
+- Alternatives considered: (a) Cardo. Rejected — less common in scholarly publishing than SBL Greek. (b) System fonts only (Times New Roman, Greek-supporting subset). Rejected — most system Greek fonts have inconsistent polytonic diacritic support across platforms. (c) Google Fonts (Noto Sans/Serif). Rejected — runtime CDN dependency.
+- Confidence: High on Greek; the Hebrew hook is intentionally provisional.
+- Made-by: orchestrator-mode in collaboration with user (Slice J1 pre-slice question; user confirmed source-lang rendering from day 1).
+- Commit: `09ebd24` (Slice J1 Phase J1.1 — @font-face + class declarations); `ffc1f4f` (Phase J1.3 — `<GreekText>` component + use in `ResultEnvelope.vue`). User-side bootstrap downloads the actual font file (tracked as part of Bucket J1-2).
+- Files: web/assets/styles/globals.css, web/components/GreekText.vue, web/public/fonts/README.md.
+- Spec refs: None.
+- Cross-refs: None (orthogonal to other slice DECs).
+
+## DEC-088 — Repo separation: `scripture-pattern-lab-web` is a separate personal GitHub repo; `web/` subdir during slice development
+- Status: Accepted
+- Question: Does the frontend code live in scripture-pattern-lab or in its own repo? If separate, how does it get there during slice development given the assistant's writes are scoped to the current repo?
+- Decision: **Frontend code lives in a separate personal GitHub repo `scripture-pattern-lab-web` under the user's account. During Slice J1 development, the code lives in a `web/` subdir of `scripture-pattern-lab/` for sandbox-write reasons. At slice close, `docs/runbooks/extract-web-repo.md` guides the user through extraction via either `git subtree split` (preserves history) or fresh-init (drops history).** Governance (DECs, reviews-log, spec-coverage, project_status memory) stays in `scripture-pattern-lab/` because that's the canonical project repo.
+- Rationale: (a) The vision doc says Tier 1 (the tool) is "generic — anyone can fork and use for their own research." Coupling the canonical Python repo to a specific frontend implementation would break that promise. The frontend is one consumer of the API; forkers should be able to take the Python repo + bring their own UI. (b) IP/ownership: the project lives in `Documents/Claude-Personal/`, signaling personal scope. The frontend repo should be personal too — not in any employer's GitHub org. (c) Continuity: if the user ever leaves Tovuti or anywhere else, the personal repo continues to exist and deploy. (d) The `web/` subdir during development is a sandbox accommodation — the assistant's writes are restricted to the current working tree. Extraction at slice close cleanly resolves this; the runbook documents both methods.
+- Alternatives considered: (a) Monorepo (web/ subdir as the permanent home). Rejected — couples generic tool to specific frontend per (a) above. (b) Sibling directory creation via `dangerouslyDisableSandbox`. Rejected — the user has not authorized sandbox bypass, and the `web/` subdir + extraction pattern works cleanly within constraints. (c) Frontend repo created upfront by user, code written into it by other means. Rejected — slows iteration; the in-slice scaffold is a coherent code-complete artifact the user can extract whenever convenient.
+- Confidence: High.
+- Made-by: orchestrator-mode in collaboration with user (Slice J1 pre-slice + design phase).
+- Commit: `09ebd24` (Slice J1 Phase J1.1: web/ subdir created); `docs/runbooks/extract-web-repo.md` documents the extraction; future user-side bootstrap will run the runbook (Bucket J1-2).
+- Files: web/ (entire subdir), docs/runbooks/extract-web-repo.md.
+- Spec refs: None.
+- Cross-refs: DEC-082 (stack choice tied to this repo); `docs/vision/long-term-architecture.md` (Tier 1 generic / Tier 2 per-researcher framing).
+
+## DEC-089 — DEC-081 structural enforcement: bundle-grep CI check on `.output/` for forbidden LLM SDKs
+- Status: Accepted
+- Question: How is DEC-081's "no LLM SDK in the frontend bundle" enforced beyond discipline?
+- Decision: **`web/scripts/check-no-llm-sdk.mjs` greps `.output/` after `nuxt build` for forbidden package names (`@ai-sdk/anthropic`, `@anthropic-ai/sdk`, `google-generative-ai`) and import patterns (`from 'openai'`, `require('openai')`). CI fails the deploy if any leaks; the check is wired as `npm run check:no-llm-sdk` and runs in `.github/workflows/deploy.yml` between `nuxt build` and `wrangler deploy`.** This is the **second line of defense**; the first line is that the package never enters `package.json`. Dynamic imports with variable specifiers (e.g., `await import(someVar)`) could bypass the grep — substantive review of every dep addition remains required (documented in the script header).
+- Rationale: (a) DEC-081 is too important to rely on discipline alone. The "one-line-of-code path" failure mode is exactly what structural enforcement prevents. (b) Bundle-grep at the CI layer + type-layer enforcement (DEC-086) + dependency-list scrutiny gives three layers; bypassing all three requires deliberate effort. (c) Cost: <1 second of CI time; near-zero false positive rate. (d) Tradeoff: dynamic imports with non-static specifiers escape the grep. Acknowledged in the script docstring; the structural answer is package-list review, not improved grep.
+- Alternatives considered: (a) AST-based check via `acorn` or similar. Rejected — adds complexity; the package-list grep catches the realistic failure mode. (b) ESLint rule. Rejected — ESLint runs on source, not built output, and tree-shaking might still pull in code that ESLint approved. (c) Discipline-only. Rejected — DEC-081's rationale (b) explicitly cites that this fails.
+- Confidence: High at the package-import level; medium against motivated bypass (which would require a code review to catch anyway).
+- Made-by: orchestrator-mode (low-stakes; DEC-081 enforcement requirement is explicit).
+- Commit: `09ebd24` (Slice J1 Phase J1.1 — script + CI wiring); `b522452` (Slice J1 close — script docstring expanded with second-line-of-defense framing).
+- Files: web/scripts/check-no-llm-sdk.mjs, web/.github/workflows/deploy.yml, web/package.json (the `check:no-llm-sdk` script).
+- Spec refs: None.
+- Cross-refs: DEC-081 (the constraint this DEC enforces); DEC-086 (type-layer enforcement; complementary).
