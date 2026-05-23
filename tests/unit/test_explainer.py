@@ -850,6 +850,32 @@ class TestExplainWithLLMClient:
         # Full envelope is byte-identical to the deterministic envelope.
         assert ers_fallback.model_dump() == ers_det.model_dump()
 
+    def test_exact_match_type_not_routed_through_llm(self) -> None:
+        """K-MID-003: symmetric coverage with the variant test.
+
+        match_type values are exact / variant / conceptual. The dispatch
+        rule only routes conceptual through the LLM. Lock the exact case
+        explicitly so a future regression that broadens the dispatch is
+        caught by this test.
+        """
+        plan = _plan_for_concepts("faith", "hope", "love")
+        exact_cand = _candidate(
+            [("πίστις", "faith"), ("ἐλπίς", "hope"), ("ἀγάπη", "love")],
+            match_type="exact",
+        )
+        result = RetrievalResult(
+            candidates=[exact_cand],
+            stages_used=["symbolic"],
+            contextualization=_flagship_contextualization(),
+        )
+        client = _FakeLLMClient(canned="LLM-prose 1Cor 13:13 πίστις.")
+        ers = explain(result, plan, _supported_validation(), llm_client=client)
+        # NO LLM calls — exact-match candidates use deterministic prose.
+        assert len(client.calls) == 0
+        # The exact candidate's explanation matches the deterministic helper.
+        det = _per_candidate_prose(exact_cand, "faith > hope > love")
+        assert ers.results[0].explanation == det
+
 
 # ---------------------------------------------------------------------------
 # Slice K — Phase K.2: _per_candidate_prose_llm helper
@@ -895,6 +921,34 @@ class TestPerCandidateProseLLM:
         # Same as the deterministic helper would have returned.
         deterministic = _per_candidate_prose(cand, "faith > hope > love")
         assert prose == deterministic
+
+    def test_falls_back_when_llm_returns_fallback_with_punctuation(self) -> None:
+        """K-MID-001: ``FALLBACK.`` / ``FALLBACK!`` / mixed-case all bail.
+
+        LLMs sometimes pad the bail-out with trailing punctuation. The
+        token detector must recognize these variants without false
+        positives on real prose containing the word.
+        """
+        cand = self._flagship_candidate()
+        for variant in ["FALLBACK.", "FALLBACK!", "fallback", "Fallback ", "FALLBACK\n"]:
+            client = _FakeLLMClient(canned=variant)
+            prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+            deterministic = _per_candidate_prose(cand, "faith > hope > love")
+            assert prose == deterministic, (
+                f"variant {variant!r} should be recognized as FALLBACK signal"
+            )
+
+    def test_does_not_misidentify_prose_containing_word_fallback(self) -> None:
+        """K-MID-001 negative: real prose mentioning fallback is NOT bailed."""
+        cand = self._flagship_candidate()
+        # A 60-char paraphrase that happens to start with FALLBACK-shape word.
+        canned = "FALLBACK is what we say when 1Cor 13:13 πίστις cannot be paraphrased here."
+        client = _FakeLLMClient(canned=canned)
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        # Not the deterministic prose — the full LLM output (within cap).
+        deterministic = _per_candidate_prose(cand, "faith > hope > love")
+        assert prose != deterministic
+        assert prose == canned
 
     def test_falls_back_when_llm_returns_empty_string(self) -> None:
         cand = self._flagship_candidate()

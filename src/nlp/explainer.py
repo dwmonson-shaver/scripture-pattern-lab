@@ -2,7 +2,7 @@
 
 Per canonical-09 §9 (REQ:09.result-explainer): the explainer transforms a
 ``RetrievalResult`` into an ``ExplainedResultSet`` whose ``summary`` is the
-slice-level prose (≤ 6 lines) and whose ``results`` carry per-candidate
+slice-level prose (≤ 5 lines) and whose ``results`` carry per-candidate
 explanations grounded in actual corpus counts.
 
 Default (DEC-061): deterministic templating for ALL match types. f-strings
@@ -54,13 +54,16 @@ from src.nlp.prompts.explainer_prompt import (
 )
 from src.validation.validator import ValidationFinding, ValidationResult
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # convention: above constants (K-MID-005)
 
 _LEMMA_CAP = 5
 _SEQUENCE_LABEL_MAX = 64
 _VERSE_LIST_CAP = 3
 _LLM_PROSE_MAX = 300
 _LLM_FALLBACK_TOKEN = "FALLBACK"
+# K-MID-001: bail on FALLBACK plus up to 5 trailing characters (punctuation,
+# whitespace, newline), but not on a sentence that *contains* the word.
+_LLM_FALLBACK_MAX_LEN = len(_LLM_FALLBACK_TOKEN) + 5
 
 
 def explain(
@@ -259,7 +262,7 @@ def _per_candidate_prose_llm(
         return deterministic_prose
 
     cleaned = raw_output.strip()
-    if not cleaned or cleaned == _LLM_FALLBACK_TOKEN:
+    if not cleaned or _is_fallback_signal(cleaned):
         logger.warning(
             "explainer LLM emitted FALLBACK or empty output for %s; "
             "falling back to deterministic prose",
@@ -268,6 +271,22 @@ def _per_candidate_prose_llm(
         return deterministic_prose
 
     return _truncate_llm_prose(cleaned)
+
+
+def _is_fallback_signal(text: str) -> bool:
+    """Recognize the LLM's FALLBACK bail-out sentinel.
+
+    The system prompt instructs the LLM to emit the literal token ``FALLBACK``
+    when it cannot satisfy the rules. In practice, LLMs sometimes pad the
+    bail-out with trailing punctuation, whitespace, or newlines (e.g.,
+    ``"FALLBACK."``, ``"FALLBACK\n"``). We accept the token plus up to
+    ``_LLM_FALLBACK_MAX_LEN - len(_LLM_FALLBACK_TOKEN)`` trailing characters
+    so that bail-outs are recognized, but a real paraphrase that *contains*
+    the word "fallback" is NOT misclassified.
+    """
+    if len(text) > _LLM_FALLBACK_MAX_LEN:
+        return False
+    return text.upper().startswith(_LLM_FALLBACK_TOKEN)
 
 
 def _truncate_llm_prose(text: str, max_chars: int = _LLM_PROSE_MAX) -> str:
