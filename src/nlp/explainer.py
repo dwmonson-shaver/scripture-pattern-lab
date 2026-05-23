@@ -22,6 +22,8 @@ Substring-tested in ``tests/unit/test_explainer.py``.
 
 from __future__ import annotations
 
+import logging
+
 from src.engine.models import (
     AlternativeOrderingCount,
     Contextualization,
@@ -34,11 +36,20 @@ from src.engine.models import (
     RetrievalResult,
     SequenceExpr,
 )
+from src.nlp.llm_client import LLMClient, LLMUnavailable
+from src.nlp.prompts.explainer_prompt import (
+    EXPLAINER_SYSTEM_PROMPT,
+    build_explainer_user_message,
+)
 from src.validation.validator import ValidationFinding, ValidationResult
+
+logger = logging.getLogger(__name__)
 
 _LEMMA_CAP = 5
 _SEQUENCE_LABEL_MAX = 64
 _VERSE_LIST_CAP = 3
+_LLM_PROSE_MAX = 300
+_LLM_FALLBACK_TOKEN = "FALLBACK"
 
 
 def explain(
@@ -170,6 +181,78 @@ def _per_candidate_prose(candidate: MatchCandidate, sequence_label: str) -> str:
         f'At {candidate.reference}: {aligned}. '
         f"Match type: {candidate.match_type}."
     )
+
+
+def _per_candidate_prose_llm(
+    candidate: MatchCandidate,
+    sequence_label: str,
+    llm_client: LLMClient,
+) -> str:
+    """LLM-backed paraphrase of grounded fields for a conceptual candidate.
+
+    Calls ``llm_client.complete(EXPLAINER_SYSTEM_PROMPT, user_message)`` where
+    ``user_message`` is the labeled-fields block produced by
+    ``build_explainer_user_message``. The LLM has no inputs other than the
+    grounded fields — that is the structural enforcement of DEC-081's
+    no-fabrication clause.
+
+    Fallback contract (DEC-061 — deterministic path is the source of truth):
+    on ``LLMUnavailable`` OR any other ``Exception``, returns the deterministic
+    ``_per_candidate_prose(...)`` output. A WARNING log is emitted with
+    ``exc_info=True`` so operators can audit silent fallbacks. The LLM's
+    explicit ``FALLBACK`` sentinel response also triggers deterministic
+    fallback (the LLM signaled it could not satisfy the prompt's rules).
+
+    Output is post-truncated to ``_LLM_PROSE_MAX`` characters as
+    defense-in-depth against a misbehaving LLM ignoring the prompt's
+    length constraint.
+    """
+    deterministic_prose = _per_candidate_prose(candidate, sequence_label)
+    try:
+        user_message = build_explainer_user_message(candidate, sequence_label)
+        raw_output = llm_client.complete(EXPLAINER_SYSTEM_PROMPT, user_message)
+    except LLMUnavailable as exc:
+        logger.warning(
+            "explainer LLM unavailable for %s; falling back to deterministic prose: %s",
+            candidate.reference,
+            exc.reason,
+        )
+        return deterministic_prose
+    except Exception:  # noqa: BLE001 — broad catch is the airtight fallback.
+        # DEC-061 mandates the deterministic baseline never breaks. Any
+        # unexpected exception (programmer error in the helper, LLM SDK
+        # surprise, etc.) falls back to deterministic prose with full
+        # traceback in the log so the operator sees the bug.
+        logger.warning(
+            "explainer LLM raised unexpectedly for %s; falling back to "
+            "deterministic prose",
+            candidate.reference,
+            exc_info=True,
+        )
+        return deterministic_prose
+
+    cleaned = raw_output.strip()
+    if not cleaned or cleaned == _LLM_FALLBACK_TOKEN:
+        logger.warning(
+            "explainer LLM emitted FALLBACK or empty output for %s; "
+            "falling back to deterministic prose",
+            candidate.reference,
+        )
+        return deterministic_prose
+
+    return _truncate_llm_prose(cleaned)
+
+
+def _truncate_llm_prose(text: str, max_chars: int = _LLM_PROSE_MAX) -> str:
+    """Cap LLM-emitted prose at ``max_chars`` with ellipsis when truncated.
+
+    Defense-in-depth: the system prompt requests ≤200 chars, but LLMs do not
+    always honor length constraints. Post-truncation guarantees the result
+    envelope stays bounded.
+    """
+    if len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 1].rstrip()}…"
 
 
 # -- Phrase composers --------------------------------------------------------

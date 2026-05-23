@@ -29,11 +29,45 @@ from src.engine.models import (
 from src.nlp.explainer import (
     _format_alt_orderings_phrase,
     _format_baselines_phrase,
+    _per_candidate_prose,
+    _per_candidate_prose_llm,
     _truncate_lemmas,
+    _truncate_llm_prose,
     _truncate_sequence_label,
     explain,
 )
+from src.nlp.llm_client import LLMClient, LLMUnavailable
 from src.validation.validator import ValidationFinding, ValidationResult
+
+
+# ---------------------------------------------------------------------------
+# LLM stubs (Slice K — Phase K.2). Subclass LLMClient so any future
+# anthropic-SDK shape change does not propagate into tests.
+# ---------------------------------------------------------------------------
+
+
+class _FakeLLMClient(LLMClient):
+    """Returns a canned response from `.complete()`."""
+
+    def __init__(self, canned: str) -> None:
+        self._canned = canned
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system_prompt: str, user_message: str) -> str:
+        self.calls.append((system_prompt, user_message))
+        return self._canned
+
+
+class _FailingLLMClient(LLMClient):
+    """Raises a configurable exception from `.complete()`."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system_prompt: str, user_message: str) -> str:
+        self.calls.append((system_prompt, user_message))
+        raise self._exc
 
 # ---------------------------------------------------------------------------
 # Fixture builders
@@ -671,3 +705,117 @@ class TestCappedSummary:
         )
         ers = explain(result, plan, _supported_validation())
         assert "capped" in ers.summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# Slice K — Phase K.2: _per_candidate_prose_llm helper
+# ---------------------------------------------------------------------------
+
+
+class TestPerCandidateProseLLM:
+    """Unit tests for the LLM-backed per-candidate prose helper.
+
+    The deterministic _per_candidate_prose is the fallback contract: any
+    failure (LLMUnavailable, unexpected Exception, FALLBACK sentinel, empty
+    output) returns the deterministic output. Successful LLM output is
+    truncated to _LLM_PROSE_MAX defense-in-depth.
+    """
+
+    @staticmethod
+    def _flagship_candidate() -> MatchCandidate:
+        return _candidate([
+            ("πίστις", "faith"),
+            ("ἐλπίς", "hope"),
+            ("ἀγάπη", "love"),
+        ])
+
+    def test_returns_llm_output_when_successful(self) -> None:
+        cand = self._flagship_candidate()
+        canned = (
+            "At 1Cor 13:13 the words πίστις, ἐλπίς and ἀγάπη appear in "
+            "sequence matching the conceptual pattern."
+        )
+        client = _FakeLLMClient(canned=canned)
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        assert prose == canned
+        # The LLM was actually called once with the expected prompt shape.
+        assert len(client.calls) == 1
+        system, user = client.calls[0]
+        assert "Do not invent" in system
+        assert "Verse reference: 1Cor 13:13" in user
+
+    def test_falls_back_when_llm_returns_fallback_token(self) -> None:
+        cand = self._flagship_candidate()
+        client = _FakeLLMClient(canned="FALLBACK")
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        # Same as the deterministic helper would have returned.
+        deterministic = _per_candidate_prose(cand, "faith > hope > love")
+        assert prose == deterministic
+
+    def test_falls_back_when_llm_returns_empty_string(self) -> None:
+        cand = self._flagship_candidate()
+        client = _FakeLLMClient(canned="   \n  ")  # all whitespace
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        deterministic = _per_candidate_prose(cand, "faith > hope > love")
+        assert prose == deterministic
+
+    def test_falls_back_on_llm_unavailable(self, caplog) -> None:
+        cand = self._flagship_candidate()
+        client = _FailingLLMClient(exc=LLMUnavailable("rate-limited"))
+        with caplog.at_level("WARNING", logger="src.nlp.explainer"):
+            prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        deterministic = _per_candidate_prose(cand, "faith > hope > love")
+        assert prose == deterministic
+        # Log contains the candidate ref and the reason — operators can audit.
+        messages = [rec.getMessage() for rec in caplog.records]
+        assert any(
+            "1Cor 13:13" in m and "rate-limited" in m for m in messages
+        ), f"expected ref+reason in warnings; got {messages!r}"
+
+    def test_falls_back_on_unexpected_exception(self, caplog) -> None:
+        cand = self._flagship_candidate()
+        client = _FailingLLMClient(exc=RuntimeError("boom"))
+        with caplog.at_level("WARNING", logger="src.nlp.explainer"):
+            prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        deterministic = _per_candidate_prose(cand, "faith > hope > love")
+        assert prose == deterministic
+        # Log includes the candidate ref AND a traceback (exc_info=True).
+        warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert warning_records, "expected at least one WARNING record"
+        record = warning_records[-1]
+        assert "1Cor 13:13" in record.getMessage()
+        assert record.exc_info is not None, "expected exc_info=True traceback"
+
+    def test_truncates_overlong_output(self) -> None:
+        cand = self._flagship_candidate()
+        long_canned = "1Cor 13:13 πίστις " + ("x" * 600)
+        client = _FakeLLMClient(canned=long_canned)
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        # Truncated to <= _LLM_PROSE_MAX (300) with ellipsis.
+        assert len(prose) <= 300
+        assert prose.endswith("…")
+
+    def test_truncate_helper_passes_through_short_text(self) -> None:
+        text = "A short sentence."
+        assert _truncate_llm_prose(text) == text
+
+    def test_truncate_helper_caps_long_text_with_ellipsis(self) -> None:
+        text = "y" * 500
+        result = _truncate_llm_prose(text, max_chars=50)
+        assert len(result) == 50
+        assert result.endswith("…")
+
+    def test_grounded_input_can_round_trip_when_llm_obeys_rules(self) -> None:
+        """When the LLM emits grounded prose, it is returned unchanged."""
+        cand = self._flagship_candidate()
+        grounded = (
+            "At 1Cor 13:13 the lemmas πίστις, ἐλπίς, and ἀγάπη appear in the "
+            "conceptual pattern faith > hope > love."
+        )
+        client = _FakeLLMClient(canned=grounded)
+        prose = _per_candidate_prose_llm(cand, "faith > hope > love", client)
+        assert prose == grounded
+        # Sanity: every digit substring of the LLM output traces to the input.
+        import re as _re
+        for digit_run in _re.findall(r"\d+", prose):
+            assert digit_run in cand.reference or digit_run in "faith > hope > love"
