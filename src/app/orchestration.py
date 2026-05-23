@@ -15,6 +15,9 @@ catch-and-map pattern applies uniformly.
 
 from __future__ import annotations
 
+import logging
+import os
+
 from sqlalchemy.engine import Engine
 
 from src.app.schemas import QueryDSLResponse, QueryNLResponse, TranslationMetadata
@@ -26,6 +29,37 @@ from src.ontology.registry import ConceptRegistry
 from src.retrieval.retrieve import retrieve
 from src.validation.registry import CapabilityRegistry
 from src.validation.validator import ValidationResult, validate
+
+logger = logging.getLogger(__name__)
+
+# Slice K — explainer LLM opt-in.
+# The env var is read at call time (not lifespan-scoped). The truthy set
+# matches src/app/main.py:137-142's empty-string-as-disabled convention.
+_EXPLAINER_LLM_ENV_VAR = "SPL_EXPLAINER_LLM"
+_EXPLAINER_LLM_TRUTHY = {"1", "true"}
+_EXPLAINER_LLM_FALSY = {"", "0", "false"}
+
+
+def _explainer_llm_opted_in() -> bool:
+    """Return True iff ``SPL_EXPLAINER_LLM`` is set to a recognized truthy value.
+
+    Unset, empty, "0", "false" (case-insensitive) → False (default).
+    "1", "true" (case-insensitive) → True.
+    Any other value → False + WARNING log (avoid silent misconfigure).
+    """
+    raw = os.environ.get(_EXPLAINER_LLM_ENV_VAR, "")
+    normalized = raw.strip().lower()
+    if normalized in _EXPLAINER_LLM_TRUTHY:
+        return True
+    if normalized in _EXPLAINER_LLM_FALSY:
+        return False
+    logger.warning(
+        "%s=%r is not a recognized boolean value; treating as disabled. "
+        "Set to '1' or 'true' to opt in.",
+        _EXPLAINER_LLM_ENV_VAR,
+        raw,
+    )
+    return False
 
 
 class ValidationUnsupported(Exception):  # noqa: N818
@@ -122,10 +156,18 @@ def run_nl_query(
     """
     translation_result = translate(nl_query, context, llm_client)
 
-    dsl_response = run_dsl_query(
+    # Slice K: if SPL_EXPLAINER_LLM is opted in, the same LLM client used by
+    # the translator is also passed into explain() so conceptual-match
+    # explanations are LLM-paraphrased. Deterministic baseline remains the
+    # fallback inside explain() — env var unset is the default and behavior
+    # is unchanged from Slice H/I.
+    explainer_llm = llm_client if _explainer_llm_opted_in() else None
+
+    dsl_response = _run_dsl_pipeline_with_optional_explainer_llm(
         dsl=translation_result.dsl,
         engine=engine,
         registry=registry,
+        explainer_llm=explainer_llm,
     )
 
     return QueryNLResponse(
@@ -138,6 +180,45 @@ def run_nl_query(
             alternatives=translation_result.alternatives,
             explanation=translation_result.explanation,
         ),
+    )
+
+
+def _run_dsl_pipeline_with_optional_explainer_llm(
+    *,
+    dsl: str,
+    engine: Engine,
+    registry: ConceptRegistry,
+    explainer_llm: LLMClient | None,
+) -> QueryDSLResponse:
+    """Internal: identical to run_dsl_query but threads explainer_llm.
+
+    Kept separate from run_dsl_query() so that the public /api/v1/query/dsl
+    path remains explicitly LLM-free (no env-var read, no LLM dependency at
+    the DSL surface — that path is for callers who already have a DSL
+    string and have not opted into LLM augmentation).
+    """
+    plan = parse(dsl)
+    validation = validate(
+        plan,
+        CapabilityRegistry.mvp(),
+        concept_registry=registry,
+    )
+    if validation.status == "unsupported" or validation.executable_plan is None:
+        raise ValidationUnsupported(validation)
+    executable = validation.executable_plan
+    result = retrieve(
+        executable,
+        executable.scope,
+        engine,
+        contextualize=True,
+        registry=registry,
+    )
+    explained = explain(result, executable, validation, llm_client=explainer_llm)
+    return QueryDSLResponse(
+        query=dsl,
+        validation=validation,
+        result=result,
+        explanation=explained,
     )
 
 

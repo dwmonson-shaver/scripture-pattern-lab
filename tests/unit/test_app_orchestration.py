@@ -455,3 +455,180 @@ class TestRunValidateOnly:
         # explain are not called by run_validate_only.
         result = run_validate_only("πίστις", empty_registry)
         assert result is not None
+
+
+# -- Slice K — Phase K.4: SPL_EXPLAINER_LLM env-var opt-in ----------------
+
+
+class TestRunNLQueryWithExplainerLLMOptIn:
+    """Verify run_nl_query reads SPL_EXPLAINER_LLM and passes llm_client
+    to explain() iff the env var is truthy.
+
+    The unit tests stub translate() + retrieve() to avoid LLM/DB calls and
+    monkeypatch explain() to capture the kwargs it receives.
+    """
+
+    @staticmethod
+    def _stub_pipeline(monkeypatch, captured: dict) -> None:
+        translation = TranslationResult(
+            dsl="faith",
+            confidence=0.9,
+            alternatives=[],
+            explanation="",
+        )
+        monkeypatch.setattr(
+            "src.app.orchestration.translate", lambda *a, **kw: translation
+        )
+        empty_result = RetrievalResult(
+            candidates=[],
+            stages_used=["pattern_engine"],
+            contextualization=Contextualization(
+                observed_count=0,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+                null_distribution=None,
+            ),
+        )
+        monkeypatch.setattr(
+            "src.app.orchestration.retrieve", lambda *a, **kw: empty_result
+        )
+
+        # Capture the kwargs explain() is called with.
+        from src.engine.models import ExplainedResultSet
+
+        def capture_explain(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return ExplainedResultSet(
+                query_shown="faith",
+                nl_source=None,
+                validation_notes=[],
+                results=[],
+                contextualization=None,
+                summary="",
+            )
+
+        monkeypatch.setattr("src.app.orchestration.explain", capture_explain)
+
+    def test_default_disabled_when_env_var_unset(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        monkeypatch.delenv("SPL_EXPLAINER_LLM", raising=False)
+        captured: dict = {}
+        self._stub_pipeline(monkeypatch, captured)
+        run_nl_query(
+            nl_query="any",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+        )
+        # explain() received llm_client=None.
+        assert captured["kwargs"]["llm_client"] is None
+
+    def test_enabled_with_value_1(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        monkeypatch.setenv("SPL_EXPLAINER_LLM", "1")
+        captured: dict = {}
+        self._stub_pipeline(monkeypatch, captured)
+        fake_client = _FakeLLMClient(canned="")
+        run_nl_query(
+            nl_query="any",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=fake_client,
+            context=_ctx(),
+        )
+        # explain() received the same llm_client that translate received.
+        assert captured["kwargs"]["llm_client"] is fake_client
+
+    def test_enabled_with_value_true_case_insensitive(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        for variant in ["true", "TRUE", "True", "TrUe"]:
+            monkeypatch.setenv("SPL_EXPLAINER_LLM", variant)
+            captured: dict = {}
+            self._stub_pipeline(monkeypatch, captured)
+            fake_client = _FakeLLMClient(canned="")
+            run_nl_query(
+                nl_query="any",
+                engine=fake_engine,
+                registry=empty_registry,
+                llm_client=fake_client,
+                context=_ctx(),
+            )
+            assert captured["kwargs"]["llm_client"] is fake_client, (
+                f"variant {variant!r} should enable"
+            )
+
+    def test_disabled_with_value_0(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        monkeypatch.setenv("SPL_EXPLAINER_LLM", "0")
+        captured: dict = {}
+        self._stub_pipeline(monkeypatch, captured)
+        run_nl_query(
+            nl_query="any",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+        )
+        assert captured["kwargs"]["llm_client"] is None
+
+    def test_disabled_with_empty_string(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        monkeypatch.setenv("SPL_EXPLAINER_LLM", "")
+        captured: dict = {}
+        self._stub_pipeline(monkeypatch, captured)
+        run_nl_query(
+            nl_query="any",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+        )
+        assert captured["kwargs"]["llm_client"] is None
+
+    def test_disabled_with_value_false_case_insensitive(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        for variant in ["false", "FALSE", "False"]:
+            monkeypatch.setenv("SPL_EXPLAINER_LLM", variant)
+            captured: dict = {}
+            self._stub_pipeline(monkeypatch, captured)
+            run_nl_query(
+                nl_query="any",
+                engine=fake_engine,
+                registry=empty_registry,
+                llm_client=_FakeLLMClient(canned=""),
+                context=_ctx(),
+            )
+            assert captured["kwargs"]["llm_client"] is None, (
+                f"variant {variant!r} should disable"
+            )
+
+    def test_typo_logs_warning_and_disables(
+        self, monkeypatch, caplog, fake_engine, empty_registry
+    ) -> None:
+        monkeypatch.setenv("SPL_EXPLAINER_LLM", "yes")
+        captured: dict = {}
+        self._stub_pipeline(monkeypatch, captured)
+        with caplog.at_level("WARNING", logger="src.app.orchestration"):
+            run_nl_query(
+                nl_query="any",
+                engine=fake_engine,
+                registry=empty_registry,
+                llm_client=_FakeLLMClient(canned=""),
+                context=_ctx(),
+            )
+        # Disabled (typo defaults off).
+        assert captured["kwargs"]["llm_client"] is None
+        # Warning includes the unrecognized value.
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("'yes'" in m or "yes" in m for m in msgs), (
+            f"expected typo-warning; got {msgs!r}"
+        )
