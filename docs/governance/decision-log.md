@@ -861,3 +861,38 @@
 - Files: src/app/orchestration.py; src/app/routes/validate.py; tests/unit/test_app_orchestration.py (TestRunValidateOnly + sentinel test that retrieve/explain are NOT called)
 - Spec refs: REQ:09.api-gateway
 - Cross-refs: DEC-062 (Slice G factory + lifespan + DI architecture); run_dsl_query + run_nl_query precedents.
+
+## DEC-081 — LLM as Translator: probabilistic translation at boundaries; deterministic computation throughout
+- Status: Accepted
+- Question: Slice J brings the LLM into a new role (driving curator actions via a conversational layer). Earlier slices have an LLM at NL→DSL translation (Slice H) and may eventually add one at result→prose rendering (Bucket 7). The agentic-publication tier (long-term-architecture vision) will put an LLM in the reader's hand. What is the project's binding rule for what an LLM may and may not do?
+- Decision: **The LLM is a translator at boundaries. Computation is deterministic throughout.** Specifically:
+
+  **What the LLM is allowed to do:**
+  - Translate natural-language input into a precise computational artifact: NL→DSL (Slice H translator), NL intent → CLI subcommand invocation (Slice J1 curator agent layer), NL reader question → query against the research pool (Tier 3 agentic publication, future).
+  - Translate deterministic output into human-readable prose: structured RetrievalResult → narrative prose (Slice F explainer; Bucket 7 LLM-augmented variant).
+  - Suggest possibilities, ask questions, surface candidates for the human to consider.
+
+  **What the LLM is NOT allowed to do:**
+  - Render result content that is not grounded in deterministic output. Every claim in a result-shaped response must trace to a structured field. No invented cross-references, fabricated counts, or made-up theological assertions.
+  - Validate concepts, mappings, or claims autonomously. Verification state transitions are gated on explicit human action (DEC-079-style; Slice J1 enforces via TTY-required `synthesize` subcommand + rationale requirement).
+  - Modify code in environments outside its scope. The research-environment LLM may not write code in the tool repo; the tool-environment LLM may not perform exegesis on scripture. Cross-environment changes happen via human-mediated handoff (feedback findings + slice scoping).
+  - Inject probabilistic claims into structurally factual outputs. If the LLM's contribution touches a result envelope, the contribution must be either (a) a translation of deterministic output, or (b) a clearly-marked auxiliary annotation that the consumer can ignore.
+
+- Rationale:
+  - **(a) The project's epistemic charter (DEC-024)** — "corpus is ground truth, registry entries are priors" — requires that the system's truth claims trace to corpus evidence. Probabilistic generation directly contradicts this if it enters the truth-rendering path. The LLM-as-translator boundary is what makes DEC-024 enforceable in a system that nevertheless wants to use LLMs.
+  - **(b) Translation is what LLMs are good at.** They are very strong at NL ↔ structured-data conversion when the target structure is well-specified. They are weak (and dangerous) at autonomous factual claims. The boundary aligns the LLM's deployment with its actual competence.
+  - **(c) Composability with future LLM-aware clients.** When the MCP server ships and an arbitrary LLM client connects (Claude Desktop, custom agents, future systems), the API surface must already enforce these boundaries — the boundaries can't depend on client cooperation. The deterministic CLI / API is the foundation; whatever LLM is in front of it must operate within the boundary by construction, not by promise.
+  - **(d) Auditability and forkability.** If the LLM never writes uncontrolled content into the data layer, the system's findings are reproducible from corpus + registry + queries. A fork of the tool gets the same answers. Without this rule, findings become contingent on which LLM you used and when.
+  - **(e) The cumulative-evidence model (Bucket 8 schema design) requires it.** Evidence rows are factual claims (a citation said this, a corpus pattern occurred at these positions). Allowing LLM-generated content to enter as "evidence" without provenance would corrupt the body of evidence. LLMs may *propose* evidence rows; humans (or deterministic systems) record their content.
+
+- Alternatives considered:
+  - **(a)** "Allow LLM-generated content anywhere in the system as long as it's marked as `origin: ai_suggested`." Rejected — labeling is insufficient; rendering paths that show ai_suggested content to readers as if it were factual erode the labeling over time. The boundary must be structural.
+  - **(b)** "Allow LLM autonomous validation under specific high-confidence conditions (e.g., translation confidence > 0.95)." Rejected — confidence is self-reported by the LLM; the threshold becomes a knob that decays toward "trust the model." DEC-072 (Slice H) already established this for translator confidence. Same reasoning applies broadly.
+  - **(c)** "Allow LLM augmentation of result content with disclaimers ('this paragraph is LLM-elaborated')." Rejected for primary rendering; *accepted* for clearly-marked auxiliary annotations that the consumer can opt into or out of. The distinction is who controls the rendering — the LLM's augmentation must be opt-in, separable, and never part of the canonical structured response.
+
+- Confidence: High. This is a foundational constraint that should be revisited only if the project's epistemic charter (DEC-024) is itself revised.
+- Made-by: orchestrator-mode in collaboration with user (Slice I close-out conversation, 2026-05-10).
+- Commit: pending (governance commit that lands Slice J0 will codify this DEC).
+- Files: docs/vision/long-term-architecture.md (the principle is cited in the vision doc); docs/governance/decision-log.md (this entry); future src/ enforcement points referenced when slices land.
+- Spec refs: Will be cited by future REQ markers around the curator and LLM-augmented explainer. Not yet tied to a specific REQ.
+- Cross-refs: DEC-003 (NL compiles to DSL, never bypass — DEC-081 generalizes), DEC-006 (system says when it cannot do something — boundary case of DEC-081), DEC-024 (corpus is ground truth — the epistemic backbone DEC-081 enforces), DEC-061 (deterministic-first explainer; LLM augmentation deferred to Bucket 7 — Bucket 7 must conform to DEC-081 if it ever ships), DEC-067 (concrete LLMClient seam — the seam where DEC-081 is enforceable), DEC-070 (HTTP error mapping for translator failures — codifies that translator errors are 5xx/4xx, not silently masked), DEC-072 (no confidence-threshold gate — companion: no autonomous LLM authority).
