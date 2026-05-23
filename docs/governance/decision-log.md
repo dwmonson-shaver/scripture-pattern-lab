@@ -892,7 +892,7 @@
 
 - Confidence: High. This is a foundational constraint that should be revisited only if the project's epistemic charter (DEC-024) is itself revised.
 - Made-by: orchestrator-mode in collaboration with user (Slice I close-out conversation, 2026-05-10).
-- Commit: pending (governance commit that lands Slice J0 will codify this DEC).
+- Commit: `8babb5a` (Slice J0 governance: lands DEC-081 + vision doc together).
 - Files: docs/vision/long-term-architecture.md (the principle is cited in the vision doc); docs/governance/decision-log.md (this entry); future src/ enforcement points referenced when slices land.
 - Spec refs: Will be cited by future REQ markers around the curator and LLM-augmented explainer. Not yet tied to a specific REQ.
 - Cross-refs: DEC-003 (NL compiles to DSL, never bypass — DEC-081 generalizes), DEC-006 (system says when it cannot do something — boundary case of DEC-081), DEC-024 (corpus is ground truth — the epistemic backbone DEC-081 enforces), DEC-061 (deterministic-first explainer; LLM augmentation deferred to Bucket 7 — Bucket 7 must conform to DEC-081 if it ever ships), DEC-067 (concrete LLMClient seam — the seam where DEC-081 is enforceable), DEC-070 (HTTP error mapping for translator failures — codifies that translator errors are 5xx/4xx, not silently masked), DEC-072 (no confidence-threshold gate — companion: no autonomous LLM authority).
