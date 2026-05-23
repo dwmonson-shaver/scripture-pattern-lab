@@ -39,7 +39,6 @@ from src.nlp.explainer import (
 from src.nlp.llm_client import LLMClient, LLMUnavailable
 from src.validation.validator import ValidationFinding, ValidationResult
 
-
 # ---------------------------------------------------------------------------
 # LLM stubs (Slice K — Phase K.2). Subclass LLMClient so any future
 # anthropic-SDK shape change does not propagate into tests.
@@ -705,6 +704,151 @@ class TestCappedSummary:
         )
         ers = explain(result, plan, _supported_validation())
         assert "capped" in ers.summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# Slice K — Phase K.3: explain() opt-in LLM path for conceptual prose
+# ---------------------------------------------------------------------------
+
+
+class TestExplainWithLLMClient:
+    """End-to-end explain() behavior with an injected LLMClient.
+
+    The slice's load-bearing contracts:
+    (a) byte-identical envelope when no client is injected (backwards compat
+        with 540 existing tests);
+    (b) conceptual candidates' explanation strings reflect the LLM paraphrase
+        when a client is injected;
+    (c) variant / exact candidates never see the LLM regardless of client;
+    (d) summary, baselines, alt-orderings, validation notes always
+        deterministic regardless of client.
+    """
+
+    def _flagship_result(self) -> RetrievalResult:
+        return RetrievalResult(
+            candidates=[
+                _candidate([("πίστις", "faith"), ("ἐλπίς", "hope"), ("ἀγάπη", "love")]),
+                _candidate([("πίστις", "faith"), ("ἐλπίς", "hope"), ("ἀγάπη", "love")]),
+            ],
+            stages_used=["symbolic"],
+            contextualization=_flagship_contextualization(),
+        )
+
+    def test_default_call_unchanged_when_no_llm_client(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        validation = _supported_validation()
+        # Call once without llm_client, once with explicit None — they must
+        # produce byte-identical dumps.
+        ers_default = explain(result, plan, validation)
+        ers_none = explain(result, plan, validation, llm_client=None)
+        assert ers_default.model_dump() == ers_none.model_dump()
+
+    def test_llm_paraphrases_conceptual_candidates(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        validation = _supported_validation()
+        canned = (
+            "At 1Cor 13:13 the lemmas πίστις, ἐλπίς, and ἀγάπη appear in "
+            "the conceptual pattern faith > hope > love."
+        )
+        client = _FakeLLMClient(canned=canned)
+        ers_det = explain(result, plan, validation)
+        ers_llm = explain(result, plan, validation, llm_client=client)
+        # Both conceptual candidates' explanation strings come from the LLM.
+        for r in ers_llm.results:
+            assert r.explanation == canned
+        # The deterministic explanation differs (i.e., the LLM path actually
+        # took effect — not a no-op).
+        for r_det, r_llm in zip(ers_det.results, ers_llm.results):
+            assert r_det.explanation != r_llm.explanation
+
+    def test_llm_client_called_once_per_conceptual_candidate(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        client = _FakeLLMClient(canned="A grounded sentence at 1Cor 13:13 mentions πίστις.")
+        explain(result, plan, _supported_validation(), llm_client=client)
+        # Two conceptual candidates in fixture → two LLM calls.
+        assert len(client.calls) == 2
+
+    def test_variant_match_type_not_routed_through_llm(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        # Single variant candidate alongside one conceptual candidate.
+        variant_cand = _candidate(
+            [("πίστις", "faith"), ("ἐλπίς", "hope"), ("ἀγάπη", "love")],
+            match_type="variant",
+        )
+        conceptual_cand = _candidate(
+            [("πίστις", "faith"), ("ἐλπίς", "hope"), ("ἀγάπη", "love")],
+            match_type="conceptual",
+        )
+        result = RetrievalResult(
+            candidates=[variant_cand, conceptual_cand],
+            stages_used=["symbolic"],
+            contextualization=_flagship_contextualization(),
+        )
+        client = _FakeLLMClient(canned="LLM-prose 1Cor 13:13 πίστις ἐλπίς ἀγάπη.")
+        ers = explain(result, plan, _supported_validation(), llm_client=client)
+        # Only ONE LLM call (for the conceptual; the variant uses deterministic).
+        assert len(client.calls) == 1
+        # The variant's explanation matches the deterministic helper exactly.
+        det_variant = _per_candidate_prose(variant_cand, "faith > hope > love")
+        assert ers.results[0].explanation == det_variant
+        # The conceptual's explanation came from the LLM.
+        assert ers.results[1].explanation == "LLM-prose 1Cor 13:13 πίστις ἐλπίς ἀγάπη."
+
+    def test_summary_unaffected_by_llm_client(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        validation = _supported_validation()
+        client = _FakeLLMClient(canned="Anything 1Cor 13:13 πίστις.")
+        ers_det = explain(result, plan, validation)
+        ers_llm = explain(result, plan, validation, llm_client=client)
+        assert ers_det.summary == ers_llm.summary
+
+    def test_contextualization_unaffected_by_llm_client(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        validation = _supported_validation()
+        client = _FakeLLMClient(canned="Anything 1Cor 13:13 πίστις.")
+        ers_det = explain(result, plan, validation)
+        ers_llm = explain(result, plan, validation, llm_client=client)
+        # The full Contextualization payload (baselines, alt-orderings, etc.)
+        # is byte-identical.
+        assert ers_det.contextualization == ers_llm.contextualization
+
+    def test_validation_notes_unaffected_by_llm_client(self) -> None:
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        # Validation with one warning finding to ensure the path is exercised.
+        validation = ValidationResult(
+            status="partial",
+            executable_plan=None,
+            findings=[
+                ValidationFinding(
+                    severity="warning",
+                    code="REGISTRY_NOT_VERIFIED",
+                    path="$.sequence.steps[0]",
+                    message="concept 'faith' is prior-grounded (unverified)",
+                ),
+            ],
+            engine_version="0.1",
+        )
+        client = _FakeLLMClient(canned="A 1Cor 13:13 πίστις paraphrase.")
+        ers_det = explain(result, plan, validation)
+        ers_llm = explain(result, plan, validation, llm_client=client)
+        assert ers_det.validation_notes == ers_llm.validation_notes
+
+    def test_llm_fallback_does_not_corrupt_envelope(self) -> None:
+        """If the LLM raises, the conceptual candidate gets deterministic prose."""
+        plan = _plan_for_concepts("faith", "hope", "love")
+        result = self._flagship_result()
+        validation = _supported_validation()
+        client = _FailingLLMClient(exc=LLMUnavailable("simulated outage"))
+        ers_fallback = explain(result, plan, validation, llm_client=client)
+        ers_det = explain(result, plan, validation)
+        # Full envelope is byte-identical to the deterministic envelope.
+        assert ers_fallback.model_dump() == ers_det.model_dump()
 
 
 # ---------------------------------------------------------------------------

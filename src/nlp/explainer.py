@@ -1,23 +1,34 @@
-"""Result explainer — deterministic prose synthesis from a RetrievalResult.
+"""Result explainer — prose synthesis from a RetrievalResult.
 
 Per canonical-09 §9 (REQ:09.result-explainer): the explainer transforms a
 ``RetrievalResult`` into an ``ExplainedResultSet`` whose ``summary`` is the
 slice-level prose (≤ 6 lines) and whose ``results`` carry per-candidate
 explanations grounded in actual corpus counts.
 
-MVP shape (DEC-061): deterministic templating for ALL match types. The
-canonical "LLM explanation for conceptual matches" sentence is deferred
-to a named bucket — adding an LLM dependency for prose generation alone
-is overkill and the user has not yet seen a deterministic baseline to
-compare against.
+Default (DEC-061): deterministic templating for ALL match types. f-strings
+inside small helpers compose every line; every prose claim is derived from
+fields on ``result``, ``plan``, or ``validation`` — never invented.
+
+Optional LLM augmentation (Slice K, DEC-090, closes Bucket 7): when ``explain``
+is called with an injected ``LLMClient``, per-candidate prose for
+``match_type == "conceptual"`` is paraphrased by the LLM from grounded
+structured fields. The LLM never replaces deterministic grounded fields:
+``summary``, ``contextualization`` baselines, alt-ordering phrases, and
+``validation_notes`` stay deterministic. The LLM has access only to the
+fields ``build_explainer_user_message`` exposes (verse reference, sequence
+label, match type, per-step lemma + node value + resolved lemmas) — the
+structural enforcement of DEC-081's no-fabrication clause. Any LLM failure
+(``LLMUnavailable``, unexpected ``Exception``, ``FALLBACK`` sentinel, empty
+output) cleanly falls back to the deterministic helper.
 
 Cap policy (Bucket 4 closure):
 - resolved-lemma display capped at 5 items with "(+N more)" suffix
 - sequence labels capped at 64 chars with ellipsis
+- LLM-paraphrased prose post-truncated to 300 chars (defense-in-depth)
 
-The module is purely deterministic — no I/O, no LLM client, no external
-template engine. f-strings inside small helpers compose every line.
-Substring-tested in ``tests/unit/test_explainer.py``.
+Substring-tested in ``tests/unit/test_explainer.py``;
+``tests/integration/test_explainer_llm_prose_live.py`` covers the live-LLM
+exit gate (DEC-081 conformance: grounded-substring check).
 """
 
 from __future__ import annotations
@@ -56,11 +67,22 @@ def explain(
     result: RetrievalResult,
     plan: QueryPlan,
     validation: ValidationResult,
+    *,
+    llm_client: LLMClient | None = None,
 ) -> ExplainedResultSet:
     """Build an ExplainedResultSet from a RetrievalResult, plan, and validation.
 
-    Deterministic. Every prose claim is derived from fields on ``result``,
-    ``plan``, or ``validation`` — never invented.
+    Default: deterministic. Every prose claim is derived from fields on
+    ``result``, ``plan``, or ``validation`` — never invented.
+
+    Optional (Slice K — DEC-090): when ``llm_client`` is supplied, each
+    candidate with ``match_type == "conceptual"`` has its ``explanation``
+    field paraphrased by the LLM from grounded structured fields. The
+    deterministic helper is the airtight fallback (any LLM failure returns
+    the deterministic prose). Variant / exact candidates always get the
+    deterministic helper. The summary, contextualization, baseline phrases,
+    alt-ordering phrases, and validation notes are always deterministic —
+    LLM augmentation touches only per-candidate ``explanation`` strings.
 
     Caller contract (DEC-024 corpus-is-ground-truth): when
     ``result.contextualization`` is supplied, its ``observed_count`` MUST be
@@ -76,16 +98,21 @@ def explain(
         candidates=result.candidates,
         ctx=result.contextualization,
     )
-    explained_results = [
-        ExplainedResult(
-            reference=c.reference,
-            text_display=_text_display_for_candidate(c),
-            match_type=c.match_type,
-            score=None,
-            explanation=_per_candidate_prose(c, sequence_label),
+    explained_results: list[ExplainedResult] = []
+    for c in result.candidates:
+        if llm_client is not None and c.match_type == "conceptual":
+            explanation = _per_candidate_prose_llm(c, sequence_label, llm_client)
+        else:
+            explanation = _per_candidate_prose(c, sequence_label)
+        explained_results.append(
+            ExplainedResult(
+                reference=c.reference,
+                text_display=_text_display_for_candidate(c),
+                match_type=c.match_type,
+                score=None,
+                explanation=explanation,
+            )
         )
-        for c in result.candidates
-    ]
     validation_notes = _format_validation_notes(validation)
 
     return ExplainedResultSet(
