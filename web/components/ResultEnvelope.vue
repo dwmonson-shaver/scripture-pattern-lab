@@ -136,9 +136,13 @@ const observedAlt = computed(() =>
         <li v-for="(b, i) in contextualization.node_baselines" :key="i">
           <GreekText>{{ b.resolved_lemmas.join(', ') }}</GreekText>
           — <strong>{{ b.count }}</strong> occurrences
-          <span class="text-caption text-medium-emphasis">({{ b.match_type }})</span>
+          <span class="text-caption text-medium-emphasis">({{ b.node_value }})</span>
         </li>
       </ul>
+      <p v-if="contextualization.alternative_orderings_capped" class="text-caption text-medium-emphasis mb-2">
+        Alternative orderings list is capped (only the first
+        {{ contextualization.alternative_orderings.length }} shown of all possible permutations).
+      </p>
       <p class="text-body-2 mb-2">
         {{ contextualization.alternative_orderings.length }} possible orderings of the nodes:
       </p>

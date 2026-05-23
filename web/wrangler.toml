@@ -21,5 +21,10 @@ enabled = true
 # NUXT_BACKEND_TOKEN) are NOT here — set them via:
 #   npx wrangler secret put NUXT_BACKEND_URL
 #   npx wrangler secret put NUXT_BACKEND_TOKEN
+#
+# Note: NUXT_PUBLIC_APP_NAME is also declared in nuxt.config.ts under
+# `runtimeConfig.public.appName`. The wrangler value WINS at runtime via
+# Nuxt's env-override semantics. Keep them in sync, or remove this block
+# to let nuxt.config.ts be authoritative.
 [vars]
 NUXT_PUBLIC_APP_NAME = "Scripture Pattern Lab"

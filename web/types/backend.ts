@@ -25,6 +25,15 @@ export type MatchType = 'exact' | 'variant' | 'conceptual'
 
 export type ValidationStatus = 'supported' | 'partial' | 'unsupported'
 
+export type NodeType =
+  | 'token'
+  | 'lemma'
+  | 'root'
+  | 'concept'
+  | 'domain'
+  | 'morph'
+  | 'wildcard'
+
 export interface ValidationFinding {
   severity: 'error' | 'warning' | 'info'
   code: string
@@ -60,30 +69,31 @@ export interface MatchCandidate {
 
 export interface NodeBaseline {
   node_index: number
-  value: string
+  node_type: NodeType
+  node_value: string
   resolved_lemmas: string[]
   count: number
-  match_type: MatchType
-  sample_size: number
 }
 
 export interface AlternativeOrderingCount {
+  permutation: number[]
   sequence_label: string
   count: number
   is_observed: boolean
 }
 
 export interface NullDistribution {
+  sample_size: number
   mean: number
   std: number
-  observed_count: number
-  permutations: number[]
+  seed: number
 }
 
 export interface Contextualization {
   observed_count: number
   node_baselines: NodeBaseline[]
   alternative_orderings: AlternativeOrderingCount[]
+  alternative_orderings_capped: boolean
   null_distribution: NullDistribution | null
 }
 

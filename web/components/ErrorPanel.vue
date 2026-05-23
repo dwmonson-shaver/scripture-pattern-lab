@@ -27,7 +27,9 @@ const codeLabel = computed(() => {
 const showDetails = ref(false)
 const hasDetails = computed(() => {
   const d = detail.value?.details
-  return d !== null && d !== undefined && Object.keys(d).length > 0
+  if (d === null || d === undefined) return false
+  if (typeof d !== 'object') return false
+  return Object.keys(d as Record<string, unknown>).length > 0
 })
 </script>
 

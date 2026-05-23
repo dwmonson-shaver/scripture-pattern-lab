@@ -128,9 +128,21 @@ def create_app() -> FastAPI:
         ),
         lifespan=lifespan,
     )
+    # `or None` collapses both "env var absent" and "env var set to empty
+    # string" to None (no-op middleware). Empty-string-as-disabled is
+    # deliberate — avoids a degenerate "match against empty string" attack
+    # surface — but log a warning when it happens so a misconfigured deploy
+    # (env var set to "" by a copy-paste of an unrendered template var)
+    # doesn't silently expose every route unauthenticated.
+    spl_token = os.environ.get("SPL_BEARER_TOKEN")
+    if spl_token == "":
+        logger.warning(
+            "create_app: SPL_BEARER_TOKEN is set to empty string; "
+            "treating as disabled. Set it to a non-empty value or unset it."
+        )
     fastapi_app.add_middleware(
         BearerAuthMiddleware,
-        expected_token=os.environ.get("SPL_BEARER_TOKEN") or None,
+        expected_token=spl_token or None,
     )
     fastapi_app.include_router(health_routes.router)
     fastapi_app.include_router(query_routes.router)

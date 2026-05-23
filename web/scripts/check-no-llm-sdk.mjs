@@ -9,6 +9,12 @@
 //
 // Each is a discrete add-back path that would erode DEC-081 if it ever
 // shipped. The check runs after `nuxt build` writes .output/.
+//
+// This is a SECOND-LINE defense. The first line is that the SDK never
+// enters package.json. Dynamic imports with variable specifiers
+// (e.g., `await import(someVar)`) could bypass this grep; review every
+// new dependency addition substantively against DEC-081 rather than
+// relying on this script alone.
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'

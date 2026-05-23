@@ -1,5 +1,19 @@
 import type { BackendErrorBody, QueryNLResponse } from '~~/types/backend'
 
+/**
+ * Client-visible error shape. Parallel to but deliberately not identical
+ * to `server/utils/backend.ts:BackendError`:
+ * - Server-side (the proxy): `body: unknown` — upstream can be anything,
+ *   the proxy doesn't validate, just mirrors.
+ * - Client-side (this file): `body: BackendErrorBody` — typed to the
+ *   project envelope because by the time the composable receives the
+ *   error, the proxy has either passed through the canonical shape or
+ *   synthesized a network_error envelope of the same shape.
+ *
+ * The asymmetry is intentional. If the two ever need to be unified, move
+ * both into `types/backend.ts` (currently the placeholder) — but keep
+ * the unknown/typed distinction so server-side can stay tolerant.
+ */
 export interface ProxyErrorShape {
   status: number
   body: BackendErrorBody

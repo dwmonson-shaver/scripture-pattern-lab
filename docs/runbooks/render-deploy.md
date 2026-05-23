@@ -75,15 +75,19 @@ Save → Render triggers the first deploy.
 
 Wait for the build to go green. The service comes up but the DB is empty — every query against `/api/v1/query/dsl` will return either 503 (engine works but registry returns no concepts) or empty result sets.
 
-Load the corpus + registry from Render's **Shell** tab (or via `render-cli` exec):
+Load the corpus + registry from Render's **Shell** tab (or via `render-cli` exec) — Render's shell inherits the service's env vars so `DATABASE_URL` is already set:
 
 ```bash
-# Inside Render shell, with DATABASE_URL already in env:
+# Inside Render Shell (DATABASE_URL is pre-set via service env):
 SPL_INGEST_CONFIRM_TRUNCATE=1 python scripts/db/ingest_corpus.py --truncate
 SPL_REGISTRY_CONFIRM_TRUNCATE=1 python scripts/db/seed_registry.py --truncate
 ```
 
+**Order matters:** ingest first (writes the `tokens` table), then seed (writes `concepts` + `concept_lemmas`, which depend on `tokens` existing for the registry's lemma-presence checks). Reversing the order leaves the registry seed unable to verify lemma coverage.
+
 Expect ~30 seconds for ingest (NT corpus, ~137k tokens) and a few seconds for the registry seed.
+
+If you're running these from a local shell instead of Render's Shell, you must `export DATABASE_URL=...` first using the **External Database URL** (NOT the Internal one — the Internal URL is only reachable from inside Render's network).
 
 ---
 
