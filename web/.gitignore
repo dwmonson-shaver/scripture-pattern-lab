@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Nuxt / Nitro build artifacts
+.nuxt/
+.output/
+
+# Wrangler local state
+.wrangler/
+
+# Test-deploy script scratch dirs
+.test-deploy/
+.dryrun-out/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDE & editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test & coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Generated types (regenerated on every build via prebuild script;
+# committed so PRs visibly show schema drift)
+# types/backend.ts -- NOT ignored (intentionally committed)
+
+# Misc
+tmp/
+temp/

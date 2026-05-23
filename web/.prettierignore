@@ -1,0 +1,10 @@
+.nuxt
+.output
+node_modules
+dist
+coverage
+*.lock
+*.log
+playwright-report
+test-results
+types/backend.ts

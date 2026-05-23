@@ -1,0 +1,14 @@
+name = "scripture-pattern-lab-web"
+main = ".output/server/index.mjs"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Dev-only variant; secrets come from .env.local for `nuxt dev`.
+workers_dev = true
+
+[assets]
+directory = ".output/public"
+binding = "ASSETS"
+
+[vars]
+NUXT_PUBLIC_APP_NAME = "Scripture Pattern Lab (dev)"

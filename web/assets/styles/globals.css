@@ -1,0 +1,22 @@
+/* Source-language fonts. Greek is shipped; Hebrew is stubbed but
+ * unused at MVP (NT-only corpus). */
+
+@font-face {
+  font-family: 'SBL Greek';
+  src: url('/fonts/SBLGreek.woff2') format('woff2');
+  font-display: swap;
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* Hebrew hook — declared so future Hebrew rendering doesn't restructure
+ * stylesheet. Falls back to system fonts until SBLHebrew.woff2 is loaded
+ * by a future slice. */
+.text-heb {
+  font-family: 'SBL Hebrew', 'Times New Roman', serif;
+  direction: rtl;
+}
+
+.text-grc {
+  font-family: 'SBL Greek', 'Times New Roman', serif;
+}

@@ -1,0 +1,25 @@
+name = "scripture-pattern-lab-web"
+main = ".output/server/index.mjs"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Use the free *.workers.dev subdomain. Custom domain deferred (see OQ-J1
+# in design-slice-j1-frontend-mvp; revisit after MVP usage patterns appear).
+workers_dev = true
+preview_urls = true
+
+# Static assets bundled by Nuxt's Cloudflare module preset.
+[assets]
+directory = ".output/public"
+binding = "ASSETS"
+
+# Workers observability dashboard.
+[observability]
+enabled = true
+
+# Public, non-secret config. The two backend secrets (NUXT_BACKEND_URL +
+# NUXT_BACKEND_TOKEN) are NOT here — set them via:
+#   npx wrangler secret put NUXT_BACKEND_URL
+#   npx wrangler secret put NUXT_BACKEND_TOKEN
+[vars]
+NUXT_PUBLIC_APP_NAME = "Scripture Pattern Lab"
