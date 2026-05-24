@@ -11,6 +11,10 @@ needed). It activates only when the env var is present, which is the
 case in the Render deployment.
 
 `/api/v1/health` is exempt — Render's healthcheck pings it unauthenticated.
+`/openapi.json` is also exempt — the OpenAPI schema is conventionally
+public (it describes the API shape, not data), and the frontend's CI
+`gen:types` step fetches it unauthenticated to regenerate
+`types/backend.ts`. Bearer auth still protects every data-bearing route.
 
 The 401 response uses the project-wide `ErrorResponse` envelope so the
 Worker proxy can dispatch UI off `body.detail.error` the same way it
@@ -28,7 +32,7 @@ from starlette.responses import Response
 
 from src.app.schemas import ErrorResponse
 
-_HEALTH_PATH = "/api/v1/health"
+_EXEMPT_PATHS = frozenset({"/api/v1/health", "/openapi.json"})
 _BEARER_SCHEME = "bearer"
 
 
@@ -37,8 +41,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
     Activation is gated on `expected_token`:
     - `None` → middleware is a no-op (every request passes through).
-    - non-`None` → every request except `GET /api/v1/health` must carry
-      `Authorization: Bearer <expected_token>` (case-insensitive scheme).
+    - non-`None` → every request except `GET /api/v1/health` and
+      `GET /openapi.json` must carry `Authorization: Bearer <expected_token>`
+      (case-insensitive scheme).
 
     Comparison uses `secrets.compare_digest` to avoid timing oracles.
     """
@@ -60,7 +65,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if self._expected_token is None:
             return await call_next(request)
 
-        if request.url.path == _HEALTH_PATH:
+        if request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
         header = request.headers.get("authorization")

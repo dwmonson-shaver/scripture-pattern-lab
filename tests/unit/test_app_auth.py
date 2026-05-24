@@ -55,6 +55,16 @@ class TestBearerAuthMiddlewareWithToken:
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
 
+    def test_openapi_json_always_unauthenticated(self, app_with_token: FastAPI) -> None:
+        """OpenAPI schema is conventionally public; the frontend's CI
+        gen:types step depends on fetching it without a token."""
+        with TestClient(app_with_token) as client:
+            response = client.get("/openapi.json")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["openapi"].startswith("3.")
+        assert "paths" in body
+
     def test_missing_authorization_header_returns_401(
         self, app_with_token: FastAPI
     ) -> None:

@@ -22,7 +22,7 @@ Bearer-token auth (Slice J1):
 The factory reads SPL_BEARER_TOKEN at construction time and wires a
 BearerAuthMiddleware. When the env var is unset (local dev, existing
 test fixtures), the middleware is a no-op; when set, every route
-except /api/v1/health requires `Authorization: Bearer <token>` with
+except /api/v1/health and /openapi.json requires `Authorization: Bearer <token>` with
 constant-time comparison. The Worker proxy is the canonical client.
 
 Run in production with:
