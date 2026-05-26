@@ -459,10 +459,17 @@ def _extend_chains_one_step(
     extended: list[list[MatchedToken]] = []
     for chain in chains:
         prev = chain[-1]
+        # Codex P2: reject any candidate already in the chain so patterns
+        # like ``A ~ B ~ A`` cannot satisfy by reusing the first A. The
+        # per-step ``_gap_satisfied_unordered(prev == next) == False``
+        # check only catches the immediate predecessor.
+        chain_ids = {t.id for t in chain}
         verse_rows = rows_by_verse.get((prev.book, prev.chapter, prev.verse))
         if not verse_rows:
             continue
         for next_token in verse_rows:
+            if next_token.id in chain_ids:
+                continue
             if not _step_pair_satisfied(
                 prev.position, next_token.position, operator
             ):
@@ -488,20 +495,29 @@ def _extend_chains_window_step(
     (editorial overlay); book boundaries are not (different authors / scrolls
     — easy footgun otherwise).
 
-    PRECEDENCE keeps the ordering predicate `next.gp > prev.gp` (with
-    step-level gap arithmetic on global_position). COOCCURRENCE drops that
-    ordering predicate; ``_step_pair_satisfied`` uses ``abs(next - prev)``.
+    PRECEDENCE: next step must land within ``[base.gp, base.gp + window_n]``
+    (forward window only — the ordering constraint forbids the second term
+    from preceding the first).
+
+    COOCCURRENCE (Codex P2 fix): next step may land within
+    ``[base.gp - window_n, base.gp + window_n]`` — a symmetric window around
+    the anchor. ``A ~ B`` reads "B near A in any direction"; a forward-only
+    window would make ``~`` behave order-dependently when the second term
+    precedes the first in the corpus, contradicting the unordered semantic.
     """
-    # Build the union of ``(book, gp_lo, gp_hi)`` windows for surviving
-    # chains. ``gp_lo`` is the *base* position; the next-step token must be
-    # strictly after the previous token's gp (when PRECEDENCE) but anywhere
-    # up to ``base + window_n`` (inclusive). For COOCCURRENCE the next token
-    # may also precede the previous token, but the global window still
-    # constrains it to ``[base, base + window_n]``.
+    # Each chain contributes one (book, gp_lo, gp_hi) range. Forward-only
+    # for PRECEDENCE, symmetric for COOCCURRENCE.
+    backward = operator.type == OperatorType.COOCCURRENCE
     window_ranges: set[tuple[str, int, int]] = set()
     for chain in chains:
         base = chain[0]
-        window_ranges.add((base.book, base.global_position, base.global_position + window_n))
+        if backward:
+            gp_lo = base.global_position - window_n
+            gp_hi = base.global_position + window_n
+        else:
+            gp_lo = base.global_position
+            gp_hi = base.global_position + window_n
+        window_ranges.add((base.book, gp_lo, gp_hi))
 
     stmt = select(*_token_columns()).where(tokens_table.c.lemma.in_(lemmas))
     for clause in base_where:
@@ -537,10 +553,21 @@ def _extend_chains_window_step(
     for chain in chains:
         base = chain[0]
         prev = chain[-1]
-        gp_lo = base.global_position
-        gp_hi = base.global_position + window_n
+        if backward:
+            gp_lo = base.global_position - window_n
+            gp_hi = base.global_position + window_n
+        else:
+            gp_lo = base.global_position
+            gp_hi = base.global_position + window_n
+        # Codex P2: reject any candidate already in the chain so patterns
+        # like ``A ~ B ~ A`` cannot satisfy by reusing the first A. The
+        # per-step ``_gap_satisfied_unordered(prev == next) == False``
+        # check only catches the immediate predecessor.
+        chain_ids = {t.id for t in chain}
         bucket = rows_by_book.get(base.book, ())
         for next_token in bucket:
+            if next_token.id in chain_ids:
+                continue
             if (
                 next_token.global_position < gp_lo
                 or next_token.global_position > gp_hi
@@ -612,8 +639,18 @@ def _build_proximity_infos(
     proximity: dict[int, ProximityInfo] = {}
     for chain_idx, chain in enumerate(chains):
         base = chain[0]
+        # Codex P2: compute span from the min/max matched gp across the
+        # entire chain — for mixed ordered/unordered queries (e.g.
+        # ``A > B ~ C``) the cooccurrence step can land between A and B
+        # or even before A, so chain[-1] is not necessarily the farthest
+        # matched token. The presented window centers on the anchor's
+        # forward range [base.gp, base.gp + window_n] for collecting
+        # surrounding tokens (this is what the user asked the engine to
+        # look at), and span_tokens reports the actual matched-token span.
+        matched_gps = [t.global_position for t in chain]
+        match_gp_lo = min(matched_gps)
+        match_gp_hi = max(matched_gps)
         gp_lo = base.global_position
-        gp_hi = chain[-1].global_position  # the actual matched span ends here
         gp_window_hi = gp_lo + window_n
         window_tokens = [
             t
@@ -645,7 +682,7 @@ def _build_proximity_infos(
 
         proximity[chain_idx] = ProximityInfo(
             window_n=window_n,
-            span_tokens=gp_hi - gp_lo,
+            span_tokens=match_gp_hi - match_gp_lo,
             crosses_verse=crosses_verse,
             crosses_chapter=crosses_chapter,
             window_tokens=window_tokens,

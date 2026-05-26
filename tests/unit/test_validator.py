@@ -338,6 +338,11 @@ class TestRule10WindowConstraints:
         assert result.status == "supported"
 
     def test_window_exceeds_max(self) -> None:
+        """Slice L Codex P1: WINDOW_EXCEEDS_MAX is in the unreducible error
+        set, so status must be ``unsupported`` and ``executable_plan`` must
+        be ``None``. _reduce_plan cannot strip the offending ``scope.unit.n``
+        without changing the user's pattern identity, so reducing-and-running
+        would silently breach the advertised capability ceiling."""
         from src.engine.models import ScopeUnitWindow
 
         plan = _simple_plan(
@@ -347,9 +352,8 @@ class TestRule10WindowConstraints:
         result = validate(plan, _mvp())
         codes = {f.code for f in result.findings}
         assert "WINDOW_EXCEEDS_MAX" in codes
-        # An error code → status is partial (reduction strips nothing here)
-        # or unsupported. Either way, status is not "supported".
-        assert result.status != "supported"
+        assert result.status == "unsupported"
+        assert result.executable_plan is None
 
     def test_gap_narrowed_by_window_warning(self) -> None:
         """Decision #10: when step-level gap.max > outer window.n, emit a

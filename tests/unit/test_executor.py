@@ -575,6 +575,124 @@ class TestWindowExecution:
         assert result == []
 
 
+class TestCodexClosures:
+    """Codex P2 closures (slice-L close): the window predicate and chain
+    extension must honor unordered semantics, and span_tokens must report the
+    true matched span."""
+
+    def _matched(self, **kwargs) -> Any:
+        from src.engine.models import MatchedToken
+
+        defaults = dict(
+            id=1, book="45", chapter=5, verse=1, position=1,
+            global_position=100, surface_form="x", normalized_form="x",
+            lemma="x", pos="N",
+        )
+        defaults.update(kwargs)
+        return MatchedToken(**defaults)
+
+    def test_windowed_cooccurrence_uses_symmetric_range(self) -> None:
+        """Codex P2 #2: ``A ~ B`` inside a window must accept B preceding A.
+
+        Specifically, the step-N SELECT for COOCCURRENCE must include the
+        backward direction in its WHERE clause (gp >= base.gp - window_n).
+        """
+        from src.engine.executor import _extend_chains_window_step
+        from src.engine.models import OperatorType, OrderOperator
+
+        anchor = self._matched(id=1, global_position=100, lemma="A")
+        # Backward candidate at gp=95 — would be filtered by a forward-only window.
+        backward = self._matched(id=2, global_position=95, lemma="B")
+
+        fake_conn = MagicMock()
+        fake_result = MagicMock()
+        fake_result.all.return_value = [
+            type("Row", (), {
+                "id": backward.id, "book": backward.book,
+                "chapter": backward.chapter, "verse": backward.verse,
+                "position": backward.position,
+                "global_position": backward.global_position,
+                "surface_form": backward.surface_form,
+                "normalized_form": backward.normalized_form,
+                "lemma": backward.lemma, "pos": backward.pos,
+            })()
+        ]
+        fake_conn.execute.return_value = fake_result
+
+        op = OrderOperator(type=OperatorType.COOCCURRENCE)
+        extended = _extend_chains_window_step(
+            fake_conn,
+            chains=[[anchor]],
+            lemmas=["B"],
+            operator=op,
+            base_where=[],
+            window_n=20,
+        )
+        assert len(extended) == 1, "backward candidate should satisfy ~"
+        assert extended[0][-1].global_position == 95
+
+    def test_chain_rejects_already_used_token(self) -> None:
+        """Codex P2 #3: an ``A ~ B ~ A`` chain must not satisfy by reusing
+        the original A token. The chain extension must skip any candidate
+        whose ``id`` already appears in the chain."""
+        from src.engine.executor import _extend_chains_window_step
+        from src.engine.models import OperatorType, OrderOperator
+
+        # Chain so far: A (id=1, gp=100), B (id=2, gp=105). Looking for the
+        # final A; the only available "A" row in the window is id=1 (the
+        # original anchor). Without the chain-ids guard this would extend.
+        a1 = self._matched(id=1, global_position=100, lemma="A")
+        b = self._matched(id=2, global_position=105, lemma="A")
+        chain = [a1, b]
+
+        fake_conn = MagicMock()
+        fake_result = MagicMock()
+        fake_result.all.return_value = [
+            type("Row", (), {
+                "id": a1.id, "book": a1.book, "chapter": a1.chapter,
+                "verse": a1.verse, "position": a1.position,
+                "global_position": a1.global_position,
+                "surface_form": a1.surface_form,
+                "normalized_form": a1.normalized_form,
+                "lemma": a1.lemma, "pos": a1.pos,
+            })()
+        ]
+        fake_conn.execute.return_value = fake_result
+
+        op = OrderOperator(type=OperatorType.COOCCURRENCE)
+        extended = _extend_chains_window_step(
+            fake_conn,
+            chains=[chain],
+            lemmas=["A"],
+            operator=op,
+            base_where=[],
+            window_n=20,
+        )
+        assert extended == [], "id=1 is already in the chain; must not reuse"
+
+    def test_span_tokens_from_min_max_matched_positions(self) -> None:
+        """Codex P2 #5: span_tokens reports the matched span, not just
+        ``chain[-1].gp - chain[0].gp``. For an out-of-order chain like
+        A(100) → C(110) → B(105) (last step ~ landed between A and C),
+        the span should still be 10 (100..110), not 5 (100..105).
+        """
+        from src.engine.executor import _build_proximity_infos
+
+        a = self._matched(id=1, global_position=100, lemma="A")
+        c = self._matched(id=2, global_position=110, lemma="C")
+        b = self._matched(id=3, global_position=105, lemma="B")
+        chain = [a, c, b]  # b landed between a and c (unordered step)
+
+        fake_conn = MagicMock()
+        fake_conn.execute.return_value.all.return_value = []
+
+        result = _build_proximity_infos(
+            connection=fake_conn, chains=[chain], base_where=[], window_n=50,
+        )
+        info = result[0]
+        assert info.span_tokens == 10, "max(gp) - min(gp) across the chain"
+
+
 class TestProximityInfoPopulation:
     """Slice L Phase 3: ``_build_proximity_infos`` builds a ProximityInfo per
     chain from the batch-fetched window tokens."""

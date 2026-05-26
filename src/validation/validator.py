@@ -795,7 +795,22 @@ def validate(
             grounding=grounding,
         )
 
-    # Has errors — try partial reduction
+    # Has errors — try partial reduction unless an unreducible error fired.
+    # Slice L: WINDOW_EXCEEDS_MAX is an error about the scope envelope itself,
+    # not a structural property _reduce_plan can strip from the AST. Reduction
+    # would leave the offending ``scope.unit.n`` in place and return a
+    # `partial` plan that the executor would happily run — silently breaching
+    # the capability surface. Force unsupported so the route returns 422.
+    unreducible_error_codes = {"WINDOW_EXCEEDS_MAX"}
+    if any(f.code in unreducible_error_codes for f in errors):
+        return ValidationResult(
+            status="unsupported",
+            executable_plan=None,
+            findings=findings,
+            engine_version=capability_registry.version,
+            grounding=grounding,
+        )
+
     reduced = _reduce_plan(plan, capability_registry)
     if reduced is not None:
         return ValidationResult(

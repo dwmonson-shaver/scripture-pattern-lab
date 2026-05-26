@@ -69,12 +69,18 @@ class TranslationNeedsClarification(BaseModel):
     ``suggested_windows`` so they can pick a window N and resubmit. No
     query executes. ``nl_source`` echoes the original NL so the frontend
     can render context.
+
+    Codex P2: ``suggested_windows`` defaults to ``[10, 20, 50]`` —
+    every value must lie at or below ``CapabilityRegistry.window_max_tokens``
+    so the user's choice always produces a runnable DSL. The original design
+    used ``[20, 50, 100]``; ``100 > window_max_tokens=50`` would have the
+    follow-up query rejected by the validator's WINDOW_EXCEEDS_MAX rule.
     """
 
     model_config = ConfigDict(frozen=True)
     kind: Literal["needs_clarification"] = "needs_clarification"
     question: str
-    suggested_windows: list[int] = Field(default_factory=lambda: [20, 50, 100])
+    suggested_windows: list[int] = Field(default_factory=lambda: [10, 20, 50])
     nl_source: str
 
 

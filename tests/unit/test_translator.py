@@ -193,7 +193,8 @@ class TestTranslateClarificationPath:
         )
         assert isinstance(result, TranslationNeedsClarification)
         assert "window size" in result.question.lower()
-        assert result.suggested_windows == [20, 50, 100]
+        # Codex P2: defaults must all lie at or below window_max_tokens=50.
+        assert result.suggested_windows == [10, 20, 50]
         assert "near each other" in result.nl_source
 
     def test_dsl_line_takes_precedence_over_clarification(self) -> None:

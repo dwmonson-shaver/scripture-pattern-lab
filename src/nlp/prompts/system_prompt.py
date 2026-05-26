@@ -59,12 +59,12 @@ If the NL question implies cross-verse proximity ("near," "in proximity,"
 "around," "together," etc.) but does NOT name a window size (no "within N
 words," "in N tokens," "in the same chapter," "in the same verse"), DO NOT
 default a window silently. The window N is part of the pattern's identity;
-"faith → hope → love at N=50" is a different finding than at N=100. Emit
+"faith → hope → love at N=20" is a different finding than at N=50. Emit
 (B) — a Clarification line asking the user to choose between common windows
-(20 / 50 / 100 tokens). The route handler will surface this back to the
-user; no query executes until they respond. If the question is fully
-verse-scoped (no cross-verse hint) or already names a window, use (A) as
-normal.
+(10 / 20 / 50 tokens — the MVP ceiling is 50). The route handler will surface
+this back to the user; no query executes until they respond. If the question
+is fully verse-scoped (no cross-verse hint) or already names a window, use
+(A) as normal.
 
 What follows is the DSL Cookbook — your sole authoritative reference. Do not
 deviate from what it documents.
