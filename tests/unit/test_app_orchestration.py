@@ -12,7 +12,12 @@ from src.app.orchestration import (
     run_nl_query,
     run_validate_only,
 )
-from src.app.schemas import QueryDSLResponse, QueryNLResponse, TranslationMetadata
+from src.app.schemas import (
+    ConversationTurn,
+    QueryDSLResponse,
+    QueryNLResponse,
+    TranslationMetadata,
+)
 from src.engine.models import (
     ConceptNotMapped,
     Contextualization,
@@ -632,3 +637,162 @@ class TestRunNLQueryWithExplainerLLMOptIn:
         assert any("'yes'" in m or "yes" in m for m in msgs), (
             f"expected typo-warning; got {msgs!r}"
         )
+
+
+# -- Slice M — Phase M4: prior_turns threading + app->nlp conversion -------
+
+
+class TestRunNLQueryPriorTurns:
+    """run_nl_query converts app-schema ConversationTurn → nlp-layer Message
+    (dicts) at the boundary and threads the result into translate(). This is
+    the clean app→nlp crossing (src/nlp never imports src/app)."""
+
+    @staticmethod
+    def _stub_retrieve(monkeypatch) -> RetrievalResult:
+        empty_result = RetrievalResult(
+            candidates=[],
+            stages_used=["pattern_engine"],
+            contextualization=Contextualization(
+                observed_count=0,
+                node_baselines=[],
+                alternative_orderings=[],
+                alternative_orderings_capped=False,
+                null_distribution=None,
+            ),
+        )
+        monkeypatch.setattr(
+            "src.app.orchestration.retrieve", lambda *a, **kw: empty_result
+        )
+        return empty_result
+
+    def test_none_prior_turns_passes_none_to_translate(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        """Default (no prior_turns) → translate() receives prior_turns=None,
+        byte-identical to today's single-shot path."""
+        captured: dict = {}
+
+        def stub_translate(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            return TranslationSuccess(dsl="faith")
+
+        monkeypatch.setattr("src.app.orchestration.translate", stub_translate)
+        self._stub_retrieve(monkeypatch)
+
+        run_nl_query(
+            nl_query="what is faith?",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+        )
+
+        assert captured["kwargs"]["prior_turns"] is None
+
+    def test_empty_prior_turns_passes_none_to_translate(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        """An explicit empty list is falsy → translate() receives None (the
+        single-shot path), not an empty Message list."""
+        captured: dict = {}
+
+        def stub_translate(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            return TranslationSuccess(dsl="faith")
+
+        monkeypatch.setattr("src.app.orchestration.translate", stub_translate)
+        self._stub_retrieve(monkeypatch)
+
+        run_nl_query(
+            nl_query="what is faith?",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+            prior_turns=[],
+        )
+
+        assert captured["kwargs"]["prior_turns"] is None
+
+    def test_non_empty_prior_turns_converted_to_message_dicts(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        """Non-empty ConversationTurn list → translate() receives the CONVERTED
+        list[Message] (plain {"role", "content"} dicts), NOT ConversationTurn
+        objects."""
+        captured: dict = {}
+
+        def stub_translate(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            return TranslationSuccess(dsl="faith")
+
+        monkeypatch.setattr("src.app.orchestration.translate", stub_translate)
+        self._stub_retrieve(monkeypatch)
+
+        prior = [
+            ConversationTurn(role="user", content="faith near hope"),
+            ConversationTurn(
+                role="assistant", content="What window size? (10, 20, 50)"
+            ),
+        ]
+
+        run_nl_query(
+            nl_query="20 tokens",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+            prior_turns=prior,
+        )
+
+        forwarded = captured["kwargs"]["prior_turns"]
+        # Converted to plain dicts, not ConversationTurn instances.
+        assert forwarded == [
+            {"role": "user", "content": "faith near hope"},
+            {"role": "assistant", "content": "What window size? (10, 20, 50)"},
+        ]
+        assert all(isinstance(m, dict) for m in forwarded)
+        assert not any(isinstance(m, ConversationTurn) for m in forwarded)
+
+    def test_answered_clarification_resolves_to_executed_response(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        """A resubmitted answered clarification whose translate() now yields a
+        TranslationSuccess must flow the full pipeline and return a normal
+        executed QueryNLResponse (validation/result/explanation/translation
+        populated, clarification=None)."""
+        translation = TranslationSuccess(
+            dsl="faith",
+            confidence=0.8,
+            alternatives=[],
+            explanation="proximity window resolved to 20 tokens",
+        )
+        monkeypatch.setattr(
+            "src.app.orchestration.translate", lambda *a, **kw: translation
+        )
+        empty_result = self._stub_retrieve(monkeypatch)
+
+        prior = [
+            ConversationTurn(role="user", content="faith near hope"),
+            ConversationTurn(
+                role="assistant", content="What window size? (10, 20, 50)"
+            ),
+        ]
+
+        resp = run_nl_query(
+            nl_query="20 tokens",
+            engine=fake_engine,
+            registry=empty_registry,
+            llm_client=_FakeLLMClient(canned=""),
+            context=_ctx(),
+            prior_turns=prior,
+        )
+
+        assert isinstance(resp, QueryNLResponse)
+        assert resp.query == "faith"
+        assert resp.clarification is None
+        assert resp.validation is not None
+        assert resp.result is empty_result
+        assert resp.explanation is not None
+        assert isinstance(resp.translation, TranslationMetadata)
+        assert resp.translation.confidence == 0.8

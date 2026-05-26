@@ -4,8 +4,23 @@ import { proxyToBackend, type BackendError } from '~~/server/utils/backend'
 // Defense in depth: match backend's max_length=2000 to fail fast at the
 // proxy before sending an oversized request. The backend has the
 // authoritative limit; this is just first-line input hygiene.
-const requestSchema = z.object({
+//
+// Slice M (DEC-098): accept an optional `prior_turns` array so the proxy
+// stops stripping the caller-assembled refinement conversation. Bounds mirror
+// the backend's ConversationTurn / QueryNLRequest limits (role enum,
+// content 1..2000, list max 20). Frontend UI is out of scope here — this is
+// the passthrough only.
+export const requestSchema = z.object({
   nl_query: z.string().min(1).max(2000),
+  prior_turns: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().min(1).max(2000),
+      }),
+    )
+    .max(20)
+    .optional(),
 })
 
 export default defineEventHandler(async (event) => {

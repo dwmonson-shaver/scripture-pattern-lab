@@ -65,6 +65,7 @@ def post_query_nl(
             registry=registry,
             llm_client=llm_client,
             context=context,
+            prior_turns=body.prior_turns,
         )
 
     except LLMUnavailable as exc:

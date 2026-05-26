@@ -153,6 +153,66 @@ class TestHappyPath:
         resp = client.post("/api/v1/query/nl", json={"nl_query": ""})
         assert resp.status_code == 422
 
+    def test_forwards_prior_turns_to_run_nl_query(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slice M (M4): the route passes body.prior_turns through to
+        run_nl_query unchanged (as parsed ConversationTurn objects)."""
+        from src.app.schemas import ConversationTurn
+
+        captured: dict = {}
+
+        def capture(*args: object, **kwargs: object) -> QueryNLResponse:
+            captured["kwargs"] = kwargs
+            return _stub_nl_response("faith ~20 hope")
+
+        monkeypatch.setattr("src.app.routes.nl.run_nl_query", capture)
+        resp = client.post(
+            "/api/v1/query/nl",
+            json={
+                "nl_query": "20 tokens",
+                "prior_turns": [
+                    {"role": "user", "content": "faith near hope"},
+                    {
+                        "role": "assistant",
+                        "content": "What window size? (10, 20, 50)",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        forwarded = captured["kwargs"]["prior_turns"]
+        assert forwarded == [
+            ConversationTurn(role="user", content="faith near hope"),
+            ConversationTurn(
+                role="assistant", content="What window size? (10, 20, 50)"
+            ),
+        ]
+
+    def test_empty_prior_turns_matches_single_shot_shape(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Default request (no prior_turns key) forwards an empty list and the
+        response shape is unchanged from today's single-shot path."""
+        captured: dict = {}
+
+        def capture(*args: object, **kwargs: object) -> QueryNLResponse:
+            captured["kwargs"] = kwargs
+            return _stub_nl_response("faith")
+
+        monkeypatch.setattr("src.app.routes.nl.run_nl_query", capture)
+        resp = client.post(
+            "/api/v1/query/nl",
+            json={"nl_query": "what is faith?"},
+        )
+        assert resp.status_code == 200
+        # No prior_turns key in the body → schema default empty list forwarded.
+        assert captured["kwargs"]["prior_turns"] == []
+        body = resp.json()
+        assert body["query"] == "faith"
+        assert body["clarification"] is None
+        assert body["translation"]["confidence"] == 0.9
+
     def test_clarification_path_returns_200_with_clarification(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:

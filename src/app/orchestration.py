@@ -22,13 +22,14 @@ from sqlalchemy.engine import Engine
 
 from src.app.schemas import (
     ClarificationPayload,
+    ConversationTurn,
     QueryDSLResponse,
     QueryNLResponse,
     TranslationMetadata,
 )
 from src.engine.parser import parse
 from src.nlp.explainer import explain
-from src.nlp.llm_client import LLMClient
+from src.nlp.llm_client import LLMClient, Message
 from src.nlp.translator import (
     TranslationContext,
     TranslationNeedsClarification,
@@ -146,6 +147,7 @@ def run_nl_query(
     registry: ConceptRegistry,
     llm_client: LLMClient,
     context: TranslationContext,
+    prior_turns: list[ConversationTurn] | None = None,
 ) -> QueryNLResponse:
     """Compile NL→DSL and then run the full DSL pipeline.
 
@@ -163,8 +165,29 @@ def run_nl_query(
     Returns a `QueryNLResponse` whose `query` field is the *compiled*
     DSL string (not the original NL — the original lives in the
     request body).
+
+    Slice M (DEC-098): ``prior_turns`` carries a caller-assembled refinement
+    conversation as app-schema :class:`ConversationTurn` objects. This is the
+    clean app→nlp boundary crossing: the app-schema turns are converted to
+    nlp-layer :class:`Message` dicts (``{"role": t.role, "content":
+    t.content}``) HERE before being threaded into ``translate()`` — src/nlp
+    never imports from src/app. When ``prior_turns`` is None/empty the
+    single-shot path is byte-identical to today (``translate()`` receives
+    ``None``). When non-empty, ``translate()`` assembles the multi-message
+    array internally. All downstream branching (clarification vs success →
+    parse/validate/retrieve/explain) is unchanged; a resubmitted answered
+    clarification that now yields a :class:`TranslationSuccess` flows the full
+    pipeline and returns a normal executed ``QueryNLResponse``.
     """
-    translation_result = translate(nl_query, context, llm_client)
+    converted_turns: list[Message] | None = (
+        [{"role": t.role, "content": t.content} for t in prior_turns]
+        if prior_turns
+        else None
+    )
+
+    translation_result = translate(
+        nl_query, context, llm_client, prior_turns=converted_turns
+    )
 
     # Slice L Decision #6: clarification short-circuits the pipeline. The
     # route returns a 200 carrying the question + suggested windows; no
