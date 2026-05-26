@@ -573,3 +573,130 @@ class TestWindowExecution:
         engine, fake_conn = self._stub_engine([], [])
         result = execute(plan, plan.scope, engine)
         assert result == []
+
+
+class TestProximityInfoPopulation:
+    """Slice L Phase 3: ``_build_proximity_infos`` builds a ProximityInfo per
+    chain from the batch-fetched window tokens."""
+
+    def _matched_token(self, **kwargs) -> Any:
+        from src.engine.models import MatchedToken
+
+        defaults = dict(
+            id=1, book="45", chapter=5, verse=1, position=1,
+            global_position=100, surface_form="x", normalized_form="x",
+            lemma="x", pos="N",
+        )
+        defaults.update(kwargs)
+        return MatchedToken(**defaults)
+
+    def _row(self, **kwargs: Any) -> Any:
+        defaults = {
+            "id": 1,
+            "book": "45",
+            "chapter": 5,
+            "verse": 1,
+            "position": 1,
+            "global_position": 100,
+            "surface_form": "x",
+            "normalized_form": "x",
+            "lemma": "x",
+            "pos": "N",
+        }
+        defaults.update(kwargs)
+        row = MagicMock()
+        for k, v in defaults.items():
+            setattr(row, k, v)
+        return row
+
+    def test_intervening_lemmas_classified_and_capped(self) -> None:
+        """Tokens between matched positions become intervening_lemmas;
+        matched ids excluded; tail beyond 20-cap goes into other_count.
+        """
+        from src.engine.executor import _build_proximity_infos
+
+        # Chain: matched token #1 at gp=100, matched #2 at gp=130. Window
+        # spans gp=100..150 (window_n=50) so all 22 lemma buckets below land
+        # inside the window.
+        m1 = self._matched_token(id=1, global_position=100, lemma="πίστις")
+        m2 = self._matched_token(id=2, global_position=130, lemma="ἀγάπη", verse=2)
+        chain = [m1, m2]
+
+        # 22 distinct intervening lemmas with descending counts (lemma_00 has
+        # 22 occurrences, lemma_21 has 1) — covers the cap + tail logic. All
+        # placed at gp=101 (inside the window, distinct ids).
+        rows = [self._row(id=1, global_position=100, lemma="πίστις")]
+        next_id = 100
+        for i in range(22):
+            for _ in range(22 - i):
+                rows.append(
+                    self._row(
+                        id=next_id,
+                        global_position=101,  # inside window for any window_n >= 1
+                        lemma=f"lemma_{i:02d}",
+                    )
+                )
+                next_id += 1
+        rows.append(self._row(id=2, global_position=130, lemma="ἀγάπη"))
+
+        fake_conn = MagicMock()
+        fetch_result = MagicMock()
+        fetch_result.all.return_value = rows
+        fake_conn.execute.return_value = fetch_result
+
+        result = _build_proximity_infos(
+            connection=fake_conn, chains=[chain], base_where=[], window_n=50,
+        )
+        assert 0 in result
+        info = result[0]
+        assert info.window_n == 50
+        assert info.span_tokens == 30  # gp=100→130
+        # Top-20 should be the 20 highest-count lemmas (00 through 19); the
+        # tail (lemma_20 with 2 occurrences + lemma_21 with 1) sums into
+        # other_count = 3.
+        assert len(info.intervening_lemmas) == 20
+        assert info.intervening_lemmas["lemma_00"] == 22
+        assert "lemma_20" not in info.intervening_lemmas
+        assert info.other_count == 3
+
+    def test_crosses_verse_flag(self) -> None:
+        from src.engine.executor import _build_proximity_infos
+
+        m1 = self._matched_token(id=1, global_position=100, chapter=5, verse=1)
+        m2 = self._matched_token(id=2, global_position=105, chapter=5, verse=2)
+        chain = [m1, m2]
+
+        rows = [
+            self._row(id=1, global_position=100, chapter=5, verse=1, lemma="x"),
+            self._row(id=2, global_position=105, chapter=5, verse=2, lemma="y"),
+        ]
+        fake_conn = MagicMock()
+        fake_conn.execute.return_value.all.return_value = rows
+
+        result = _build_proximity_infos(
+            connection=fake_conn, chains=[chain], base_where=[], window_n=20,
+        )
+        info = result[0]
+        assert info.crosses_verse is True
+        assert info.crosses_chapter is False
+
+    def test_crosses_chapter_flag(self) -> None:
+        from src.engine.executor import _build_proximity_infos
+
+        m1 = self._matched_token(id=1, global_position=100, chapter=5, verse=1)
+        m2 = self._matched_token(id=2, global_position=200, chapter=6, verse=1)
+        chain = [m1, m2]
+
+        rows = [
+            self._row(id=1, global_position=100, chapter=5, verse=1, lemma="x"),
+            self._row(id=2, global_position=200, chapter=6, verse=1, lemma="y"),
+        ]
+        fake_conn = MagicMock()
+        fake_conn.execute.return_value.all.return_value = rows
+
+        result = _build_proximity_infos(
+            connection=fake_conn, chains=[chain], base_where=[], window_n=200,
+        )
+        info = result[0]
+        assert info.crosses_verse is True
+        assert info.crosses_chapter is True

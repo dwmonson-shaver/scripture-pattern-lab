@@ -336,6 +336,32 @@ class StepMatch(BaseModel):
     token: MatchedToken
 
 
+class ProximityInfo(BaseModel):
+    """Cross-verse proximity envelope attached to a ``MatchCandidate`` produced
+    by a ``ScopeUnitWindow(n)`` query (Slice L Decision #4).
+
+    Layered onto the existing ``match_type`` axis — a conceptual hit at
+    ``window=50`` is ``match_type="conceptual"`` AND
+    ``proximity=ProximityInfo(window_n=50, …)``. ``None`` on verse-scope
+    queries.
+
+    Carries the full window's tokens (matched + non-matched) so consumers can
+    inspect the "scaffolding" — what else appeared between the matches.
+    ``intervening_lemmas`` is capped at the top 20 by count (Decision #9);
+    the remaining tail is summed into ``other_count``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    window_n: int
+    span_tokens: int
+    crosses_verse: bool
+    crosses_chapter: bool
+    window_tokens: list[MatchedToken]
+    intervening_lemmas: dict[str, int]
+    other_count: int = 0
+
+
 class MatchCandidate(BaseModel):
     """One verse-grouped candidate produced by ``execute()``.
 
@@ -343,6 +369,11 @@ class MatchCandidate(BaseModel):
     ``reference`` is the human-readable verse pointer (``"1Cor 13:13"``),
     ``match_type`` distinguishes exact / variant / conceptual (DEC-007), and
     ``alignment`` carries the per-step provenance.
+
+    Slice L: ``proximity`` carries a :class:`ProximityInfo` envelope when the
+    candidate was produced by a ``ScopeUnitWindow(n)`` query; ``None`` for
+    verse-scope candidates. The ``match_type`` axis (how it matched) and the
+    ``proximity`` axis (where it landed) are orthogonal — Decision #4.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -351,6 +382,7 @@ class MatchCandidate(BaseModel):
     reference: str
     match_type: Literal["exact", "variant", "conceptual"]
     alignment: list[StepMatch]
+    proximity: ProximityInfo | None = None
 
 
 # ---------------------------------------------------------------------------

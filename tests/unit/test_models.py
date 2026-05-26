@@ -23,6 +23,7 @@ from src.engine.models import (
     OperatorType,
     OptionalExpr,
     OrderOperator,
+    ProximityInfo,
     QueryMetadata,
     QueryPlan,
     RankingFactor,
@@ -57,6 +58,102 @@ class TestEnums:
 
     def test_expansion_direction_values(self) -> None:
         assert set(ExpansionDirection) == {"forward", "backward", "both"}
+
+
+class TestProximityInfo:
+    """Slice L Phase 3: ProximityInfo envelope on MatchCandidate."""
+
+    def _token(self, **kwargs) -> MatchedToken:
+        defaults = dict(
+            id=1, book="45", chapter=5, verse=1, position=1,
+            global_position=100, surface_form="x", normalized_form="x",
+            lemma="x", pos="N",
+        )
+        defaults.update(kwargs)
+        return MatchedToken(**defaults)
+
+    def test_construct(self) -> None:
+        p = ProximityInfo(
+            window_n=50,
+            span_tokens=12,
+            crosses_verse=True,
+            crosses_chapter=False,
+            window_tokens=[self._token()],
+            intervening_lemmas={"και": 3, "δε": 1},
+            other_count=2,
+        )
+        assert p.window_n == 50
+        assert p.intervening_lemmas["και"] == 3
+        assert p.other_count == 2
+
+    def test_default_other_count_zero(self) -> None:
+        p = ProximityInfo(
+            window_n=10,
+            span_tokens=5,
+            crosses_verse=False,
+            crosses_chapter=False,
+            window_tokens=[],
+            intervening_lemmas={},
+        )
+        assert p.other_count == 0
+
+    def test_frozen(self) -> None:
+        p = ProximityInfo(
+            window_n=10, span_tokens=5, crosses_verse=False,
+            crosses_chapter=False, window_tokens=[], intervening_lemmas={},
+        )
+        with pytest.raises(ValidationError):
+            p.window_n = 20
+
+    def test_round_trip(self) -> None:
+        p = ProximityInfo(
+            window_n=50,
+            span_tokens=7,
+            crosses_verse=True,
+            crosses_chapter=False,
+            window_tokens=[self._token()],
+            intervening_lemmas={"και": 2},
+            other_count=0,
+        )
+        d = p.model_dump()
+        assert d["window_n"] == 50
+        p2 = ProximityInfo.model_validate(d)
+        assert p2 == p
+
+
+class TestMatchCandidateProximityField:
+    """Slice L: MatchCandidate.proximity defaults to None for verse-scope hits."""
+
+    def _token(self) -> MatchedToken:
+        return MatchedToken(
+            id=1, book="45", chapter=5, verse=1, position=1,
+            global_position=100, surface_form="x", normalized_form="x",
+            lemma="x", pos="N",
+        )
+
+    def test_default_none(self) -> None:
+        mc = MatchCandidate(
+            tokens=[self._token()],
+            reference="Rom 5:1",
+            match_type="exact",
+            alignment=[],
+        )
+        assert mc.proximity is None
+
+    def test_with_proximity(self) -> None:
+        prox = ProximityInfo(
+            window_n=20, span_tokens=4, crosses_verse=False,
+            crosses_chapter=False, window_tokens=[], intervening_lemmas={},
+        )
+        mc = MatchCandidate(
+            tokens=[self._token()],
+            reference="Rom 5:1",
+            match_type="conceptual",
+            alignment=[],
+            proximity=prox,
+        )
+        assert mc.proximity is prox
+        assert mc.match_type == "conceptual"  # Decision #4: axes orthogonal
 
 
 class TestScopeUnitDiscriminatedUnion:

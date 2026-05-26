@@ -49,6 +49,7 @@ from src.engine.models import (
     NodeType,
     OperatorType,
     OrderOperator,
+    ProximityInfo,
     QueryPlan,
     RegistryRequired,
     ScopeConstraint,
@@ -160,9 +161,22 @@ def execute(
             if not chains:
                 return []
 
+        # Slice L Phase 3: when scope.unit is ScopeUnitWindow, fetch the full
+        # window's tokens for every surviving chain in a single batch SELECT,
+        # then attach a ProximityInfo per candidate. Non-window queries skip
+        # this entirely (proximity stays None on every candidate).
+        proximity_by_chain_index: dict[int, ProximityInfo] = {}
+        if window_n is not None and chains:
+            proximity_by_chain_index = _build_proximity_infos(
+                connection=connection,
+                chains=chains,
+                base_where=base_where,
+                window_n=window_n,
+            )
+
     # Convert each completed chain into a MatchCandidate.
     candidates: list[MatchCandidate] = []
-    for chain in chains:
+    for chain_idx, chain in enumerate(chains):
         first = chain[0]
         reference = f"{bb_to_display(first.book)} {first.chapter}:{first.verse}"
         alignment = [
@@ -181,6 +195,7 @@ def execute(
                 reference=reference,
                 match_type=match_type,
                 alignment=alignment,
+                proximity=proximity_by_chain_index.get(chain_idx),
             )
         )
 
@@ -537,6 +552,107 @@ def _extend_chains_window_step(
                 continue
             extended.append([*chain, next_token])
     return extended
+
+
+_PROXIMITY_INTERVENING_CAP = 20  # Decision #9
+
+
+def _build_proximity_infos(
+    *,
+    connection,
+    chains: list[list[MatchedToken]],
+    base_where: list,
+    window_n: int,
+) -> dict[int, ProximityInfo]:
+    """Batch-fetch every token in each surviving chain's window and build a
+    :class:`ProximityInfo` per chain (Slice L Phase 3).
+
+    A single SELECT over the union of `(book, gp_lo, gp_hi)` ranges. The
+    `tokens_global_position_idx` covers the gp side; we filter by the same
+    `base_where` clauses every other step query uses (corpus/language/books)
+    so the window doesn't silently span corpora.
+
+    Returns a mapping from chain index → ProximityInfo. Callers attach the
+    info to the corresponding ``MatchCandidate``.
+    """
+    from collections import Counter
+
+    from sqlalchemy import and_, or_
+
+    # One range per chain (chains share the same anchor when chain[0] is the
+    # same token, but that's already deduped by the chain itself — multiple
+    # distinct chains with the same anchor are still distinct candidates).
+    range_clauses = []
+    for chain in chains:
+        base = chain[0]
+        range_clauses.append(
+            and_(
+                tokens_table.c.book == base.book,
+                tokens_table.c.global_position >= base.global_position,
+                tokens_table.c.global_position <= base.global_position + window_n,
+            )
+        )
+
+    stmt = select(*_token_columns())
+    for clause in base_where:
+        stmt = stmt.where(clause)
+    stmt = stmt.where(or_(*range_clauses))
+
+    rows = connection.execute(stmt).all()
+
+    # Bucket all fetched tokens by book so each chain looks up its own window.
+    # Within a book, sort by global_position so window_tokens is in order.
+    by_book: dict[str, list[MatchedToken]] = {}
+    for row in rows:
+        token = _row_to_matched_token(row)
+        by_book.setdefault(token.book, []).append(token)
+    for book_tokens in by_book.values():
+        book_tokens.sort(key=lambda t: t.global_position)
+
+    proximity: dict[int, ProximityInfo] = {}
+    for chain_idx, chain in enumerate(chains):
+        base = chain[0]
+        gp_lo = base.global_position
+        gp_hi = chain[-1].global_position  # the actual matched span ends here
+        gp_window_hi = gp_lo + window_n
+        window_tokens = [
+            t
+            for t in by_book.get(base.book, ())
+            if gp_lo <= t.global_position <= gp_window_hi
+        ]
+
+        # Matched-token ids are easy to mark on the way through.
+        matched_ids = {t.id for t in chain}
+        intervening_counter: Counter[str] = Counter()
+        for tok in window_tokens:
+            if tok.id in matched_ids:
+                continue
+            intervening_counter[tok.lemma] += 1
+
+        # Cap the top-20 intervening lemmas; sum the tail into other_count.
+        top = intervening_counter.most_common(_PROXIMITY_INTERVENING_CAP)
+        intervening_lemmas = dict(top)
+        # Total non-matched count - top capture = tail count.
+        total_intervening = sum(intervening_counter.values())
+        captured = sum(intervening_lemmas.values())
+        other_count = total_intervening - captured
+
+        crosses_verse = any(
+            t.verse != base.verse or t.chapter != base.chapter
+            for t in chain[1:]
+        )
+        crosses_chapter = any(t.chapter != base.chapter for t in chain[1:])
+
+        proximity[chain_idx] = ProximityInfo(
+            window_n=window_n,
+            span_tokens=gp_hi - gp_lo,
+            crosses_verse=crosses_verse,
+            crosses_chapter=crosses_chapter,
+            window_tokens=window_tokens,
+            intervening_lemmas=intervening_lemmas,
+            other_count=other_count,
+        )
+    return proximity
 
 
 def _step_pair_satisfied(
