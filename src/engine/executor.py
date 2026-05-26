@@ -85,17 +85,6 @@ def execute(
     """
     sequence = validate_plan_shape(plan, scope)
 
-    # Slice L Phase 1: ScopeUnitWindow shape is accepted at validate_plan_shape
-    # so the AST + parser tests pass; the executor body that follows still
-    # implements the verse-tuple path only. Phase 2 swaps in the
-    # global_position window path and lifts this guard.
-    if isinstance(scope.unit, ScopeUnitWindow):
-        raise UnsupportedPlanShape(
-            "scope.unit=ScopeUnitWindow execution is not yet implemented "
-            "(Slice L Phase 2 ships it)",
-            path="$.scope.unit",
-        )
-
     # The validated MVP shape guarantees every step is a NodeRef.
     steps: list[NodeRef] = [step for step in sequence.steps]  # type: ignore[misc]
 
@@ -111,6 +100,13 @@ def execute(
     match_type: Literal["exact", "conceptual"] = (
         "conceptual" if has_concept_step else "exact"
     )
+
+    # Slice L: ScopeUnitWindow routes to the global_position path; verse-tuple
+    # (legacy) path covers ScopeUnitVerse and ``None``. Window N anchors the
+    # entire sequence on the first matched token (chain[0].global_position).
+    window_n: int | None = None
+    if isinstance(scope.unit, ScopeUnitWindow):
+        window_n = scope.unit.n
 
     with engine.connect() as connection:
         # Step 0: seed with all candidates whose lemma is in the resolved set.
@@ -139,18 +135,28 @@ def execute(
         for step_index in range(1, len(steps)):
             if not chains:
                 return []
-            gap = sequence.operators[step_index - 1].gap
+            operator = sequence.operators[step_index - 1]
             next_lemmas = resolved_lemmas[step_index]
             if not next_lemmas:
                 return []
 
-            chains = _extend_chains_one_step(
-                connection,
-                chains=chains,
-                lemmas=next_lemmas,
-                gap=gap,
-                base_where=base_where,
-            )
+            if window_n is None:
+                chains = _extend_chains_one_step(
+                    connection,
+                    chains=chains,
+                    lemmas=next_lemmas,
+                    operator=operator,
+                    base_where=base_where,
+                )
+            else:
+                chains = _extend_chains_window_step(
+                    connection,
+                    chains=chains,
+                    lemmas=next_lemmas,
+                    operator=operator,
+                    base_where=base_where,
+                    window_n=window_n,
+                )
             if not chains:
                 return []
 
@@ -291,10 +297,13 @@ def validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExpr
                 f"operator {type(op).__name__} is not supported",
                 path=path,
             )
-        if op.type != OperatorType.PRECEDENCE:
+        # Slice L Phase 2: PRECEDENCE keeps ordering semantics; COOCCURRENCE
+        # is the unordered sibling (Decision #7) — both executable now.
+        # ADJACENCY (`>>`) is still deferred (no semantics designed yet).
+        if op.type not in (OperatorType.PRECEDENCE, OperatorType.COOCCURRENCE):
             raise UnsupportedPlanShape(
                 f"operator type {op.type.value!r} is not supported by the "
-                "MVP executor (only PRECEDENCE)",
+                "MVP executor (only PRECEDENCE and COOCCURRENCE)",
                 path=path,
             )
 
@@ -384,18 +393,23 @@ def _extend_chains_one_step(
     *,
     chains: list[list[MatchedToken]],
     lemmas: list[str],
-    gap: GapConstraint | None,
+    operator: OrderOperator,
     base_where: list,
 ) -> list[list[MatchedToken]]:
-    """Extend each chain by one matching token. ONE SELECT, in-memory join.
+    """Verse-scope chain extension. ONE SELECT, in-memory join.
 
-    Replaces the prior per-candidate fan-out (one SELECT per surviving chain
-    per step). For each step k ≥ 1 we now issue exactly one SELECT scoped to
-    the union of surviving step-(k-1) verses, then group rows in Python and
-    pair each result row with every chain whose last token shares the same
-    ``(book, chapter, verse)`` and satisfies the position + gap constraints.
-    Honors C-CLOSE-003 by carrying ``base_where`` (corpus/language/books)
-    into every step query.
+    Used when ``scope.unit`` is :class:`ScopeUnitVerse` (or ``None``). For
+    each step k ≥ 1 we issue exactly one SELECT scoped to the union of
+    surviving step-(k-1) verses, then pair each result row with every chain
+    whose last token shares the same ``(book, chapter, verse)`` and satisfies
+    the position + gap constraints. Honors C-CLOSE-003 by carrying
+    ``base_where`` (corpus/language/books) into every step query.
+
+    Slice L: ``operator`` now carries the order semantics — PRECEDENCE
+    requires ``next.position > prev.position``; COOCCURRENCE drops that
+    ordering predicate and uses ``abs(next.position - prev.position)``
+    against the (optional) gap window. Within a single verse, COOCCURRENCE
+    + window is unusual but supported for completeness.
     """
     # Collect the unique verses the surviving chains terminate in. We use a
     # tuple-IN filter so the DB can index-scan the verse keys rather than
@@ -434,10 +448,117 @@ def _extend_chains_one_step(
         if not verse_rows:
             continue
         for next_token in verse_rows:
-            if not _gap_satisfied(prev.position, next_token.position, gap):
+            if not _step_pair_satisfied(
+                prev.position, next_token.position, operator
+            ):
                 continue
             extended.append([*chain, next_token])
     return extended
+
+
+def _extend_chains_window_step(
+    connection,
+    *,
+    chains: list[list[MatchedToken]],
+    lemmas: list[str],
+    operator: OrderOperator,
+    base_where: list,
+    window_n: int,
+) -> list[list[MatchedToken]]:
+    """Window-scope chain extension. ONE SELECT, in-memory join.
+
+    Slice L (Decision #3): the window is anchored on ``chain[0]`` (the first
+    matched token). Every later step must land within ``[base.gp, base.gp +
+    window_n]`` and share ``base.book``. Chapter boundaries are crossable
+    (editorial overlay); book boundaries are not (different authors / scrolls
+    — easy footgun otherwise).
+
+    PRECEDENCE keeps the ordering predicate `next.gp > prev.gp` (with
+    step-level gap arithmetic on global_position). COOCCURRENCE drops that
+    ordering predicate; ``_step_pair_satisfied`` uses ``abs(next - prev)``.
+    """
+    # Build the union of ``(book, gp_lo, gp_hi)`` windows for surviving
+    # chains. ``gp_lo`` is the *base* position; the next-step token must be
+    # strictly after the previous token's gp (when PRECEDENCE) but anywhere
+    # up to ``base + window_n`` (inclusive). For COOCCURRENCE the next token
+    # may also precede the previous token, but the global window still
+    # constrains it to ``[base, base + window_n]``.
+    window_ranges: set[tuple[str, int, int]] = set()
+    for chain in chains:
+        base = chain[0]
+        window_ranges.add((base.book, base.global_position, base.global_position + window_n))
+
+    stmt = select(*_token_columns()).where(tokens_table.c.lemma.in_(lemmas))
+    for clause in base_where:
+        stmt = stmt.where(clause)
+
+    # Single SQL filter: OR of `(book = X AND gp BETWEEN lo AND hi)` per
+    # surviving chain. Index `tokens_global_position_idx` covers the gp side;
+    # the book filter is selective (NT has 27 books, max ~138K tokens).
+    from sqlalchemy import and_, or_
+
+    range_clauses = [
+        and_(
+            tokens_table.c.book == book,
+            tokens_table.c.global_position >= lo,
+            tokens_table.c.global_position <= hi,
+        )
+        for (book, lo, hi) in window_ranges
+    ]
+    if not range_clauses:
+        return []
+    stmt = stmt.where(or_(*range_clauses))
+
+    rows = connection.execute(stmt).all()
+
+    # Index rows by ``(book, gp)`` so we can pair each surviving chain with
+    # candidate next-tokens that fall in its window.
+    rows_by_book: dict[str, list[MatchedToken]] = {}
+    for row in rows:
+        token = _row_to_matched_token(row)
+        rows_by_book.setdefault(token.book, []).append(token)
+
+    extended: list[list[MatchedToken]] = []
+    for chain in chains:
+        base = chain[0]
+        prev = chain[-1]
+        gp_lo = base.global_position
+        gp_hi = base.global_position + window_n
+        bucket = rows_by_book.get(base.book, ())
+        for next_token in bucket:
+            if (
+                next_token.global_position < gp_lo
+                or next_token.global_position > gp_hi
+            ):
+                continue
+            if not _step_pair_satisfied(
+                prev.global_position, next_token.global_position, operator
+            ):
+                continue
+            extended.append([*chain, next_token])
+    return extended
+
+
+def _step_pair_satisfied(
+    prev_position: int, next_position: int, operator: OrderOperator
+) -> bool:
+    """Return True iff a ``next`` token can extend a chain after ``prev``.
+
+    Slice L unifies the per-step predicate across operator kinds:
+
+    - PRECEDENCE: ``next > prev`` (strict ordering) plus the gap window.
+    - COOCCURRENCE: ``next != prev`` plus ``abs(next - prev)`` against the
+      gap window. Order is dropped (Decision #7).
+
+    The ``position`` arguments are positional in their containing space:
+    within a verse, that is ``token.position``; across a window, that is
+    ``token.global_position``. The arithmetic is identical for both because
+    both are 1-based monotonic indices.
+    """
+    if operator.type == OperatorType.COOCCURRENCE:
+        return _gap_satisfied_unordered(prev_position, next_position, operator.gap)
+    # PRECEDENCE (the only other branch validate_plan_shape allows).
+    return _gap_satisfied(prev_position, next_position, operator.gap)
 
 
 def _gap_satisfied(
@@ -462,6 +583,32 @@ def _gap_satisfied(
     if gap is not None and gap.max is not None:
         if next_position > prev_position + gap.max + 1:
             return False
+    return True
+
+
+def _gap_satisfied_unordered(
+    prev_position: int, next_position: int, gap: GapConstraint | None
+) -> bool:
+    """Unordered (COOCCURRENCE) variant of :func:`_gap_satisfied`.
+
+    Slice L Decision #7: ``~`` matches tokens "near each other, either order."
+    Uses ``abs(next - prev)`` and checks the same gap-window bounds. The
+    "tokens between them" semantic is preserved: a distance of ``d`` between
+    positions means ``d - 1`` tokens lie strictly between, so ``gap.min``
+    intervening tokens require ``d > gap.min`` and ``gap.max`` intervening
+    tokens allow ``d <= gap.max + 1``.
+    """
+    if prev_position == next_position:
+        # Same token can never be both prev and next; the SELECT already
+        # filters by `lemma` but `chain[0]` and a later step might share a
+        # lemma in theory. Reject identity to avoid degenerate "matches".
+        return False
+    distance = abs(next_position - prev_position)
+    min_gap = gap.min if gap is not None else 0
+    if min_gap > 0 and distance <= min_gap:
+        return False
+    if gap is not None and gap.max is not None and distance > gap.max + 1:
+        return False
     return True
 
 

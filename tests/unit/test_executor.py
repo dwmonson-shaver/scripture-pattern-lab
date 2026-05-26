@@ -144,7 +144,16 @@ def test_raises_unsupported_on_adjacency_operator() -> None:
     assert excinfo.value.path == "$.sequence.operators[0]"
 
 
-def test_raises_unsupported_on_cooccurrence_operator() -> None:
+def test_cooccurrence_operator_passes_shape_validation() -> None:
+    """Slice L Phase 2: COOCCURRENCE is now accepted at validate_plan_shape.
+
+    Prior to Slice L, ``~`` was rejected at shape time. Now it executes via
+    the unordered branch (Decision #7). The shape gate accepts it; this test
+    confirms the rejection has been lifted. Execution semantics are covered
+    by the integration suite (cross-verse 3 John fixture).
+    """
+    from src.engine.executor import validate_plan_shape
+
     seq = SequenceExpr(
         steps=[
             NodeRef(type=NodeType.LEMMA, value="πίστις"),
@@ -153,8 +162,8 @@ def test_raises_unsupported_on_cooccurrence_operator() -> None:
         operators=[OrderOperator(type=OperatorType.COOCCURRENCE)],
     )
     plan = _make_plan(seq)
-    with pytest.raises(UnsupportedPlanShape):
-        execute(plan, plan.scope, _make_engine())
+    validated = validate_plan_shape(plan, plan.scope)
+    assert validated.operators[0].type == OperatorType.COOCCURRENCE
 
 
 def test_raises_registry_required_on_concept_without_registry() -> None:
@@ -190,11 +199,13 @@ def test_raises_unsupported_on_unknown_book_abbreviation() -> None:
     assert excinfo.value.path == "$.scope.books[0]"
 
 
-def test_phase1_window_scope_raises_not_yet_implemented() -> None:
-    """Phase 1: ScopeUnitWindow shape is accepted at validate_plan_shape, but
-    the executor body still implements only the verse-tuple path. Phase 2
-    lifts this guard.
+def test_window_scope_passes_shape_validation() -> None:
+    """Slice L Phase 2: ScopeUnitWindow now executes through the
+    global_position path. The shape gate accepts it; execution semantics
+    are covered in the integration suite.
     """
+    from src.engine.executor import validate_plan_shape
+
     seq = SequenceExpr(
         steps=[
             NodeRef(type=NodeType.LEMMA, value="πίστις"),
@@ -203,10 +214,8 @@ def test_phase1_window_scope_raises_not_yet_implemented() -> None:
         operators=[OrderOperator(type=OperatorType.PRECEDENCE)],
     )
     plan = _make_plan(seq, scope=ScopeConstraint(unit=ScopeUnitWindow(n=50)))
-    with pytest.raises(UnsupportedPlanShape) as excinfo:
-        execute(plan, plan.scope, _make_engine())
-    assert excinfo.value.path == "$.scope.unit"
-    assert "Phase 2" in str(excinfo.value)
+    validated = validate_plan_shape(plan, plan.scope)
+    assert len(validated.steps) == 2
 
 
 def test_raises_unsupported_on_negated_node() -> None:
@@ -437,3 +446,130 @@ def test_gap_constraint_with_min_zero_does_not_disable_ordering() -> None:
     engine.connect.return_value.__exit__.return_value = False
     result = execute(plan, plan.scope, engine)
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Slice L Phase 2: ~ (cooccurrence) gap arithmetic and window predicate
+# ---------------------------------------------------------------------------
+
+
+class TestGapSatisfiedUnordered:
+    """Unit tests for ``_gap_satisfied_unordered`` (the ``~`` arithmetic).
+
+    Mirrors ``_gap_satisfied``'s behavior but with ``abs(next - prev)``.
+    """
+
+    def test_either_direction_passes_without_gap(self) -> None:
+        from src.engine.executor import _gap_satisfied_unordered
+
+        assert _gap_satisfied_unordered(10, 7, None) is True
+        assert _gap_satisfied_unordered(7, 10, None) is True
+
+    def test_same_position_rejected(self) -> None:
+        from src.engine.executor import _gap_satisfied_unordered
+
+        assert _gap_satisfied_unordered(5, 5, None) is False
+
+    def test_min_gap_either_direction(self) -> None:
+        from src.engine.executor import _gap_satisfied_unordered
+
+        # distance=2, gap.min=2 → exactly the minimum is NOT satisfied
+        # (we require distance > min_gap, same as ordered variant).
+        gap = GapConstraint(min=2, max=None)
+        assert _gap_satisfied_unordered(10, 12, gap) is False
+        assert _gap_satisfied_unordered(12, 10, gap) is False
+        assert _gap_satisfied_unordered(10, 13, gap) is True
+        assert _gap_satisfied_unordered(13, 10, gap) is True
+
+    def test_max_gap_either_direction(self) -> None:
+        from src.engine.executor import _gap_satisfied_unordered
+
+        # distance <= max + 1 passes
+        gap = GapConstraint(min=0, max=5)
+        assert _gap_satisfied_unordered(10, 15, gap) is True  # distance=5
+        assert _gap_satisfied_unordered(15, 10, gap) is True  # distance=5
+        assert _gap_satisfied_unordered(10, 16, gap) is True  # distance=6, == max+1
+        assert _gap_satisfied_unordered(10, 17, gap) is False  # distance=7
+
+
+class TestWindowExecution:
+    """Unit tests that ``ScopeUnitWindow(n)`` routes through the
+    global_position path. Verifies the SQL has the right predicate shape
+    without requiring a live DB.
+    """
+
+    def _stub_engine(
+        self, step0_rows: list[Any], step1_rows: list[Any]
+    ) -> tuple[Any, Any]:
+        fake_conn = MagicMock()
+        step0_result = MagicMock()
+        step0_result.all.return_value = step0_rows
+        step1_result = MagicMock()
+        step1_result.all.return_value = step1_rows
+        fake_conn.execute.side_effect = [step0_result, step1_result]
+        engine = MagicMock()
+        engine.connect.return_value.__enter__.return_value = fake_conn
+        engine.connect.return_value.__exit__.return_value = False
+        return engine, fake_conn
+
+    def _row(self, **kwargs: Any) -> Any:
+        defaults = {
+            "id": 1,
+            "book": "45",
+            "chapter": 5,
+            "verse": 1,
+            "position": 1,
+            "global_position": 100,
+            "surface_form": "x",
+            "normalized_form": "x",
+            "lemma": "x",
+            "pos": "N",
+        }
+        defaults.update(kwargs)
+        row = MagicMock()
+        for k, v in defaults.items():
+            setattr(row, k, v)
+        return row
+
+    def test_window_step_query_uses_global_position_predicate(self) -> None:
+        """Window-mode step-N SELECT contains a global_position BETWEEN
+        clause anchored on step-0's global_position (not the verse tuple).
+        """
+        seq = SequenceExpr(
+            steps=[
+                NodeRef(type=NodeType.LEMMA, value="πίστις"),
+                NodeRef(type=NodeType.LEMMA, value="ἐλπίς"),
+            ],
+            operators=[OrderOperator(type=OperatorType.PRECEDENCE)],
+        )
+        plan = _make_plan(seq, scope=ScopeConstraint(unit=ScopeUnitWindow(n=50)))
+        step0 = self._row(global_position=100, lemma="πίστις")
+        # No step-1 rows; we only need to inspect the step-1 SQL shape.
+        engine, fake_conn = self._stub_engine([step0], [])
+        execute(plan, plan.scope, engine)
+
+        # The second execute() call is the step-1 SELECT.
+        assert fake_conn.execute.call_count == 2
+        step1_stmt = fake_conn.execute.call_args_list[1].args[0]
+        compiled = str(step1_stmt.compile(compile_kwargs={"literal_binds": True}))
+        # The window predicate: book = '45' AND global_position BETWEEN 100 AND 150.
+        assert "global_position >= 100" in compiled
+        assert "global_position <= 150" in compiled
+        assert "tokens.book = '45'" in compiled
+        # The verse-tuple predicate (legacy path) must NOT be present.
+        # tuple_(book, chapter, verse) IN (...) is the marker; SELECT-list
+        # references to chapter/verse columns are unavoidable.
+        assert "(tokens.book, tokens.chapter, tokens.verse) IN" not in compiled
+
+    def test_window_cooccurrence_passes_shape(self) -> None:
+        seq = SequenceExpr(
+            steps=[
+                NodeRef(type=NodeType.LEMMA, value="πίστις"),
+                NodeRef(type=NodeType.LEMMA, value="ἀγάπη"),
+            ],
+            operators=[OrderOperator(type=OperatorType.COOCCURRENCE)],
+        )
+        plan = _make_plan(seq, scope=ScopeConstraint(unit=ScopeUnitWindow(n=30)))
+        engine, fake_conn = self._stub_engine([], [])
+        result = execute(plan, plan.scope, engine)
+        assert result == []
