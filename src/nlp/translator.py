@@ -24,7 +24,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.nlp.llm_client import LLMClient
+from src.nlp.llm_client import LLMClient, Message
 from src.nlp.prompts.system_prompt import SYSTEM_PROMPT
 
 
@@ -121,21 +121,62 @@ def translate(
     nl_query: str,
     context: TranslationContext,
     llm_client: LLMClient,
+    prior_turns: list[Message] | None = None,
 ) -> TranslationSuccess | TranslationNeedsClarification:
     """Compile a natural-language query into a translator result.
 
     Single-shot LLM call per canonical-09 §2 MVP implementation. Raises
-    LLMUnavailable (from llm_client.complete()) on API errors; raises
-    NLCompileError if the LLM output cannot be parsed as either a DSL or
-    a clarification.
+    LLMUnavailable (from llm_client.complete()/.complete_turns()) on API
+    errors; raises NLCompileError if the LLM output cannot be parsed as
+    either a DSL or a clarification.
 
     Slice L Decision #6: when the NL implies cross-verse proximity but is
     silent on the window size, the translator returns a
     :class:`TranslationNeedsClarification` instead of guessing a default.
+
+    Slice M (DEC-098): ``prior_turns`` carries a caller-assembled refinement
+    conversation as nlp-layer :class:`Message` objects — NOT the app-schema
+    ``ConversationTurn`` (src/nlp must never import from src/app; the app
+    layer converts at the boundary). When ``prior_turns`` is None/empty the
+    single-shot ``complete()`` path runs byte-identically to today. When it is
+    non-empty, :func:`_build_turns` assembles the multi-message array and
+    ``complete_turns()`` is called instead. ``_parse_output()`` is shared, so
+    Shape A success / Shape B clarification parsing is identical for both
+    paths. The static cached ``SYSTEM_PROMPT`` prefix is unchanged on both
+    paths (DEC-071); only the per-request ``messages`` array grows.
     """
-    user_message = _build_user_message(nl_query, context)
-    raw_output = llm_client.complete(SYSTEM_PROMPT, user_message)
+    if not prior_turns:
+        user_message = _build_user_message(nl_query, context)
+        raw_output = llm_client.complete(SYSTEM_PROMPT, user_message)
+    else:
+        turns = _build_turns(nl_query, context, prior_turns)
+        raw_output = llm_client.complete_turns(SYSTEM_PROMPT, turns)
     return _parse_output(nl_query=nl_query, raw_output=raw_output)
+
+
+def _build_turns(
+    nl_query: str,
+    context: TranslationContext,
+    prior_turns: list[Message],
+) -> list[Message]:
+    """Assemble the multi-message array for a refinement request.
+
+    ``turns[0]`` is rebuilt as a user message whose content is
+    ``_build_user_message(prior_turns[0]["content"], context)`` so the
+    registry summaries ride on the first user turn exactly as the single-shot
+    path does. ``prior_turns[1:]`` are carried verbatim, and the current
+    ``nl_query`` is appended as the latest user turn. The cached system prefix
+    stays out of the per-request array (DEC-071, DEC-098).
+
+    Caller contract: ``prior_turns[0]`` is the original user query (role
+    "user"). The app-schema validation guarantees well-formed roles before
+    conversion, so no role-shuffling is done here.
+    """
+    first: Message = {
+        "role": "user",
+        "content": _build_user_message(prior_turns[0]["content"], context),
+    }
+    return [first, *prior_turns[1:], {"role": "user", "content": nl_query}]
 
 
 def _build_user_message(nl_query: str, context: TranslationContext) -> str:

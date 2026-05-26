@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.nlp.llm_client import LLMClient, LLMUnavailable
+from src.nlp.llm_client import LLMClient, LLMUnavailable, Message
 from src.nlp.prompts.system_prompt import (
     DEFAULT_COOKBOOK_PATH,
     SYSTEM_PROMPT,
@@ -22,23 +22,50 @@ from src.nlp.translator import (
 
 
 class FakeLLMClient(LLMClient):
-    """Returns canned_response on .complete(); records the args."""
+    """Returns canned_response on .complete()/.complete_turns(); records args.
 
-    def __init__(self, canned_response: str) -> None:
+    ``single_shot_response`` and ``turns_response`` let a test script different
+    canned outputs per seam (e.g. a clarification on the single-shot call and a
+    DSL on the multi-turn call). When ``turns_response`` is None, both seams
+    return ``canned_response``.
+    """
+
+    def __init__(
+        self,
+        canned_response: str,
+        *,
+        turns_response: str | None = None,
+    ) -> None:
         self.canned_response = canned_response
+        self.turns_response = turns_response
         self.last_system: str | None = None
         self.last_user: str | None = None
+        self.last_turns: list[Message] | None = None
+        self.complete_calls = 0
+        self.complete_turns_calls = 0
 
     def complete(self, system_prompt: str, user_message: str) -> str:
+        self.complete_calls += 1
         self.last_system = system_prompt
         self.last_user = user_message
         return self.canned_response
 
+    def complete_turns(self, system_prompt: str, turns: list[Message]) -> str:
+        self.complete_turns_calls += 1
+        self.last_system = system_prompt
+        self.last_turns = turns
+        if self.turns_response is not None:
+            return self.turns_response
+        return self.canned_response
+
 
 class FailingLLMClient(LLMClient):
-    """Raises LLMUnavailable on every call."""
+    """Raises LLMUnavailable on every call (both seams)."""
 
     def complete(self, system_prompt: str, user_message: str) -> str:
+        raise LLMUnavailable("simulated failure")
+
+    def complete_turns(self, system_prompt: str, turns: list[Message]) -> str:
         raise LLMUnavailable("simulated failure")
 
 
@@ -210,3 +237,97 @@ class TestTranslateClarificationPath:
         result = translate("q", _ctx(), client)
         assert isinstance(result, TranslationSuccess)
         assert result.dsl == "faith > hope > love within:verse"
+
+
+class TestTranslateMultiTurn:
+    """Slice M (DEC-098): when ``prior_turns`` is non-empty, ``translate``
+    assembles a multi-message array and calls ``complete_turns()`` instead of
+    the single-shot ``complete()``. Empty/None preserves the single-shot path
+    byte-identically. ``prior_turns`` is the nlp-layer ``Message`` type."""
+
+    def test_none_prior_turns_uses_single_shot(self) -> None:
+        client = FakeLLMClient(canned_response="DSL: faith\n")
+        translate("what is faith?", _ctx(), client)
+        assert client.complete_calls == 1
+        assert client.complete_turns_calls == 0
+
+    def test_empty_prior_turns_uses_single_shot(self) -> None:
+        client = FakeLLMClient(canned_response="DSL: faith\n")
+        translate("what is faith?", _ctx(), client, prior_turns=[])
+        assert client.complete_calls == 1
+        assert client.complete_turns_calls == 0
+
+    def test_non_empty_prior_turns_uses_complete_turns(self) -> None:
+        client = FakeLLMClient(canned_response="DSL: faith within:20\n")
+        prior_turns: list[Message] = [
+            {"role": "user", "content": "faith, hope, love near each other"},
+            {"role": "assistant", "content": "What window size? 10/20/50?"},
+        ]
+        translate("within 20 tokens", _ctx(), client, prior_turns=prior_turns)
+        assert client.complete_turns_calls == 1
+        assert client.complete_calls == 0
+
+    def test_multi_turn_role_sequence_and_registry_on_first_turn(self) -> None:
+        client = FakeLLMClient(canned_response="DSL: faith within:20\n")
+        prior_turns: list[Message] = [
+            {"role": "user", "content": "faith, hope, love near each other"},
+            {"role": "assistant", "content": "What window size? 10/20/50?"},
+        ]
+        translate("within 20 tokens", _ctx(), client, prior_turns=prior_turns)
+        turns = client.last_turns
+        assert turns is not None
+        # user / assistant / user
+        assert [t["role"] for t in turns] == ["user", "assistant", "user"]
+        # turns[0] carries the original NL plus the registry summaries (built
+        # exactly like the single-shot user message).
+        assert "faith, hope, love near each other" in turns[0]["content"]
+        assert "ops: > , >>" in turns[0]["content"]
+        assert "faith, hope, love" in turns[0]["content"]
+        # The prior assistant turn is carried verbatim.
+        assert turns[1] == {"role": "assistant", "content": "What window size? 10/20/50?"}
+        # The latest user turn is the bare nl_query (no registry summaries).
+        assert turns[2] == {"role": "user", "content": "within 20 tokens"}
+        assert "ops: > , >>" not in turns[2]["content"]
+
+    def test_clarification_then_answer_resolves_to_success(self) -> None:
+        # Scripted clarification-then-answer turn list: the fake returns Shape A
+        # DSL on the multi-turn call → translate returns TranslationSuccess.
+        client = FakeLLMClient(
+            canned_response="Clarification: pick a window\n",
+            turns_response="DSL: faith ~ hope ~ love within:20\nConfidence: 0.9\n",
+        )
+        prior_turns: list[Message] = [
+            {"role": "user", "content": "faith, hope, love near each other"},
+            {"role": "assistant", "content": "What window size? 10/20/50?"},
+        ]
+        result = translate("20 tokens", _ctx(), client, prior_turns=prior_turns)
+        assert isinstance(result, TranslationSuccess)
+        assert result.dsl == "faith ~ hope ~ love within:20"
+        assert result.confidence == 0.9
+
+    def test_llm_unavailable_propagates_from_multi_turn(self) -> None:
+        client = FailingLLMClient()
+        prior_turns: list[Message] = [
+            {"role": "user", "content": "faith near hope"},
+            {"role": "assistant", "content": "What window size?"},
+        ]
+        with pytest.raises(LLMUnavailable, match="simulated failure"):
+            translate("within 20", _ctx(), client, prior_turns=prior_turns)
+
+    def test_system_prompt_byte_identical_across_paths(self) -> None:
+        # Cache-prefix guard (DEC-071): the SYSTEM_PROMPT constant passed to the
+        # client is the identical object on both the single-shot and multi-turn
+        # paths.
+        single = FakeLLMClient(canned_response="DSL: faith\n")
+        translate("faith", _ctx(), single)
+
+        multi = FakeLLMClient(canned_response="DSL: faith\n")
+        prior_turns: list[Message] = [
+            {"role": "user", "content": "faith near hope"},
+            {"role": "assistant", "content": "What window size?"},
+        ]
+        translate("within 20", _ctx(), multi, prior_turns=prior_turns)
+
+        assert single.last_system is SYSTEM_PROMPT
+        assert multi.last_system is SYSTEM_PROMPT
+        assert single.last_system == multi.last_system
