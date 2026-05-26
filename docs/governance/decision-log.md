@@ -1119,3 +1119,55 @@
 - Files: `src/engine/parser.py` (parse_operator TILDE branch with optional gap); `src/engine/executor.py` (`_gap_satisfied_unordered`, `_step_pair_satisfied`, chain-id filter); `src/validation/registry.py` (operators includes "cooccurrence").
 - Spec refs: REQ:05.order-operator, REQ:09.pattern-engine.
 - Cross-refs: DEC-094 (window predicate this dispatches on); DEC-007 (match types stay distinct — `~` doesn't introduce a new match_type).
+
+## DEC-098 — Multi-turn refinement is stateless echo-back; the server holds no conversation state
+- Status: Accepted (Slice M design Decision 1)
+- Question: Slice L's `TranslationNeedsClarification` dead-ends — the caller gets a question but has no way to answer and continue. To close the loop (translator asks → caller answers → translator re-attempts → executes), where does the conversation state live: a server-side session store keyed by a conversation id, or echoed back by the client on each request?
+- Decision: **Stateless echo-back.** The server holds no conversation state, no session id, no storage between requests. The caller re-sends the full conversation as an optional `prior_turns: list[ConversationTurn]` on each request; each request is fully self-contained. When `prior_turns` is non-empty the translator assembles a real multi-message array (system + [user(original), assistant(question), user(answer), …]) via the additive `complete_turns()` seam (DEC-071 amendment); when empty the single-shot `complete()` path is byte-identical to before. (Resolves OQ-1 in favor of a real message array over concatenating turns into one user string — turn-role fidelity; the assistant's prior question is semantically an assistant turn.)
+- Rationale: (a) **Extends the house philosophy across turns**: DEC-072 (confidence is informational, caller decides) + DEC-073 (alternatives surfaced, caller re-submits) already establish "the caller drives; the server surfaces options statelessly." A refinement loop is that pattern across turns. (b) **Fits the deliberately stateless backend**: the system carries no per-request state at any layer; a session store would be the first exception. (c) **Fits the hosting**: the $0/mo Render free tier spins down when idle and has no persistent local store — server-held session state would evaporate. (d) **Cache-friendly**: the static `SYSTEM_PROMPT` prefix (DEC-071) stays byte-identical on both seams; only the per-request `messages` array grows, so the prompt-cache prefix still hits. (e) **Echo-back is cheap**: a refinement conversation is a handful of short strings.
+- Alternatives considered: (a) **Server-side session store (conversation id + Redis/DB)**. Rejected — premature abstraction for a single-user MVP, contradicts the stateless design and the ephemeral free tier, and re-litigates DEC-072/073. (b) **Concatenate the conversation into one augmented user string** (keep the single-message seam). Rejected (OQ-1) — loses turn-role fidelity; the model can't cleanly separate its own prior question from the user's answer from the original query.
+- Confidence: High for stateless echo-back (three existing decisions point the same way); medium-high for the message-array seam over concatenation (reversible internal detail; the cache-prefix guard test proves `system=` is identical across both seams). Codex advisory on OQ-1 was deferred to slice close because Codex was quota-blocked all session; the Claude-fallback review confirmed the seam.
+- Made-by: Design discussion 2026-05-26; orchestrator implementation across M1–M5.
+- Commit: `6cee834` (M2 complete_turns + DEC-071 amendment), `48707e9` (M3 translate affordance), `129747f` (M4 orchestration conversion + route).
+- Files: `src/nlp/llm_client.py` (complete_turns seam + Message); `src/nlp/translator.py` (prior_turns branch + _build_turns); `src/app/orchestration.py` (ConversationTurn→Message conversion); `docs/canonical/09_backend-service-boundaries.md` §2.
+- Spec refs: REQ:09.nl-to-dsl.
+- Cross-refs: DEC-071 (amended — single-shot stays default, system prompt still cached); DEC-072 + DEC-073 (caller-drives philosophy this extends); DEC-099 (same route); DEC-100 (schema + shape validation); DEC-024 (corpus is ground truth — why forged turns are immaterial).
+
+## DEC-099 — Extend the existing `POST /api/v1/query/nl` route; do not add a refinement route
+- Status: Accepted (Slice M design Decision 3)
+- Question: Does multi-turn refinement get a new endpoint (e.g. `POST /api/v1/query/nl/refine`), or extend the existing NL route with the optional `prior_turns` field?
+- Decision: **Extend the existing route.** `prior_turns=[]` (the default) is byte-identical to today's single-shot call; a non-empty `prior_turns` is a refinement turn on the same path. No new route, no duplicated exception-mapping chain, no new proxy route.
+- Rationale: (a) One envelope, one path; the request is the same shape with one optional field. (b) A `/nl/refine` route would duplicate the 8-branch exception mapping in `routes/nl.py` and the Nuxt proxy. (c) **Governance consequence**: Bucket J1-4's trigger is "before a v0.2 slice that adds additional proxy routes beyond `/api/sp/query/nl`." Extending the existing route adds no new proxy route, so J1-4 does NOT fire and stays deferred. (Had we chosen `/nl/refine`, J1-4 would have fired and scoped in.)
+- Alternatives considered: (a) **New `/nl/refine` route**. Rejected — duplication + fires J1-4 for no benefit. The single-shot vs refinement distinction is data (`prior_turns` present or not), not a separate resource.
+- Confidence: High.
+- Made-by: Design discussion 2026-05-26; orchestrator implementation M4.
+- Commit: `129747f` (M4 route + proxy passthrough).
+- Files: `src/app/routes/nl.py`; `web/server/api/sp/query/nl.post.ts`.
+- Spec refs: REQ:09.api-gateway.
+- Cross-refs: DEC-098 (the refinement mechanism); reviews-log Bucket J1-4 (does not fire — see Slice M start triage).
+
+## DEC-100 — `ConversationTurn` schema + deterministic conversation-shape validation + resource guards (no semantic round cap)
+- Status: Accepted (Slice M design Decision 4; hardened at slice-close review)
+- Question: What carries a turn on the wire, and how is a malformed conversation handled? Should there be a cap on refinement rounds?
+- Decision: New frozen `ConversationTurn{role: Literal["user","assistant"], content: str(1..2000)}`. `QueryNLRequest.prior_turns: list[ConversationTurn]` defaults to `[]`, bounded `max_length=20`. A deterministic (AI-free) `@model_validator` enforces the conversation shape — `prior_turns` must begin with a user turn, strictly alternate roles, and end with an assistant turn (because `run_nl_query` appends the current `nl_query` as the next user turn) — and an aggregate content cap of 16000 characters. A malformed conversation is a clean **422**, never an Anthropic 400 that propagates to a 500 (M-CLOSE-001). The caps are **resource guards only (OQ-2 resolution), NOT a semantic round cap**: the server never decides to stop clarifying — the caller quits by not resubmitting.
+- Rationale: (a) **Boundary discipline**: `ConversationTurn` is the app-schema (wire) type; `src/nlp` uses its own `Message` type and the app layer converts at the boundary (`src/nlp` never imports `src/app`, mirroring DEC-052). (b) **The shape validator closes a real 500**: without it, a schema-valid body like `[user, user]` or one not ending in an assistant turn makes the assembled array have consecutive same-role messages → Anthropic 400 → raw propagation → caller-triggerable 500 (the 4xx-propagates-raw rule from DEC-070). Catching it deterministically at request validation is honest and AI-free. (c) **Resource guards, not judgment**: `max_length=20` + per-turn 2000 + aggregate 16000 bound the per-request token cost on the metered LLM (M-CLOSE-002); they are the same category as the existing `nl_query max_length=2000`, not a "your query is too vague, giving up" gate, which DEC-072 forbids.
+- Alternatives considered: (a) **No shape validation** (let Anthropic 400 → 500). Rejected — a validation-passing request must not yield an internal error. (b) **A semantic round cap** ("refuse past N rounds"). Rejected — DEC-072: confidence is informational and the caller decides when to give up; the server must not substitute its judgment. (c) **Echo `prior_turns` back in `ClarificationPayload`** (server-assembled convenience). Rejected (OQ-4 default) — the client reconstructs from what it holds; keeps stateless purity.
+- Confidence: High. The validator is small and deterministic; the resource caps are generous for a real refinement conversation (original question + many short Q&A turns).
+- Made-by: Design discussion 2026-05-26; orchestrator implementation M1; shape + aggregate validator added at slice-close (Claude-fallback review M-CLOSE-001/002).
+- Commit: `886f487` (M1 schema), `f81c089` (slice-close validator: shape + aggregate cap).
+- Files: `src/app/schemas.py` (ConversationTurn, QueryNLRequest._validate_conversation_shape, _MAX_PRIOR_TURNS_CONTENT_CHARS).
+- Spec refs: REQ:09.api-gateway, REQ:09.nl-to-dsl.
+- Cross-refs: DEC-098 (the refinement mechanism); DEC-070 (4xx propagates raw → why the unguarded path was a 500); DEC-072 (no judgment gate); DEC-052 (the app↔nlp boundary precedent).
+
+## DEC-101 — Frontend multi-turn UI is out of scope for Slice M; only the proxy passthrough lands
+- Status: Accepted (Slice M design Decision 6)
+- Question: Does Slice M wire the multi-turn refinement UI (render the clarification, capture the answer, resubmit) into the Nuxt frontend?
+- Decision: **No.** Slice M widens the Nuxt proxy zod schema to ACCEPT and forward an optional `prior_turns` array (so the contract is honest and the backend is reachable), but the multi-turn UI panel is a follow-on slice with its own design discussion.
+- Rationale: The project consistently splits backend-API-first from frontend-wiring (Slice J1, Slice L's deferred frontend chip). The proxy passthrough is the minimum to keep the contract honest; full UX (rendering, answer capture, resubmit) is its own scope and would over-extend this slice.
+- Alternatives considered: (a) **Build the UI now**. Rejected — over-scopes a backend-contract slice. (b) **Don't touch the proxy at all**. Rejected — the proxy would silently strip `prior_turns`, making the deployed contract a lie.
+- Confidence: High.
+- Made-by: Design discussion 2026-05-26; orchestrator implementation M4.
+- Commit: `129747f` (M4 proxy zod passthrough).
+- Files: `web/server/api/sp/query/nl.post.ts`.
+- Spec refs: REQ:09.api-gateway.
+- Cross-refs: DEC-099 (same route, no new proxy route → Bucket J1-4 does not fire); a future frontend-refinement slice owns the UI.
