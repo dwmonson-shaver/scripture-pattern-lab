@@ -191,7 +191,14 @@ class TestQueryNLRequest:
         }
 
     def test_accepts_prior_turns_at_max_length(self) -> None:
-        turns = [ConversationTurn(role="user", content="x") for _ in range(20)]
+        # 20 turns alternating user/assistant (starts user, ends assistant) —
+        # the conversation-shape rule (M-CLOSE-001) requires alternation.
+        turns = [
+            ConversationTurn(
+                role="user" if i % 2 == 0 else "assistant", content="x"
+            )
+            for i in range(20)
+        ]
         req = QueryNLRequest(nl_query="follow-up", prior_turns=turns)
         assert len(req.prior_turns) == 20
 
@@ -200,6 +207,70 @@ class TestQueryNLRequest:
         turns = [ConversationTurn(role="user", content="x") for _ in range(21)]
         with pytest.raises(ValidationError):
             QueryNLRequest(nl_query="follow-up", prior_turns=turns)
+
+
+class TestQueryNLRequestConversationShape:
+    """M-CLOSE-001/002: deterministic conversation-shape + aggregate-content
+    validation on QueryNLRequest. A malformed conversation must be a clean 422
+    (ValidationError), never an Anthropic 400 that propagates to a 500."""
+
+    def _alternating(self, n: int, content: str = "x") -> list[ConversationTurn]:
+        return [
+            ConversationTurn(
+                role="user" if i % 2 == 0 else "assistant", content=content
+            )
+            for i in range(n)
+        ]
+
+    def test_accepts_well_formed_round_two(self) -> None:
+        # [user(original), assistant(question)] — the canonical round-2 shape.
+        turns = [
+            ConversationTurn(role="user", content="faith near hope"),
+            ConversationTurn(role="assistant", content="What window? 10/20/50"),
+        ]
+        req = QueryNLRequest(nl_query="20", prior_turns=turns)
+        assert len(req.prior_turns) == 2
+
+    def test_accepts_well_formed_round_three(self) -> None:
+        req = QueryNLRequest(nl_query="50", prior_turns=self._alternating(4))
+        assert len(req.prior_turns) == 4
+
+    def test_rejects_first_turn_not_user(self) -> None:
+        turns = [
+            ConversationTurn(role="assistant", content="hi"),
+            ConversationTurn(role="user", content="x"),
+        ]
+        with pytest.raises(ValidationError, match="begin with a 'user' turn"):
+            QueryNLRequest(nl_query="x", prior_turns=turns)
+
+    def test_rejects_last_turn_not_assistant(self) -> None:
+        # [user, assistant, user] would make the appended nl_query a second
+        # consecutive user turn → Anthropic 400.
+        with pytest.raises(ValidationError, match="end with an 'assistant' turn"):
+            QueryNLRequest(nl_query="x", prior_turns=self._alternating(3))
+
+    def test_rejects_consecutive_same_role(self) -> None:
+        # Valid endpoints (starts user, ends assistant) but a consecutive
+        # same-role pair in the middle isolates the alternation rule.
+        turns = [
+            ConversationTurn(role="user", content="a"),
+            ConversationTurn(role="assistant", content="b"),
+            ConversationTurn(role="assistant", content="c"),
+        ]
+        with pytest.raises(ValidationError, match="must alternate"):
+            QueryNLRequest(nl_query="x", prior_turns=turns)
+
+    def test_rejects_aggregate_content_over_cap(self) -> None:
+        # 10 alternating turns × 2000 chars = 20000 > 16000 cap. Valid shape
+        # (starts user, ends assistant, alternates) so only the aggregate
+        # guard fires.
+        turns = self._alternating(10, content="a" * 2000)
+        with pytest.raises(ValidationError, match="total content exceeds"):
+            QueryNLRequest(nl_query="x", prior_turns=turns)
+
+    def test_empty_prior_turns_still_single_shot(self) -> None:
+        req = QueryNLRequest(nl_query="single shot")
+        assert req.prior_turns == []
 
 
 class TestConversationTurn:

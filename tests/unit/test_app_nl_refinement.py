@@ -286,3 +286,52 @@ class TestTwoRoundRefinementExitGate:
         assert _AMBIGUOUS_QUERY in sent_turns[0]["content"]
         assert sent_turns[1]["content"] == question
         assert sent_turns[2]["content"] == _WINDOW_ANSWER
+
+
+class _StillClarifyingLLMClient(LLMClient):
+    """Round 1 AND round 2 both emit a Clarification — models a conversation
+    that needs more than one round. Proves the loop supports N rounds and the
+    server never decides to stop clarifying (M-CLOSE-005; DEC-072)."""
+
+    def complete(self, system_prompt: str, user_message: str) -> str:
+        return f"Clarification: {_CLARIFICATION_QUESTION}\n"
+
+    def complete_turns(self, system_prompt: str, turns: list[Message]) -> str:
+        return "Clarification: Which corpus — NT only, or NT + LXX?\n"
+
+
+def test_round_two_can_clarify_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A resubmitted answer that the translator still finds ambiguous returns
+    another clarification (200, clarification set, pipeline fields None) — the
+    refinement loop is unbounded on the caller's side (no semantic round cap)."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SPL_EXPLAINER_LLM", raising=False)
+    fastapi_app = create_app()
+    fastapi_app.dependency_overrides[get_engine] = lambda: MagicMock(
+        spec=Engine, name="fake_engine"
+    )
+    fastapi_app.dependency_overrides[get_concept_registry] = (
+        lambda: ConceptRegistry.empty()
+    )
+    fastapi_app.dependency_overrides[get_llm_client] = _StillClarifyingLLMClient
+    fastapi_app.dependency_overrides[get_translation_context] = (
+        _stub_translation_context
+    )
+    with TestClient(fastapi_app) as client:
+        resp = client.post(
+            "/api/v1/query/nl",
+            json={
+                "nl_query": _WINDOW_ANSWER,
+                "prior_turns": [
+                    {"role": "user", "content": _AMBIGUOUS_QUERY},
+                    {"role": "assistant", "content": _CLARIFICATION_QUESTION},
+                ],
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["clarification"] is not None
+    assert "corpus" in body["clarification"]["question"]
+    assert body["result"] is None
+    assert body["validation"] is None

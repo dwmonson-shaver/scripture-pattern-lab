@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.engine.models import ExplainedResultSet, RetrievalResult
 from src.ontology.registry import ConceptSummary
@@ -86,6 +86,9 @@ class ConversationTurn(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
 
 
+_MAX_PRIOR_TURNS_CONTENT_CHARS = 16000
+
+
 class QueryNLRequest(BaseModel):
     """Request body for POST /api/v1/query/nl."""
 
@@ -96,6 +99,49 @@ class QueryNLRequest(BaseModel):
     # inputs that would otherwise propagate to the LLM unchecked. H-CLOSE-002.
     nl_query: str = Field(min_length=1, max_length=2000)
     prior_turns: list[ConversationTurn] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _validate_conversation_shape(self) -> QueryNLRequest:
+        """Deterministic (AI-free) validation of the refinement conversation.
+
+        Anthropic requires the messages array to start with a user turn and
+        alternate roles. ``run_nl_query`` rebuilds ``prior_turns[0]`` as the
+        original user query and appends the current ``nl_query`` as the final
+        user turn, so ``prior_turns`` must begin with "user", strictly
+        alternate, and end with "assistant" (the latest clarification).
+        Otherwise the assembled array has two consecutive same-role messages,
+        Anthropic returns 400, it propagates raw, and the route returns a
+        caller-triggerable 500. Catching it here makes a malformed conversation
+        a clean 422 instead (M-CLOSE-001).
+        """
+        turns = self.prior_turns
+        if not turns:
+            return self
+        if turns[0].role != "user":
+            raise ValueError("prior_turns must begin with a 'user' turn")
+        if turns[-1].role != "assistant":
+            raise ValueError(
+                "prior_turns must end with an 'assistant' turn (the latest "
+                "clarification); the current nl_query is the next user turn"
+            )
+        for earlier, later in zip(turns, turns[1:]):
+            if earlier.role == later.role:
+                raise ValueError(
+                    "prior_turns roles must alternate between 'user' and "
+                    "'assistant'"
+                )
+        # Aggregate content cap (resource guard, M-CLOSE-002): per-turn 2000 ×
+        # 20 turns is a ~40 KB worst case to the metered LLM on each stateless
+        # echo-back request. Bound the sum so a single request can't balloon the
+        # per-call token cost; 16000 is generous headroom for a real refinement
+        # conversation (original question + many short Q&A turns).
+        total_content = sum(len(turn.content) for turn in turns)
+        if total_content > _MAX_PRIOR_TURNS_CONTENT_CHARS:
+            raise ValueError(
+                "prior_turns total content exceeds "
+                f"{_MAX_PRIOR_TURNS_CONTENT_CHARS} characters"
+            )
+        return self
 
 
 class QueryNLResponse(BaseModel):

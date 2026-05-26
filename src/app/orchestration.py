@@ -179,6 +179,11 @@ def run_nl_query(
     clarification that now yields a :class:`TranslationSuccess` flows the full
     pipeline and returns a normal executed ``QueryNLResponse``.
     """
+    # A client could forge an assistant turn (e.g. claim the translator said
+    # "window 50"). Accepted by design (M-CLOSE-006): each request is stateless,
+    # the translator re-derives DSL from the cookbook + corpus, and the corpus
+    # is ground truth (DEC-024) — a forged turn at worst yields a DSL the caller
+    # can inspect; there is no persistent state to corrupt.
     converted_turns: list[Message] | None = (
         [{"role": t.role, "content": t.content} for t in prior_turns]
         if prior_turns
