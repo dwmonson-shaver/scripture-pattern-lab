@@ -54,6 +54,17 @@ class TestCapabilitiesRoute:
         assert "concept" in body["node_types"]
         assert "precedence" in body["operators"]
 
+    def test_body_contains_slice_l_proximity_fields(
+        self, client: TestClient
+    ) -> None:
+        """Slice L: capabilities now advertises scope_units, window_max_tokens,
+        and ``cooccurrence`` in operators (Decision #5)."""
+        resp = client.get("/api/v1/capabilities")
+        body = resp.json()
+        assert body["scope_units"] == ["verse", "window"]
+        assert body["window_max_tokens"] == 50
+        assert "cooccurrence" in body["operators"]
+
     def test_json_content_type(self, client: TestClient) -> None:
         resp = client.get("/api/v1/capabilities")
         assert resp.headers["content-type"].startswith("application/json")

@@ -30,6 +30,7 @@ from src.engine.models import (
     OptionalExpr,
     OrderOperator,
     QueryPlan,
+    ScopeUnitWindow,
     SequenceExpr,
 )
 from src.ontology.registry import ConceptRegistry
@@ -334,7 +335,16 @@ def _rule_9_match_mode(
 def _rule_10_scope(
     plan: QueryPlan, registry: CapabilityRegistry
 ) -> list[ValidationFinding]:
-    """Check scope validation."""
+    """Check scope validation.
+
+    Slice L extends rule 10 with two new finding codes:
+    - ``WINDOW_EXCEEDS_MAX`` (error): a ``ScopeUnitWindow.n`` value above
+      ``registry.window_max_tokens`` (Decision #5).
+    - ``GAP_NARROWED_BY_WINDOW`` (warning): a step-level ``gap.max`` larger
+      than the outer window's ``n`` — the gap will be silently narrowed by
+      the window envelope (Decision #10). Surfaced to the user so the
+      narrowing is explicit, not surprising.
+    """
     findings = []
     scope = plan.scope
 
@@ -363,6 +373,42 @@ def _rule_10_scope(
                 ),
             )
         )
+
+    if isinstance(scope.unit, ScopeUnitWindow):
+        if scope.unit.n > registry.window_max_tokens:
+            findings.append(
+                ValidationFinding(
+                    severity="error",
+                    code="WINDOW_EXCEEDS_MAX",
+                    path="scope.unit.n",
+                    message=(
+                        f"Window size {scope.unit.n} exceeds the engine's "
+                        f"window_max_tokens limit of {registry.window_max_tokens}."
+                    ),
+                )
+            )
+        # Gap-narrowed-by-window warning: every step-level gap.max that
+        # exceeds the outer window's n will be silently narrowed by the
+        # window envelope. Emit one warning per offending operator so the
+        # path is precise.
+        for op_path, op in _collect_operators(plan.sequence):
+            if (
+                op.gap is not None
+                and op.gap.max is not None
+                and op.gap.max > scope.unit.n
+            ):
+                findings.append(
+                    ValidationFinding(
+                        severity="warning",
+                        code="GAP_NARROWED_BY_WINDOW",
+                        path=f"{op_path}.gap",
+                        message=(
+                            f"Step-level gap max={op.gap.max} exceeds the "
+                            f"outer window size n={scope.unit.n}; the gap "
+                            "will be narrowed by the window."
+                        ),
+                    )
+                )
 
     return findings
 
@@ -717,16 +763,20 @@ def validate(
         )
 
     if not errors and warnings:
-        # Warnings only (e.g., unsupported expansion or rule-13 prior-grounded)
-        # — status is `partial` only when reduction happened, otherwise
-        # `supported`. Rule 13 alone (a warning that doesn't change the
-        # plan) should leave the plan supported with grounding set; a
-        # non-rule-13 warning still triggers reduction. Distinguish by
-        # whether any non-rule-13 warnings exist.
-        non_rule13_warnings = [
-            f for f in warnings if f.code != "RULE13_PRIOR_GROUNDED"
+        # Warnings only — distinguish "informational" warnings (which leave
+        # the plan supported as-is) from "structural" warnings that require
+        # reduction. Slice L: ``GAP_NARROWED_BY_WINDOW`` is informational —
+        # the executor honors both the step-level gap and the outer window
+        # natively (AND composition), so no reduction is needed; the
+        # narrowing is surfaced for transparency.
+        _informational_warning_codes = {
+            "RULE13_PRIOR_GROUNDED",
+            "GAP_NARROWED_BY_WINDOW",
+        }
+        non_informational_warnings = [
+            f for f in warnings if f.code not in _informational_warning_codes
         ]
-        if not non_rule13_warnings:
+        if not non_informational_warnings:
             return ValidationResult(
                 status="supported",
                 executable_plan=plan,

@@ -60,8 +60,16 @@ class TestCapabilityRegistry:
         assert set(reg.node_types) == {"token", "lemma", "concept", "morph", "wildcard"}
 
     def test_mvp_operators(self) -> None:
+        """Slice L: cooccurrence is now executable; adjacency still advertised
+        for parser-shape parity (rejected at the executor's second wall)."""
         reg = _mvp()
-        assert set(reg.operators) == {"precedence", "adjacency"}
+        assert set(reg.operators) == {"precedence", "adjacency", "cooccurrence"}
+
+    def test_mvp_scope_units(self) -> None:
+        """Slice L: scope_units enumerates the kinds the executor runs."""
+        reg = _mvp()
+        assert reg.scope_units == ["verse", "window"]
+        assert reg.window_max_tokens == 50
 
     def test_mvp_corpora(self) -> None:
         reg = _mvp()
@@ -164,7 +172,9 @@ class TestRule3Operators:
         codes = {f.code for f in result.findings}
         assert "UNSUPPORTED_OPERATOR" not in codes
 
-    def test_cooccurrence_unsupported(self) -> None:
+    def test_cooccurrence_supported_in_slice_l(self) -> None:
+        """Slice L: cooccurrence is now in the MVP registry's operators
+        list (Decision #7). Previously rejected as UNSUPPORTED_OPERATOR."""
         plan = QueryPlan(
             version="0.1",
             source="faith ~ hope",
@@ -180,7 +190,7 @@ class TestRule3Operators:
         )
         result = validate(plan, _mvp())
         codes = {f.code for f in result.findings}
-        assert "UNSUPPORTED_OPERATOR" in codes
+        assert "UNSUPPORTED_OPERATOR" not in codes
 
 
 class TestRule5Polarity:
@@ -309,6 +319,67 @@ class TestRule10Scope:
         codes = {f.code for f in result.findings}
         assert "UNKNOWN_CORPUS" not in codes
         assert "UNKNOWN_LANGUAGE" not in codes
+
+
+class TestRule10WindowConstraints:
+    """Slice L Decision #5 + #10: WINDOW_EXCEEDS_MAX and
+    GAP_NARROWED_BY_WINDOW are emitted from rule 10's scope check."""
+
+    def test_window_within_limit(self) -> None:
+        from src.engine.models import ScopeUnitWindow
+
+        plan = _simple_plan(
+            "faith", "hope",
+            scope=ScopeConstraint(unit=ScopeUnitWindow(n=50)),
+        )
+        result = validate(plan, _mvp())
+        codes = {f.code for f in result.findings}
+        assert "WINDOW_EXCEEDS_MAX" not in codes
+        assert result.status == "supported"
+
+    def test_window_exceeds_max(self) -> None:
+        from src.engine.models import ScopeUnitWindow
+
+        plan = _simple_plan(
+            "faith", "hope",
+            scope=ScopeConstraint(unit=ScopeUnitWindow(n=100)),
+        )
+        result = validate(plan, _mvp())
+        codes = {f.code for f in result.findings}
+        assert "WINDOW_EXCEEDS_MAX" in codes
+        # An error code → status is partial (reduction strips nothing here)
+        # or unsupported. Either way, status is not "supported".
+        assert result.status != "supported"
+
+    def test_gap_narrowed_by_window_warning(self) -> None:
+        """Decision #10: when step-level gap.max > outer window.n, emit a
+        GAP_NARROWED_BY_WINDOW warning. Status stays ``supported`` — the
+        narrowing is informational, the executor handles AND-composition
+        natively."""
+        from src.engine.models import GapConstraint, ScopeUnitWindow
+
+        plan = QueryPlan(
+            version="0.1",
+            source="faith >{0,80} hope within:window(50)",
+            sequence=SequenceExpr(
+                steps=[
+                    NodeRef(type=NodeType.CONCEPT, value="faith"),
+                    NodeRef(type=NodeType.CONCEPT, value="hope"),
+                ],
+                operators=[
+                    OrderOperator(
+                        type=OperatorType.PRECEDENCE,
+                        gap=GapConstraint(min=0, max=80),
+                    )
+                ],
+            ),
+            scope=ScopeConstraint(unit=ScopeUnitWindow(n=50)),
+            mode="conceptual",
+        )
+        result = validate(plan, _mvp())
+        codes = {f.code for f in result.findings}
+        assert "GAP_NARROWED_BY_WINDOW" in codes
+        assert result.status == "supported"
 
 
 class TestRule11SequenceLength:
