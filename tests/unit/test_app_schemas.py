@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.app.schemas import (
+    ConversationTurn,
     ErrorResponse,
     QueryDSLRequest,
     QueryDSLResponse,
@@ -177,6 +178,66 @@ class TestQueryNLRequest:
         req = QueryNLRequest(nl_query="x")
         with pytest.raises(ValidationError):
             req.nl_query = "y"
+
+    def test_default_prior_turns_is_empty_list(self) -> None:
+        # M1/DEC-098: omitting prior_turns preserves single-shot behavior
+        # byte-for-byte (empty list, not None).
+        req = QueryNLRequest(nl_query="what does Paul say about love?")
+        assert req.prior_turns == []
+        dumped = req.model_dump()
+        assert dumped == {
+            "nl_query": "what does Paul say about love?",
+            "prior_turns": [],
+        }
+
+    def test_accepts_prior_turns_at_max_length(self) -> None:
+        turns = [ConversationTurn(role="user", content="x") for _ in range(20)]
+        req = QueryNLRequest(nl_query="follow-up", prior_turns=turns)
+        assert len(req.prior_turns) == 20
+
+    def test_rejects_prior_turns_over_max_length(self) -> None:
+        # max_length=20 is a resource guard only (OQ-2), not a semantic cap.
+        turns = [ConversationTurn(role="user", content="x") for _ in range(21)]
+        with pytest.raises(ValidationError):
+            QueryNLRequest(nl_query="follow-up", prior_turns=turns)
+
+
+class TestConversationTurn:
+    def test_round_trip_user(self) -> None:
+        turn = ConversationTurn(role="user", content="faith and love near each other")
+        restored = ConversationTurn.model_validate_json(turn.model_dump_json())
+        assert restored == turn
+        assert restored.role == "user"
+
+    def test_round_trip_assistant(self) -> None:
+        turn = ConversationTurn(
+            role="assistant",
+            content="What window size? (suggested: 20, 50, 100)",
+        )
+        restored = ConversationTurn.model_validate_json(turn.model_dump_json())
+        assert restored == turn
+        assert restored.role == "assistant"
+
+    def test_rejects_over_max_content_length(self) -> None:
+        with pytest.raises(ValidationError):
+            ConversationTurn(role="user", content="a" * 2001)
+
+    def test_accepts_at_max_content_length(self) -> None:
+        turn = ConversationTurn(role="user", content="a" * 2000)
+        assert len(turn.content) == 2000
+
+    def test_rejects_empty_content(self) -> None:
+        with pytest.raises(ValidationError):
+            ConversationTurn(role="user", content="")
+
+    def test_rejects_invalid_role(self) -> None:
+        with pytest.raises(ValidationError):
+            ConversationTurn(role="system", content="x")  # type: ignore[arg-type]
+
+    def test_frozen(self) -> None:
+        turn = ConversationTurn(role="user", content="x")
+        with pytest.raises(ValidationError):
+            turn.content = "y"
 
 
 class TestTranslationMetadata:

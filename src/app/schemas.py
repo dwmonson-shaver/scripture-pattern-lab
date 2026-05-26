@@ -9,6 +9,8 @@ thoughts/design-slice-g-fastapi-route-2026-05-09.md).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.engine.models import ExplainedResultSet, RetrievalResult
@@ -74,6 +76,16 @@ class QueryDSLResponse(BaseModel):
     explanation: ExplainedResultSet
 
 
+class ConversationTurn(BaseModel):
+    """One turn of a refinement conversation, echoed back by the client each
+    request per the stateless-echo-back design (DEC-098)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class QueryNLRequest(BaseModel):
     """Request body for POST /api/v1/query/nl."""
 
@@ -83,6 +95,7 @@ class QueryNLRequest(BaseModel):
     # is ~200 chars) while bounding adversarial / accidentally-pasted-prose
     # inputs that would otherwise propagate to the LLM unchecked. H-CLOSE-002.
     nl_query: str = Field(min_length=1, max_length=2000)
+    prior_turns: list[ConversationTurn] = Field(default_factory=list, max_length=20)
 
 
 class QueryNLResponse(BaseModel):
