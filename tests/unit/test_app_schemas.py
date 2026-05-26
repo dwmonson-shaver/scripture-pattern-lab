@@ -196,7 +196,11 @@ class TestTranslationMetadata:
             meta.confidence = 0.5
 
 
-class TestQueryNLResponseInheritance:
+class TestQueryNLResponseShape:
+    """Slice L: QueryNLResponse is no longer a subclass of QueryDSLResponse —
+    it carries the same four pipeline fields PLUS a discriminated
+    ``clarification`` slot (Decision #6)."""
+
     @staticmethod
     def _stub_validation() -> ValidationResult:
         return ValidationResult(
@@ -207,9 +211,9 @@ class TestQueryNLResponseInheritance:
             grounding="prior-grounded",
         )
 
-    def test_inherits_dsl_response_fields(self) -> None:
-        # QueryNLResponse(QueryDSLResponse) — must accept the same query,
-        # validation, result, explanation fields verbatim.
+    def test_executed_shape(self) -> None:
+        # Standard execute-path shape: all pipeline fields present,
+        # ``clarification`` is None.
         from src.engine.models import Contextualization
 
         empty = RetrievalResult(
@@ -243,6 +247,22 @@ class TestQueryNLResponseInheritance:
 
         assert resp.query == "faith"
         assert resp.translation is meta
-        assert resp.translation.confidence == 0.9
-        # Subclass relation:
-        assert isinstance(resp, QueryDSLResponse)
+        assert resp.clarification is None
+
+    def test_clarification_shape(self) -> None:
+        from src.app.schemas import ClarificationPayload
+
+        clar = ClarificationPayload(
+            question="What window size? (suggested: 20, 50, 100)",
+            suggested_windows=[20, 50, 100],
+            nl_source="faith and love near each other",
+        )
+        resp = QueryNLResponse(
+            query="faith and love near each other",
+            clarification=clar,
+        )
+        assert resp.clarification is clar
+        assert resp.validation is None
+        assert resp.result is None
+        assert resp.explanation is None
+        assert resp.translation is None

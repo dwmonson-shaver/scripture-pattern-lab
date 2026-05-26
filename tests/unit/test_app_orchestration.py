@@ -29,7 +29,7 @@ from src.nlp.llm_client import LLMClient, LLMUnavailable
 from src.nlp.translator import (
     NLCompileError,
     TranslationContext,
-    TranslationResult,
+    TranslationSuccess,
 )
 from src.ontology.registry import ConceptRegistry
 from src.validation.validator import ValidationFinding, ValidationResult
@@ -269,7 +269,7 @@ class TestRunNLQueryHappyPath:
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
         # Stub the translator to avoid real LLM call.
-        translation = TranslationResult(
+        translation = TranslationSuccess(
             dsl="faith",
             confidence=0.9,
             alternatives=["love"],
@@ -361,7 +361,7 @@ class TestRunNLQueryDownstreamFailures:
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
         # Translator emits "valid"-looking DSL that fails parse.
-        translation = TranslationResult(dsl="faith > > > hope")
+        translation = TranslationSuccess(dsl="faith > > > hope")
         monkeypatch.setattr(
             "src.app.orchestration.translate", lambda *a, **kw: translation
         )
@@ -378,7 +378,7 @@ class TestRunNLQueryDownstreamFailures:
     def test_validation_unsupported_propagates(
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
-        translation = TranslationResult(dsl="inverse(faith)")
+        translation = TranslationSuccess(dsl="inverse(faith)")
         monkeypatch.setattr(
             "src.app.orchestration.translate", lambda *a, **kw: translation
         )
@@ -395,7 +395,7 @@ class TestRunNLQueryDownstreamFailures:
     def test_concept_not_mapped_propagates(
         self, monkeypatch, fake_engine, empty_registry
     ) -> None:
-        translation = TranslationResult(dsl="faith > hope")
+        translation = TranslationSuccess(dsl="faith > hope")
         monkeypatch.setattr(
             "src.app.orchestration.translate", lambda *a, **kw: translation
         )
@@ -470,7 +470,7 @@ class TestRunNLQueryWithExplainerLLMOptIn:
 
     @staticmethod
     def _stub_pipeline(monkeypatch, captured: dict) -> None:
-        translation = TranslationResult(
+        translation = TranslationSuccess(
             dsl="faith",
             confidence=0.9,
             alternatives=[],

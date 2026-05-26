@@ -33,6 +33,23 @@ class TranslationMetadata(BaseModel):
     explanation: str
 
 
+class ClarificationPayload(BaseModel):
+    """Slice L Decision #6: the response payload when the translator emits
+    a ``Clarification:`` instead of ``DSL:``.
+
+    The route returns a 200 with this set and the other fields (``result``,
+    ``validation``, ``explanation``, ``translation``) absent. No query
+    executed. The frontend (follow-up scope) renders the question + the
+    suggested windows as a choice surface.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    question: str
+    suggested_windows: list[int]
+    nl_source: str
+
+
 class QueryDSLRequest(BaseModel):
     """Request body for POST /api/v1/query/dsl."""
 
@@ -68,17 +85,27 @@ class QueryNLRequest(BaseModel):
     nl_query: str = Field(min_length=1, max_length=2000)
 
 
-class QueryNLResponse(QueryDSLResponse):
+class QueryNLResponse(BaseModel):
     """Response envelope for POST /api/v1/query/nl.
 
-    Inherits the four DSL-route fields verbatim and adds `translation`
-    with translator-side metadata. The `query` field carries the
-    *compiled* DSL string the translator emitted (which is what was
-    actually executed against the corpus); the original NL query lives
-    in the request, not the response.
+    Two shapes (Slice L Decision #6):
+    - Executed: ``query`` (compiled DSL) + ``validation`` + ``result`` +
+      ``explanation`` + ``translation`` populated; ``clarification`` is None.
+    - Clarification: ``query`` (the original NL) + ``clarification``
+      populated; the four pipeline fields are None.
+
+    The discriminating signal is presence/absence of ``clarification``.
+    Always returned as HTTP 200.
     """
 
-    translation: TranslationMetadata
+    model_config = ConfigDict(frozen=True)
+
+    query: str
+    validation: ValidationResult | None = None
+    result: RetrievalResult | None = None
+    explanation: ExplainedResultSet | None = None
+    translation: TranslationMetadata | None = None
+    clarification: ClarificationPayload | None = None
 
 
 class QueryValidateRequest(BaseModel):

@@ -20,11 +20,21 @@ import os
 
 from sqlalchemy.engine import Engine
 
-from src.app.schemas import QueryDSLResponse, QueryNLResponse, TranslationMetadata
+from src.app.schemas import (
+    ClarificationPayload,
+    QueryDSLResponse,
+    QueryNLResponse,
+    TranslationMetadata,
+)
 from src.engine.parser import parse
 from src.nlp.explainer import explain
 from src.nlp.llm_client import LLMClient
-from src.nlp.translator import TranslationContext, translate
+from src.nlp.translator import (
+    TranslationContext,
+    TranslationNeedsClarification,
+    TranslationSuccess,
+    translate,
+)
 from src.ontology.registry import ConceptRegistry
 from src.retrieval.retrieve import retrieve
 from src.validation.registry import CapabilityRegistry
@@ -155,6 +165,21 @@ def run_nl_query(
     request body).
     """
     translation_result = translate(nl_query, context, llm_client)
+
+    # Slice L Decision #6: clarification short-circuits the pipeline. The
+    # route returns a 200 carrying the question + suggested windows; no
+    # query executes. Frontend handling is follow-up scope.
+    if isinstance(translation_result, TranslationNeedsClarification):
+        return QueryNLResponse(
+            query=nl_query,
+            clarification=ClarificationPayload(
+                question=translation_result.question,
+                suggested_windows=translation_result.suggested_windows,
+                nl_source=translation_result.nl_source,
+            ),
+        )
+
+    assert isinstance(translation_result, TranslationSuccess)
 
     # Slice K: if SPL_EXPLAINER_LLM is opted in, the same LLM client used by
     # the translator is also passed into explain() so conceptual-match

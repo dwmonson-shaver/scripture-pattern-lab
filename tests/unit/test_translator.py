@@ -16,7 +16,7 @@ from src.nlp.prompts.system_prompt import (
 from src.nlp.translator import (
     NLCompileError,
     TranslationContext,
-    TranslationResult,
+    TranslationSuccess,
     translate,
 )
 
@@ -85,7 +85,7 @@ class TestTranslateHappyPath:
             )
         )
         result = translate("paths from faith to love through hope", _ctx(), client)
-        assert isinstance(result, TranslationResult)
+        assert isinstance(result, TranslationSuccess)
         assert result.dsl == "faith > hope > love"
         assert result.confidence == 0.92
         assert result.alternatives == ["faith > love > hope", "love > faith > hope"]
@@ -111,7 +111,8 @@ class TestTranslateOutputParsing:
         with pytest.raises(NLCompileError) as exc_info:
             translate("vague query", _ctx(), client)
         assert exc_info.value.nl_query == "vague query"
-        assert "did not contain a 'DSL:' line" in exc_info.value.reason
+        assert "DSL:" in exc_info.value.reason
+        assert "Clarification:" in exc_info.value.reason
         assert exc_info.value.attempted_output == "I cannot translate this query."
 
     def test_empty_dsl_line_raises_nl_compile_error(self) -> None:
@@ -164,7 +165,7 @@ class TestTranslatePropagatesLLMUnavailable:
 
 class TestTranslationResultFrozen:
     def test_translation_result_is_frozen(self) -> None:
-        result = TranslationResult(dsl="faith", confidence=0.5)
+        result = TranslationSuccess(dsl="faith", confidence=0.5)
         with pytest.raises(Exception):
             result.dsl = "hope"  # type: ignore[misc]
 
@@ -172,3 +173,39 @@ class TestTranslationResultFrozen:
         ctx = _ctx()
         with pytest.raises(Exception):
             ctx.capability_registry_summary = "x"  # type: ignore[misc]
+
+
+class TestTranslateClarificationPath:
+    """Slice L Decision #6: when the LLM emits ``Clarification:`` instead of
+    ``DSL:``, the translator returns ``TranslationNeedsClarification``."""
+
+    def test_clarification_line_returns_clarification_variant(self) -> None:
+        from src.nlp.translator import TranslationNeedsClarification
+
+        client = FakeLLMClient(
+            canned_response=(
+                "Clarification: What window size do you want for proximity? "
+                "Common choices: 20, 50, 100 tokens.\n"
+            )
+        )
+        result = translate(
+            "Where do faith, hope, love appear near each other?", _ctx(), client
+        )
+        assert isinstance(result, TranslationNeedsClarification)
+        assert "window size" in result.question.lower()
+        assert result.suggested_windows == [20, 50, 100]
+        assert "near each other" in result.nl_source
+
+    def test_dsl_line_takes_precedence_over_clarification(self) -> None:
+        """If the LLM emits both ``DSL:`` and ``Clarification:``, the DSL
+        wins — the explicit translation is the canonical signal."""
+        client = FakeLLMClient(
+            canned_response=(
+                "DSL: faith > hope > love within:verse\n"
+                "Confidence: 0.8\n"
+                "Clarification: ambiguous window size\n"
+            )
+        )
+        result = translate("q", _ctx(), client)
+        assert isinstance(result, TranslationSuccess)
+        assert result.dsl == "faith > hope > love within:verse"

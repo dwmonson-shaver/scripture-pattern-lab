@@ -153,6 +153,37 @@ class TestHappyPath:
         resp = client.post("/api/v1/query/nl", json={"nl_query": ""})
         assert resp.status_code == 422
 
+    def test_clarification_path_returns_200_with_clarification(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slice L Decision #6: when the translator returns a clarification,
+        the route returns 200 with the ``clarification`` field set and the
+        pipeline fields absent. No query executes."""
+        from src.app.schemas import ClarificationPayload
+
+        def stub_clarification(*args: object, **kwargs: object) -> QueryNLResponse:
+            return QueryNLResponse(
+                query="faith and love near each other",
+                clarification=ClarificationPayload(
+                    question="What window size? (suggested: 20, 50, 100)",
+                    suggested_windows=[20, 50, 100],
+                    nl_source="faith and love near each other",
+                ),
+            )
+
+        monkeypatch.setattr("src.app.routes.nl.run_nl_query", stub_clarification)
+        resp = client.post(
+            "/api/v1/query/nl",
+            json={"nl_query": "faith and love near each other"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["clarification"]["suggested_windows"] == [20, 50, 100]
+        assert body["validation"] is None
+        assert body["result"] is None
+        assert body["explanation"] is None
+        assert body["translation"] is None
+
 
 class TestErrorMappingTranslatorSide:
     def test_llm_unavailable_returns_503(

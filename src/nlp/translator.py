@@ -5,14 +5,22 @@ over an LLMClient: it builds the user message from the NL query plus context
 summaries, calls .complete(), and parses the structured output.
 
 Output extraction is regex-based against the documented format in
-src/nlp/prompts/system_prompt.py. If the LLM doesn't follow the format
-(no "DSL:" line), NLCompileError is raised — the route layer maps this to
-422 nl_compile_error per DEC-070.
+src/nlp/prompts/system_prompt.py. The LLM may emit one of two response
+shapes (Slice L Decision #6):
+
+- "DSL:" line + Confidence + Alternatives + Explanation → ``TranslationSuccess``
+- "Clarification:" line (no DSL:) → ``TranslationNeedsClarification`` for the
+  cross-verse proximity scope-window question; route handler surfaces the
+  question back to the user and the query does NOT execute.
+
+If the LLM emits neither, ``NLCompileError`` is raised — the route layer maps
+this to 422 nl_compile_error per DEC-070.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,22 +40,54 @@ class TranslationContext(BaseModel):
     concept_registry_summary: str
 
 
-class TranslationResult(BaseModel):
-    """Translator output. dsl is the load-bearing field; rest are metadata.
+class TranslationSuccess(BaseModel):
+    """Translator output for a successful NL→DSL compilation.
 
-    confidence default is 0.0 — when the LLM doesn't volunteer a Confidence:
-    line, we treat the translation as zero-confidence rather than max
-    (H-CLOSE-003). Honest signal per DEC-024 (corpus-is-ground-truth):
-    don't claim certainty the LLM didn't claim. Confidence is informational
-    per DEC-072 — never gates execution — so the value's calibration is
-    a transparency claim, not a control claim.
+    ``dsl`` is the load-bearing field; rest are metadata. ``confidence``
+    default is 0.0 — when the LLM doesn't volunteer a ``Confidence:`` line,
+    treat as zero-confidence rather than max (H-CLOSE-003). Honest signal
+    per DEC-024 (corpus-is-ground-truth): don't claim certainty the LLM
+    didn't claim. Confidence is informational per DEC-072 — never gates
+    execution — so the value's calibration is a transparency claim, not a
+    control claim.
     """
 
     model_config = ConfigDict(frozen=True)
+    kind: Literal["success"] = "success"
     dsl: str
     confidence: float = 0.0
     alternatives: list[str] = Field(default_factory=list)
     explanation: str = ""
+
+
+class TranslationNeedsClarification(BaseModel):
+    """Translator output when the NL is silent about proximity scope and the
+    LLM emits a ``Clarification:`` line instead of ``DSL:`` (Slice L
+    Decision #6).
+
+    The route handler surfaces ``question`` to the user along with
+    ``suggested_windows`` so they can pick a window N and resubmit. No
+    query executes. ``nl_source`` echoes the original NL so the frontend
+    can render context.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    kind: Literal["needs_clarification"] = "needs_clarification"
+    question: str
+    suggested_windows: list[int] = Field(default_factory=lambda: [20, 50, 100])
+    nl_source: str
+
+
+TranslationResult = Annotated[
+    Union[TranslationSuccess, TranslationNeedsClarification],
+    Field(discriminator="kind"),
+]
+
+
+# Legacy alias — many callers import ``TranslationResult`` expecting the
+# success-shape directly. Keep the alias so the existing surface stays
+# compatible; new code should branch on ``isinstance(result,
+# TranslationSuccess | TranslationNeedsClarification)``.
 
 
 class NLCompileError(Exception):
@@ -68,18 +108,24 @@ _ALT_SECTION = re.compile(
     re.MULTILINE,
 )
 _EXPLANATION_LINE = re.compile(r"^Explanation:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
+_CLARIFICATION_LINE = re.compile(r"^Clarification:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 
 
 def translate(
     nl_query: str,
     context: TranslationContext,
     llm_client: LLMClient,
-) -> TranslationResult:
-    """Compile a natural-language query into a TranslationResult.
+) -> TranslationSuccess | TranslationNeedsClarification:
+    """Compile a natural-language query into a translator result.
 
     Single-shot LLM call per canonical-09 §2 MVP implementation. Raises
     LLMUnavailable (from llm_client.complete()) on API errors; raises
-    NLCompileError if the LLM output cannot be parsed.
+    NLCompileError if the LLM output cannot be parsed as either a DSL or
+    a clarification.
+
+    Slice L Decision #6: when the NL implies cross-verse proximity but is
+    silent on the window size, the translator returns a
+    :class:`TranslationNeedsClarification` instead of guessing a default.
     """
     user_message = _build_user_message(nl_query, context)
     raw_output = llm_client.complete(SYSTEM_PROMPT, user_message)
@@ -96,31 +142,45 @@ def _build_user_message(nl_query: str, context: TranslationContext) -> str:
     )
 
 
-def _parse_output(*, nl_query: str, raw_output: str) -> TranslationResult:
+def _parse_output(
+    *, nl_query: str, raw_output: str
+) -> TranslationSuccess | TranslationNeedsClarification:
+    # Slice L: ``Clarification:`` takes precedence ONLY when no ``DSL:`` line
+    # is present. If the LLM emitted both, we honor the DSL (Decision #6 set
+    # the contract that DSL and Clarification are mutually exclusive; the
+    # explicit DSL still represents a successful compile).
     dsl_match = _DSL_LINE.search(raw_output)
-    if dsl_match is None:
-        raise NLCompileError(
-            nl_query=nl_query,
-            attempted_output=raw_output,
-            reason="LLM output did not contain a 'DSL:' line",
-        )
-    dsl = dsl_match.group(1).strip()
-    if not dsl:
-        raise NLCompileError(
-            nl_query=nl_query,
-            attempted_output=raw_output,
-            reason="LLM emitted an empty DSL string",
+    if dsl_match is not None:
+        dsl = dsl_match.group(1).strip()
+        if not dsl:
+            raise NLCompileError(
+                nl_query=nl_query,
+                attempted_output=raw_output,
+                reason="LLM emitted an empty DSL string",
+            )
+        confidence = _extract_confidence(raw_output)
+        alternatives = _extract_alternatives(raw_output)
+        explanation = _extract_explanation(raw_output)
+        return TranslationSuccess(
+            dsl=dsl,
+            confidence=confidence,
+            alternatives=alternatives,
+            explanation=explanation,
         )
 
-    confidence = _extract_confidence(raw_output)
-    alternatives = _extract_alternatives(raw_output)
-    explanation = _extract_explanation(raw_output)
+    clarification_match = _CLARIFICATION_LINE.search(raw_output)
+    if clarification_match is not None:
+        question = clarification_match.group(1).strip()
+        if question:
+            return TranslationNeedsClarification(
+                question=question,
+                nl_source=nl_query,
+            )
 
-    return TranslationResult(
-        dsl=dsl,
-        confidence=confidence,
-        alternatives=alternatives,
-        explanation=explanation,
+    raise NLCompileError(
+        nl_query=nl_query,
+        attempted_output=raw_output,
+        reason="LLM output did not contain a 'DSL:' or 'Clarification:' line",
     )
 
 

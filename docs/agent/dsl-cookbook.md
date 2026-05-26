@@ -52,7 +52,17 @@ The MVP executor supports two node types:
 
 The validator's `max_sequence_length` is **10** — sequences longer than that are rejected.
 
-> Other operators (`>>` adjacency, `~` cooccurrence) parse but raise `UnsupportedPlanShape`. Use only `>` (with optional gap) in primary queries.
+> The `>>` adjacency operator parses but is not yet executable (raises `UnsupportedPlanShape`). The `~` cooccurrence operator executes as of Slice L (see below).
+
+### Cooccurrence: `~` (Slice L)
+
+`A ~ B` matches `A` and `B` near each other **without requiring an order**. Inside a `within:window(N)` scope it expresses "in proximity, either direction." Optional `~{m,n}` carries a step-level gap with `abs(next − prev)` semantics (same syntax as `>{m,n}`).
+
+| Syntax | Meaning |
+|---|---|
+| `A ~ B` | A and B both appear in scope, in any order |
+| `A ~{0,5} B` | A and B within 5 tokens of each other, either order |
+| `A > B ~ C` | A precedes B, and C cooccurs (any order relative to B) |
 
 ### Scope Directives
 
@@ -60,16 +70,42 @@ Trailing `keyword:value` directives narrow where the engine searches:
 
 | Directive | Values | Default |
 |---|---|---|
-| `within:` | `verse` | `verse` (the only supported unit today) |
+| `within:` | `verse` (single verse) or `window(N)` where 1 ≤ N ≤ 50 (cross-verse window of N tokens, anchored on first match) | `verse` |
 | `lang:` | `grc` (Koine Greek) | `grc` |
 | `corpus:` | `nt` (New Testament) | `nt` |
 | `book:` | comma-separated abbreviations: `rom`, `1cor`, `2cor`, `gal`, `eph`, `php`, `col`, `1th`, `2th`, `1ti`, `2ti`, `tit`, `phm`, `heb`, `jas`, `1pe`, `2pe`, `1jn`, `2jn`, `3jn`, `jud`, `rev`, `mat`, `mar`, `luk`, `jhn`, `act` | (whole corpus) |
+
+**Window semantics** (Slice L): `within:window(N)` anchors on the first matched token's `global_position` and requires every subsequent step within `[base, base + N]` tokens, same book (book boundaries blocked; chapter boundaries crossable). Each result carries a `proximity` envelope reporting the actual span, whether it crossed a verse/chapter, the intervening lemmas, etc. `window(0)` is rejected; `N > 50` is rejected at validation.
 
 **Example with full scope:**
 
 ```
 faith > hope > love within:verse lang:grc corpus:nt book:1cor
 ```
+
+**Cross-verse window example:**
+
+```
+faith > hope > love within:window(50) corpus:nt
+```
+
+**Unordered cooccurrence inside a window:**
+
+```
+lemma:πίστις ~{0,5} lemma:ἀγάπη within:window(20) corpus:nt
+```
+
+### Proximity Vocabulary (NL → DSL)
+
+When the user uses cross-verse proximity language ("near," "in proximity," "around," "together") AND names a window, translate to `within:window(N)`. When the user implies proximity but does NOT name a window size, emit a `Clarification:` line instead of `DSL:` — the window N is part of the pattern's identity (a finding at N=50 is different from a finding at N=100), so silent defaults erase that distinction.
+
+| NL hint | DSL surface |
+|---|---|
+| "in the same verse," "in one verse" | `within:verse` |
+| "within 20 words," "in 20 tokens" | `within:window(20)` |
+| "near each other," "in proximity" (no number) | emit `Clarification:` line |
+| "appears together, either order" | `~` (cooccurrence) |
+| "appears together within N tokens, either order" | `lemma:A ~{0,N} lemma:B within:window(N+10)` (or whatever envelope makes sense) |
 
 ### Match Mode
 
@@ -82,7 +118,7 @@ The parser infers the `mode:` directive from your query. If any node is `concept
 | `>` | precedence (later in scope) | ✅ |
 | `>{m,n}` | precedence with gap window | ✅ |
 | `>>` | strict adjacency | ❌ parses, validator accepts (`adjacency` is in MVP registry), executor raises `UnsupportedPlanShape` |
-| `~` | cooccurrence (no order) | ❌ parses, validator rejects (`cooccurrence` not in MVP registry's operators) |
+| `~` | cooccurrence (no order) | ✅ Slice L. Optionally `~{m,n}` for a step-level gap window with `abs(next − prev)` semantics. |
 | `+`, `-`, `±` (polarity prefix) | polarity marker on a node | ⚠️ parses, validator accepts (MVP `polarity_support=True`), executor accepts — but **polarity does not affect matching in MVP**. It is recorded on the AST and consumed only by the registry-grounding axis (`Grounding:` line). Do not rely on `+`/`-` to filter results. |
 | `!` (negation prefix) | negate a node | ❌ parses, executor rejects |
 | `[step]` | optional step | ❌ parses, executor rejects |
@@ -435,11 +471,11 @@ registry not seeded: concept '<name>' has no lemma mapping. Run scripts/db/seed_
 executor rejected plan: <message> (path=<jsonpath>)
 ```
 
-**Cause:** A query that passed the parser AND the validator was still rejected by the executor. The executor checks shape invariants the validator does not — e.g., `validate_plan_shape` rejects `>>` adjacency operators, non-`NodeRef` step types (groups, alternatives, optionals), node types other than `LEMMA`/`CONCEPT`, `negated=True` nodes, non-empty `morph_filters`, `within:` set to anything other than `verse`, and unknown book abbreviations.
+**Cause:** A query that passed the parser AND the validator was still rejected by the executor. The executor checks shape invariants the validator does not — e.g., `validate_plan_shape` rejects `>>` adjacency operators, non-`NodeRef` step types (groups, alternatives, optionals), node types other than `LEMMA`/`CONCEPT`, `negated=True` nodes, non-empty `morph_filters`, and unknown book abbreviations. `within:` is accepted for `verse` and `window(N)`; other units now fail at parse time (Slice L).
 
 **Recovery:**
 1. Read the `path:` to see which AST node was unsupported (e.g., `$.scope.unit`, `$.sequence.steps[2]`, `$.scope.books[1]`).
-2. Adjust the corresponding DSL part. Common: `within:` set to anything other than `verse`; book abbreviation typo.
+2. Adjust the corresponding DSL part. Common: book abbreviation typo; `within:` set to a unit that's not yet executable (only `verse` and `window(N)` ship today).
 
 ### `Found 0 matches` — corpus is silent on this query
 
@@ -476,7 +512,6 @@ These DSL features are recognized by the parser but raise `UnsupportedPlanShape`
 
 - `inverse(SEQUENCE)` — find sequences expressing the inverse pattern (e.g., negative pole of trust)
 - `>>` — strict adjacency (no tokens between)
-- `~` — cooccurrence without order
 - `!` negation
 - `[step]` optional step
 - `(a | b | c)` alternative options
@@ -484,7 +519,7 @@ These DSL features are recognized by the parser but raise `UnsupportedPlanShape`
 - `lemma:X+morph:Y` compound morph filter
 - `token:`, `root:`, `morph:`, `domain:` node types
 - `*` wildcard in sequence
-- `within:clause`, `within:sentence`, `within:pericope`, `within:chapter` (only `within:verse` works today)
+- `within:clause`, `within:sentence`, `within:pericope`, `within:chapter` (parser rejects these; the only executable units are `verse` and `window(N)`)
 
 ---
 
