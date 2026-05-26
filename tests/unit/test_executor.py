@@ -27,7 +27,8 @@ from src.engine.models import (
     QueryPlan,
     RegistryRequired,
     ScopeConstraint,
-    ScopeUnit,
+    ScopeUnitVerse,
+    ScopeUnitWindow,
     SequenceExpr,
     UnsupportedPlanShape,
 )
@@ -189,8 +190,11 @@ def test_raises_unsupported_on_unknown_book_abbreviation() -> None:
     assert excinfo.value.path == "$.scope.books[0]"
 
 
-def test_raises_unsupported_on_unsupported_scope_unit() -> None:
-    """ScopeUnit.CHAPTER is rejected (only VERSE / None supported)."""
+def test_phase1_window_scope_raises_not_yet_implemented() -> None:
+    """Phase 1: ScopeUnitWindow shape is accepted at validate_plan_shape, but
+    the executor body still implements only the verse-tuple path. Phase 2
+    lifts this guard.
+    """
     seq = SequenceExpr(
         steps=[
             NodeRef(type=NodeType.LEMMA, value="πίστις"),
@@ -198,10 +202,11 @@ def test_raises_unsupported_on_unsupported_scope_unit() -> None:
         ],
         operators=[OrderOperator(type=OperatorType.PRECEDENCE)],
     )
-    plan = _make_plan(seq, scope=ScopeConstraint(unit=ScopeUnit.CHAPTER))
+    plan = _make_plan(seq, scope=ScopeConstraint(unit=ScopeUnitWindow(n=50)))
     with pytest.raises(UnsupportedPlanShape) as excinfo:
         execute(plan, plan.scope, _make_engine())
     assert excinfo.value.path == "$.scope.unit"
+    assert "Phase 2" in str(excinfo.value)
 
 
 def test_raises_unsupported_on_negated_node() -> None:
@@ -301,7 +306,7 @@ def test_step0_query_includes_corpus_and_language_filters() -> None:
     plan = _make_plan(
         seq,
         scope=ScopeConstraint(
-            unit=ScopeUnit.VERSE,
+            unit=ScopeUnitVerse(),
             corpus="nt",
             language="grc",
         ),
@@ -340,7 +345,7 @@ def test_every_step_query_includes_scope_filters() -> None:
     plan = _make_plan(
         seq,
         scope=ScopeConstraint(
-            unit=ScopeUnit.VERSE,
+            unit=ScopeUnitVerse(),
             corpus="nt",
             language="grc",
         ),

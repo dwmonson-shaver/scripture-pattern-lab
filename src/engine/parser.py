@@ -269,7 +269,13 @@ class _Parser:
             return OrderOperator(type=OperatorType.ADJACENCY)
 
         if tok.kind == TokenKind.TILDE:
-            return OrderOperator(type=OperatorType.COOCCURRENCE)
+            # Slice L Decision #7: ~ accepts the same optional ``{min,max}``
+            # gap as ``>``; semantics drop the ordering predicate (executor
+            # uses ``abs(next - prev)`` rather than ``next - prev``).
+            gap = None
+            if self.at(TokenKind.LBRACE):
+                gap = self.parse_gap()
+            return OrderOperator(type=OperatorType.COOCCURRENCE, gap=gap)
 
         if tok.kind == TokenKind.GT:
             gap = None
@@ -434,7 +440,8 @@ class _Parser:
     ) -> tuple["ScopeConstraint", "MatchMode | None", "ExpansionDirective | None"]:
         from src.engine.models import (
             ScopeConstraint,
-            ScopeUnit,
+            ScopeUnitVerse,
+            ScopeUnitWindow,
         )
 
         corpus = None
@@ -459,7 +466,40 @@ class _Parser:
 
             if word == "within":
                 unit_tok = self.expect(TokenKind.WORD)
-                unit = ScopeUnit(unit_tok.value)
+                if unit_tok.value == "verse":
+                    unit = ScopeUnitVerse()
+                elif unit_tok.value == "window":
+                    # ``within:window(N)`` per Slice L Decision #2. The parens
+                    # + integer are required — ``within:window`` alone is an
+                    # error so the user must declare N explicitly.
+                    self.expect(TokenKind.LPAREN)
+                    n_tok = self.expect(TokenKind.WORD)
+                    try:
+                        n_value = int(n_tok.value)
+                    except ValueError:
+                        self._error(
+                            f"window size must be an integer, got {n_tok.value!r}"
+                        )
+                    if n_value <= 0:
+                        # Decision #8: window(0) is degenerate (matches base
+                        # token only); reject at parse time before the
+                        # executor sees it.
+                        self._error(
+                            f"window size must be >= 1, got {n_value}"
+                        )
+                    self.expect(TokenKind.RPAREN)
+                    unit = ScopeUnitWindow(n=n_value)
+                else:
+                    # ``clause | sentence | pericope | chapter`` etc. used to
+                    # parse into the old StrEnum as inert kinds the executor
+                    # rejected at runtime. Slice L deliberately moves the
+                    # rejection up to parse time so the failure is local to
+                    # the surface; future slices that ship execution will
+                    # add the corresponding sibling here.
+                    self._error(
+                        f"unsupported scope unit: {unit_tok.value!r} "
+                        "(supported: verse, window(N))"
+                    )
             elif word == "lang":
                 lang_tok = self.expect(TokenKind.WORD)
                 language = lang_tok.value

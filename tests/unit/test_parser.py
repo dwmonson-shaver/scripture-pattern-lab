@@ -5,12 +5,14 @@ import pytest
 from src.engine.models import (
     AlternativeExpr,
     ExpansionDirection,
+    GapConstraint,
     InverseExpr,
     NodeRef,
     NodeType,
     OperatorType,
     OptionalExpr,
-    ScopeUnit,
+    ScopeUnitVerse,
+    ScopeUnitWindow,
     SequenceExpr,
 )
 from src.engine.parser import ParseError, TokenKind, _Parser, parse, tokenize
@@ -243,6 +245,16 @@ class TestParseSequence:
         p = _make_parser("faith ~ hope")
         seq = p.parse_sequence()
         assert seq.operators[0].type == OperatorType.COOCCURRENCE
+        assert seq.operators[0].gap is None
+
+    def test_cooccurrence_with_gap(self) -> None:
+        """Slice L Decision #7: ``~{m,n}`` carries a step-level gap, same
+        syntax as ``>{m,n}``. Executor uses ``abs(next - prev)``.
+        """
+        p = _make_parser("faith ~{0,5} hope")
+        seq = p.parse_sequence()
+        assert seq.operators[0].type == OperatorType.COOCCURRENCE
+        assert seq.operators[0].gap == GapConstraint(min=0, max=5)
 
     def test_wildcard_in_sequence(self) -> None:
         p = _make_parser("* > concept:faith")
@@ -327,7 +339,32 @@ class TestParseNegation:
 class TestParseDirectives:
     def test_scope_within(self) -> None:
         plan = parse("faith > hope within:verse")
-        assert plan.scope.unit == ScopeUnit.VERSE
+        assert isinstance(plan.scope.unit, ScopeUnitVerse)
+
+    def test_scope_within_window(self) -> None:
+        """Slice L: ``within:window(N)`` parses to ``ScopeUnitWindow(n=N)``."""
+        plan = parse("faith > hope within:window(50)")
+        assert isinstance(plan.scope.unit, ScopeUnitWindow)
+        assert plan.scope.unit.n == 50
+
+    def test_scope_within_window_rejects_zero(self) -> None:
+        """Slice L Decision #8: ``window(0)`` is degenerate; parser rejects it."""
+        with pytest.raises(ParseError) as excinfo:
+            parse("faith > hope within:window(0)")
+        assert "window size must be >= 1" in str(excinfo.value)
+
+    def test_scope_within_window_requires_parens(self) -> None:
+        """``within:window`` without ``(N)`` is an error — N must be explicit."""
+        with pytest.raises(ParseError):
+            parse("faith > hope within:window")
+
+    def test_scope_within_rejects_unsupported_unit(self) -> None:
+        """Slice L: ``clause | sentence | pericope | chapter`` previously parsed
+        into the inert StrEnum and were rejected at execute; now rejected at parse.
+        """
+        with pytest.raises(ParseError) as excinfo:
+            parse("faith > hope within:chapter")
+        assert "chapter" in str(excinfo.value)
 
     def test_scope_lang(self) -> None:
         plan = parse("lemma:pistis > lemma:elpis lang:grc")
@@ -343,7 +380,7 @@ class TestParseDirectives:
 
     def test_multiple_directives(self) -> None:
         plan = parse("lemma:pistis > lemma:elpis within:verse lang:grc corpus:nt")
-        assert plan.scope.unit == ScopeUnit.VERSE
+        assert isinstance(plan.scope.unit, ScopeUnitVerse)
         assert plan.scope.language == "grc"
         assert plan.scope.corpus == "nt"
 
@@ -439,7 +476,7 @@ class TestDoc07Examples:
         assert plan.sequence.operators[1].gap is None
         assert plan.scope.corpus == "nt"
         assert plan.scope.language == "grc"
-        assert plan.scope.unit == ScopeUnit.VERSE
+        assert isinstance(plan.scope.unit, ScopeUnitVerse)
         assert plan.mode == "exact"
 
     def test_example_3_polarity_marked(self) -> None:
@@ -450,7 +487,7 @@ class TestDoc07Examples:
         plan = parse(dsl)
         assert all(s.polarity == "+" for s in plan.sequence.steps)
         assert plan.scope.corpus == "nt"
-        assert plan.scope.unit == ScopeUnit.VERSE
+        assert isinstance(plan.scope.unit, ScopeUnitVerse)
         assert plan.mode == "conceptual"
 
     def test_example_4_alternatives_and_optional(self) -> None:
@@ -475,7 +512,7 @@ class TestDoc07Examples:
         vals = [s.value for s in plan.sequence.inner.steps]
         assert vals == ["faith", "hope", "love"]
         assert plan.scope.corpus == "nt"
-        assert plan.scope.unit == ScopeUnit.VERSE
+        assert isinstance(plan.scope.unit, ScopeUnitVerse)
         assert plan.mode == "conceptual"
 
     def test_example_6_expansion(self) -> None:

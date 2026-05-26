@@ -30,7 +30,8 @@ from src.engine.models import (
     RegistryRequired,
     RetrievalResult,
     ScopeConstraint,
-    ScopeUnit,
+    ScopeUnitVerse,
+    ScopeUnitWindow,
     SequenceExpr,
     StepExpr,
     StepMatch,
@@ -54,13 +55,41 @@ class TestEnums:
     def test_ranking_factor_values(self) -> None:
         assert len(RankingFactor) == 6
 
-    def test_scope_unit_values(self) -> None:
-        assert set(ScopeUnit) == {
-            "token", "clause", "verse", "sentence", "pericope", "chapter"
-        }
-
     def test_expansion_direction_values(self) -> None:
         assert set(ExpansionDirection) == {"forward", "backward", "both"}
+
+
+class TestScopeUnitDiscriminatedUnion:
+    """Slice L: ScopeUnit became a discriminated union of ScopeUnitVerse + ScopeUnitWindow."""
+
+    def test_verse_default(self) -> None:
+        u = ScopeUnitVerse()
+        assert u.kind == "verse"
+
+    def test_window_n(self) -> None:
+        u = ScopeUnitWindow(n=50)
+        assert u.kind == "window"
+        assert u.n == 50
+
+    def test_window_frozen(self) -> None:
+        u = ScopeUnitWindow(n=10)
+        with pytest.raises(ValidationError):
+            u.n = 20
+
+    def test_round_trip_verse(self) -> None:
+        sc = ScopeConstraint(unit=ScopeUnitVerse())
+        d = sc.model_dump()
+        assert d["unit"] == {"kind": "verse"}
+        sc2 = ScopeConstraint.model_validate(d)
+        assert isinstance(sc2.unit, ScopeUnitVerse)
+
+    def test_round_trip_window(self) -> None:
+        sc = ScopeConstraint(unit=ScopeUnitWindow(n=25))
+        d = sc.model_dump()
+        assert d["unit"] == {"kind": "window", "n": 25}
+        sc2 = ScopeConstraint.model_validate(d)
+        assert isinstance(sc2.unit, ScopeUnitWindow)
+        assert sc2.unit.n == 25
 
 
 class TestMorphFilter:
@@ -126,16 +155,16 @@ class TestScopeConstraint:
             corpus="nt",
             language="grc",
             books=["rom", "1cor"],
-            unit=ScopeUnit.VERSE,
+            unit=ScopeUnitVerse(),
         )
         assert sc.books == ["rom", "1cor"]
-        assert sc.unit == "verse"
+        assert isinstance(sc.unit, ScopeUnitVerse)
 
     def test_dump(self) -> None:
-        sc = ScopeConstraint(corpus="nt", unit=ScopeUnit.VERSE)
+        sc = ScopeConstraint(corpus="nt", unit=ScopeUnitVerse())
         d = sc.model_dump()
         assert d["corpus"] == "nt"
-        assert d["unit"] == "verse"
+        assert d["unit"] == {"kind": "verse"}
 
 
 class TestExpansionDirective:
@@ -390,7 +419,7 @@ class TestJsonRoundTrips:
             scope=ScopeConstraint(
                 corpus="nt",
                 language="grc",
-                unit=ScopeUnit.VERSE,
+                unit=ScopeUnitVerse(),
             ),
             mode="exact",
         )
@@ -416,7 +445,7 @@ class TestJsonRoundTrips:
                     OrderOperator(type=OperatorType.PRECEDENCE),
                 ],
             ),
-            scope=ScopeConstraint(corpus="nt", unit=ScopeUnit.VERSE),
+            scope=ScopeConstraint(corpus="nt", unit=ScopeUnitVerse()),
             mode="conceptual",
         )
         json_str = plan.model_dump_json()
@@ -477,7 +506,7 @@ class TestJsonRoundTrips:
                     ],
                 ),
             ),
-            scope=ScopeConstraint(corpus="nt", unit=ScopeUnit.VERSE),
+            scope=ScopeConstraint(corpus="nt", unit=ScopeUnitVerse()),
             mode="conceptual",
         )
         json_str = plan.model_dump_json()

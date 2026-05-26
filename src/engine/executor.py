@@ -52,7 +52,8 @@ from src.engine.models import (
     QueryPlan,
     RegistryRequired,
     ScopeConstraint,
-    ScopeUnit,
+    ScopeUnitVerse,
+    ScopeUnitWindow,
     SequenceExpr,
     StepMatch,
     UnsupportedPlanShape,
@@ -83,6 +84,17 @@ def execute(
     lemmas in the registry (concept absent or not seeded).
     """
     sequence = validate_plan_shape(plan, scope)
+
+    # Slice L Phase 1: ScopeUnitWindow shape is accepted at validate_plan_shape
+    # so the AST + parser tests pass; the executor body that follows still
+    # implements the verse-tuple path only. Phase 2 swaps in the
+    # global_position window path and lifts this guard.
+    if isinstance(scope.unit, ScopeUnitWindow):
+        raise UnsupportedPlanShape(
+            "scope.unit=ScopeUnitWindow execution is not yet implemented "
+            "(Slice L Phase 2 ships it)",
+            path="$.scope.unit",
+        )
 
     # The validated MVP shape guarantees every step is a NodeRef.
     steps: list[NodeRef] = [step for step in sequence.steps]  # type: ignore[misc]
@@ -286,12 +298,17 @@ def validate_plan_shape(plan: QueryPlan, scope: ScopeConstraint) -> SequenceExpr
                 path=path,
             )
 
-    # Scope unit: treat None as verse; only VERSE is supported explicitly.
-    if scope.unit is not None and scope.unit != ScopeUnit.VERSE:
+    # Scope unit (Slice L): treat None as verse. ScopeUnitVerse is supported
+    # in the verse-tuple step path below; ScopeUnitWindow is accepted at the
+    # shape gate but executed via the global_position path (Phase 2). Other
+    # discriminator kinds (programmatically constructed) fail loudly here as
+    # the second wall.
+    if scope.unit is not None and not isinstance(
+        scope.unit, (ScopeUnitVerse, ScopeUnitWindow)
+    ):
         raise UnsupportedPlanShape(
-            f"scope unit {scope.unit.value!r} is not supported by the "
-            "MVP executor (only VERSE; corpus has no clause/sentence/"
-            "pericope/chapter annotations)",
+            f"scope unit {type(scope.unit).__name__!r} is not supported by "
+            "the MVP executor (supported: ScopeUnitVerse, ScopeUnitWindow)",
             path="$.scope.unit",
         )
 

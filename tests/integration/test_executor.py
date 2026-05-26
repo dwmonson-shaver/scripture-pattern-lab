@@ -30,7 +30,7 @@ from src.engine.models import (
     OrderOperator,
     QueryPlan,
     ScopeConstraint,
-    ScopeUnit,
+    ScopeUnitVerse,
     SequenceExpr,
 )
 from src.engine.parser import parse
@@ -154,7 +154,7 @@ def _make_lemma_sequence(
         version="0.1",
         source=" > ".join(f"lemma:{lemma}" for lemma in lemmas),
         sequence=SequenceExpr(steps=steps, operators=operators),
-        scope=scope or ScopeConstraint(unit=ScopeUnit.VERSE),
+        scope=scope or ScopeConstraint(unit=ScopeUnitVerse()),
         mode="exact",
     )
 
@@ -220,7 +220,7 @@ def test_concept_step_resolves_via_registry(clean_registry: Engine) -> None:
             steps=[NodeRef(type=NodeType.CONCEPT, value="greeting")],
             operators=[],
         ),
-        scope=ScopeConstraint(unit=ScopeUnit.VERSE),
+        scope=ScopeConstraint(unit=ScopeUnitVerse()),
         mode="conceptual",
     )
     results = execute(plan, plan.scope, engine, concept_registry=registry)
@@ -235,7 +235,7 @@ def test_book_filter_normalizes_abbreviation(loaded_3jn_engine: Engine) -> None:
     """``scope.books=['3jn']`` resolves through book_abbrev_to_bb to BB '25'."""
     plan = _make_lemma_sequence(
         ["Γάϊος"],
-        scope=ScopeConstraint(unit=ScopeUnit.VERSE, books=["3jn"]),
+        scope=ScopeConstraint(unit=ScopeUnitVerse(), books=["3jn"]),
     )
     results = execute(plan, plan.scope, loaded_3jn_engine)
     assert len(results) >= 1

@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Discriminator,
+    Field,
     NonNegativeFloat,
     NonNegativeInt,
     Tag,
@@ -56,17 +57,6 @@ class RankingFactor(StrEnum):
     CONTEXTUAL_COHERENCE = "contextual_coherence"
 
 
-class ScopeUnit(StrEnum):
-    """Structural units for scope constraints."""
-
-    TOKEN = "token"
-    CLAUSE = "clause"
-    VERSE = "verse"
-    SENTENCE = "sentence"
-    PERICOPE = "pericope"
-    CHAPTER = "chapter"
-
-
 class ExpansionDirection(StrEnum):
     """Directions for expansion directives."""
 
@@ -81,6 +71,45 @@ class ExpansionDirection(StrEnum):
 
 Polarity = Literal["+", "-", "±"]
 MatchMode = Literal["exact", "variant", "conceptual", "hybrid"]
+
+
+# ---------------------------------------------------------------------------
+# ScopeUnit — discriminated union (Slice L)
+#
+# Replaces the prior ``ScopeUnit(StrEnum)`` flat enum. Two siblings ship:
+# ``ScopeUnitVerse`` (legacy single-verse boundary) and ``ScopeUnitWindow(n)``
+# (cross-verse window of N tokens, addressed via ``global_position``). Adding
+# ``ScopeUnitSentence`` / ``ScopeUnitClause`` etc. later is just another
+# sibling with a unique ``kind`` tag.
+# ---------------------------------------------------------------------------
+
+
+class ScopeUnitVerse(BaseModel):
+    """Single-verse scope (legacy MVP unit; default when ``unit is None``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["verse"] = "verse"
+
+
+class ScopeUnitWindow(BaseModel):
+    """Cross-verse window of ``n`` tokens, anchored on the first match's
+    ``global_position``. Book boundary blocked; chapter boundary crossable
+    (Decision #3). ``n == 0`` is rejected at parse time (Decision #8); the
+    capability validator emits ``WINDOW_EXCEEDS_MAX`` when ``n`` exceeds
+    ``CapabilityRegistry.window_max_tokens`` (Decision #5).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["window"] = "window"
+    n: int
+
+
+ScopeUnit = Annotated[
+    Union[ScopeUnitVerse, ScopeUnitWindow],
+    Field(discriminator="kind"),
+]
 
 
 # ---------------------------------------------------------------------------
