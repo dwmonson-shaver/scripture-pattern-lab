@@ -744,6 +744,7 @@
 - Files: src/nlp/prompts/system_prompt.py; src/nlp/translator.py (consumer); docs/canonical/09_backend-service-boundaries.md §2 (codifies)
 - Spec refs: REQ:09.nl-to-dsl
 - Cross-refs: DEC-060 (Slice E agent-facing-docs directory boundary — cookbook lives in `docs/agent/`); OQ-H1 (slice review: is the static cookbook embedding sufficient?).
+- Amended: 2026-05-26 (Slice M, design Decision 5): Single-shot translation remains the default and the cache-friendly base case. Multi-turn refinement is an explicit, caller-driven opt-in carried in the request body as `prior_turns`; when `prior_turns` is non-empty the translator assembles a multi-message array (system prompt unchanged and still cached per DEC-071) instead of a single user message. The server holds no conversation state between requests (proposed DEC-098). The `llm_client.py` base-class docstring now cites both DEC-071 and DEC-098. This amendment scopes "single-shot" as the default while authorizing the opt-in; it does NOT rewrite the original decision — the static cached system prompt is intact and unchanged. The opt-in is carried in the request body (not an env var) because the conversation is per-request data, not deployment config. Files: src/nlp/llm_client.py (`complete_turns` seam + docstring). Cross-refs: proposed DEC-098 (stateless echo-back; finalized in Slice M Phase M5).
 
 ## DEC-072 — No confidence-threshold gate; confidence is informational, not control
 - Status: Accepted

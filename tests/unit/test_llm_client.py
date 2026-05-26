@@ -34,6 +34,11 @@ class TestLLMClientBase:
         with pytest.raises(NotImplementedError):
             client.complete("system", "user")
 
+    def test_base_complete_turns_raises_not_implemented(self) -> None:
+        client = LLMClient()
+        with pytest.raises(NotImplementedError):
+            client.complete_turns("system", [{"role": "user", "content": "u"}])
+
     def test_anthropic_subclasses_base(self) -> None:
         with patch("src.nlp.llm_client.anthropic.Anthropic"):
             client = AnthropicLLMClient(api_key="test-key")
@@ -191,6 +196,148 @@ class TestAnthropicErrorWrapping:
             client = AnthropicLLMClient(api_key="sk-test")
             with pytest.raises(exc_class):
                 client.complete("s", "u")
+
+
+class TestAnthropicCompleteTurns:
+    def test_forwards_turns_and_system_verbatim(self) -> None:
+        turns = [
+            {"role": "user", "content": "original NL"},
+            {"role": "assistant", "content": "Clarification: what window?"},
+            {"role": "user", "content": "within 5 verses"},
+        ]
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            inner.messages.create.return_value = _fake_message("DSL: faith ~{0,5} hope")
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            result = client.complete_turns("system text", turns)
+        assert result == "DSL: faith ~{0,5} hope"
+        inner.messages.create.assert_called_once_with(
+            model="claude-opus-4-7",
+            max_tokens=1024,
+            system="system text",
+            messages=turns,
+        )
+        # `turns` forwarded verbatim (same object identity, no rewrapping).
+        assert inner.messages.create.call_args.kwargs["messages"] is turns
+
+    def test_filters_non_text_blocks(self) -> None:
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            text_block = MagicMock()
+            text_block.type = "text"
+            text_block.text = "real text"
+            tool_block = MagicMock()
+            tool_block.type = "tool_use"
+            response = MagicMock()
+            response.content = [tool_block, text_block]
+            inner.messages.create.return_value = response
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            turns = [{"role": "user", "content": "u"}]
+            assert client.complete_turns("s", turns) == "real text"
+
+
+class TestAnthropicCompleteTurnsErrorWrapping:
+    @pytest.mark.parametrize(
+        "exc_factory",
+        [
+            lambda: anthropic.APIConnectionError(request=MagicMock()),
+            lambda: anthropic.APITimeoutError(request=MagicMock()),
+        ],
+    )
+    def test_network_errors_wrap_as_llm_unavailable(self, exc_factory) -> None:
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            inner.messages.create.side_effect = exc_factory()
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(LLMUnavailable):
+                client.complete_turns("s", [{"role": "user", "content": "u"}])
+
+    @pytest.mark.parametrize(
+        ("exc_class", "status_code", "name"),
+        [
+            (anthropic.RateLimitError, 429, "RateLimitError"),
+            (anthropic.AuthenticationError, 401, "AuthenticationError"),
+            (anthropic.PermissionDeniedError, 403, "PermissionDeniedError"),
+            (anthropic.InternalServerError, 500, "InternalServerError"),
+        ],
+    )
+    def test_status_errors_wrap_as_llm_unavailable(
+        self, exc_class, status_code: int, name: str
+    ) -> None:
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            response = MagicMock()
+            response.status_code = status_code
+            response.headers = {}
+            inner.messages.create.side_effect = exc_class(
+                message=f"{name} fault", response=response, body=None
+            )
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(LLMUnavailable, match=name):
+                client.complete_turns("s", [{"role": "user", "content": "u"}])
+
+    @pytest.mark.parametrize(
+        ("exc_class", "name"),
+        [
+            (anthropic.BadRequestError, "BadRequestError"),
+            (anthropic.NotFoundError, "NotFoundError"),
+            (anthropic.UnprocessableEntityError, "UnprocessableEntityError"),
+            (anthropic.ConflictError, "ConflictError"),
+        ],
+    )
+    def test_4xx_request_bugs_propagate_raw_not_as_llm_unavailable(
+        self, exc_class, name: str
+    ) -> None:
+        # Same classification as complete(): 4xx code-bug errors propagate raw
+        # so the route returns 500 internal_error, not 503 llm_unavailable
+        # (DEC-070; H-H1H2-001). The shared _UNAVAILABLE_ERRORS tuple guarantees
+        # both seams classify identically.
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            response = MagicMock()
+            response.status_code = 400
+            response.headers = {}
+            inner.messages.create.side_effect = exc_class(
+                message=f"{name} fault", response=response, body=None
+            )
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+            with pytest.raises(exc_class):
+                client.complete_turns("s", [{"role": "user", "content": "u"}])
+
+
+class TestCachePrefixRegressionGuard:
+    """DEC-071 cache prefix must not drift between the two seams (design Risk).
+
+    The static SYSTEM_PROMPT is the cached prefix; both complete() and
+    complete_turns() must pass it through as `system=` byte-identically so the
+    Anthropic prompt-cache prefix keeps hitting. Only the per-request `messages`
+    array differs.
+    """
+
+    def test_system_arg_byte_identical_across_seams(self) -> None:
+        system_prompt = "STATIC CACHED PREFIX\nline 2\nλόγος"
+        with patch("src.nlp.llm_client.anthropic.Anthropic") as anth_cls:
+            inner = MagicMock()
+            inner.messages.create.return_value = _fake_message("DSL: x")
+            anth_cls.return_value = inner
+            client = AnthropicLLMClient(api_key="sk-test")
+
+            client.complete(system_prompt, "user text")
+            single_shot_system = inner.messages.create.call_args.kwargs["system"]
+
+            client.complete_turns(
+                system_prompt, [{"role": "user", "content": "user text"}]
+            )
+            multi_turn_system = inner.messages.create.call_args.kwargs["system"]
+
+        assert single_shot_system == multi_turn_system
+        assert single_shot_system is system_prompt
+        assert multi_turn_system is system_prompt
 
 
 class TestBuildFromEnv:
