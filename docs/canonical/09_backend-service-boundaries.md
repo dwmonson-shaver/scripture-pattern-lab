@@ -205,11 +205,38 @@ issues; they propagate raw and the route returns 500 `internal_error`.
   user judgment without corpus-grounded basis (corpus-is-ground-truth
   charter, DEC-024).
 
-**MVP implementation**: Single LLM call with a static system prompt
-assembled at module import time from `docs/agent/dsl-cookbook.md` plus a
-compile-only translator framing (DEC-071). No fine-tuning, no multi-turn
-refinement. LLM provider: Anthropic Claude (DEC-067 confirms the MVP
-technology stack pin).
+**MVP implementation**: Single-shot by default — one LLM call with a static
+system prompt assembled at module import time from `docs/agent/dsl-cookbook.md`
+plus a compile-only translator framing (DEC-071). No fine-tuning. LLM provider:
+Anthropic Claude (DEC-067 confirms the MVP technology stack pin).
+
+**Caller-driven refinement** (Slice M; DEC-098, DEC-099, DEC-100, DEC-101): the
+single-shot contract is the default and unchanged. A caller MAY thread a prior
+conversation through the optional `prior_turns` field on `QueryNLRequest` (a
+bounded `list[ConversationTurn]{role, content}`, `max_length=20` as a resource
+guard only — no semantic round cap). The refinement is **stateless echo-back**:
+the server holds NO conversation state, NO session id, and NO storage between
+requests — the client re-sends the full turn list each request, so each request
+is self-contained (DEC-098). This is **not a new route** — `POST
+/api/v1/query/nl` is extended, not duplicated (DEC-099). When `prior_turns` is
+empty (the default), behavior is byte-identical to the single-shot path:
+`translate()` calls `complete()` with a single-element `messages` array. When
+`prior_turns` is non-empty, `translate()` assembles a multi-message array
+(`complete_turns()`) — the original user query (rebuilt with the registry
+summaries on the first user turn), the prior turns verbatim, then the current
+`nl_query` as the latest user turn. The static `SYSTEM_PROMPT` prefix stays the
+cached prefix on BOTH seams (DEC-071 unchanged); only the per-request `messages`
+array grows, so the cache prefix is identical across the two paths. The app→nlp
+boundary is crossed cleanly: `run_nl_query` converts the app-schema
+`ConversationTurn` objects to nlp-layer `Message` dicts before calling
+`translate()` (src/nlp never imports from src/app). An answered clarification
+(a resubmit whose `prior_turns` carry the original query + the clarification
+question, with a window-size answer as the new `nl_query`) flows the full
+pipeline and returns a normal executed `QueryNLResponse`. No confidence-driven
+auto-retry and no silent window default (DEC-072, DEC-097): the server never
+decides to stop clarifying — the caller quits by not resubmitting. Frontend
+multi-turn UI is out of scope for this slice (DEC-101); only the Nuxt proxy
+passthrough was widened.
 
 **Output format protocol**: The system prompt instructs the LLM to emit
 a structured response:
