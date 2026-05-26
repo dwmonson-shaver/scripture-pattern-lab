@@ -114,6 +114,7 @@ def explain(
                 match_type=c.match_type,
                 score=None,
                 explanation=explanation,
+                proximity=c.proximity,
             )
         )
     validation_notes = _format_validation_notes(validation)
@@ -193,23 +194,82 @@ def _summary_prose(
 
 
 def _per_candidate_prose(candidate: MatchCandidate, sequence_label: str) -> str:
-    """Compose a one-paragraph explanation for a single MatchCandidate."""
+    """Compose a one-paragraph explanation for a single MatchCandidate.
+
+    Slice L: when the candidate carries a ``ProximityInfo`` envelope, append
+    a deterministic proximity clause naming the window N, the actual span,
+    the cross-verse / cross-chapter flags, and the top-5 intervening lemmas
+    (with "+M more" for the tail). LLM augmentation deliberately skipped for
+    proximity prose this slice (Decision #11) — re-opening Slice K's
+    no-fabrication test surface is out of scope.
+    """
     label = _truncate_sequence_label(sequence_label)
     if not candidate.alignment:
-        return (
+        base = (
             f'Match for "{label}" at {candidate.reference} '
             f"(match type: {candidate.match_type})."
         )
-    pieces: list[str] = []
-    for step in candidate.alignment:
-        if step.node_value and step.token.lemma != step.node_value:
-            pieces.append(f"{step.token.lemma} (for {step.node_value})")
+    else:
+        pieces: list[str] = []
+        for step in candidate.alignment:
+            if step.node_value and step.token.lemma != step.node_value:
+                pieces.append(f"{step.token.lemma} (for {step.node_value})")
+            else:
+                pieces.append(step.token.lemma)
+        aligned = ", ".join(pieces)
+        base = (
+            f'At {candidate.reference}: {aligned}. '
+            f"Match type: {candidate.match_type}."
+        )
+
+    if candidate.proximity is None:
+        return base
+    return f"{base} {_proximity_clause(candidate)}"
+
+
+_PROSE_INTERVENING_CAP = 5
+
+
+def _proximity_clause(candidate: MatchCandidate) -> str:
+    """Deterministic proximity prose for a windowed candidate (Slice L
+    Decision #11). Names window N, span, cross-boundary flags, and the
+    top-5 intervening lemmas (rest summed into "+M more")."""
+    prox = candidate.proximity
+    assert prox is not None  # caller guards
+    boundary_phrase = ""
+    if prox.crosses_chapter:
+        boundary_phrase = " crossing chapter boundary"
+    elif prox.crosses_verse:
+        boundary_phrase = " crossing verse boundary"
+
+    # End-reference: last matched token's chapter:verse, if multi-verse.
+    last = candidate.tokens[-1]
+    first = candidate.tokens[0]
+    if (last.chapter, last.verse) != (first.chapter, first.verse):
+        last_ref = f"{first.chapter}:{first.verse}–{last.chapter}:{last.verse}"
+        span_phrase = f"spanning {candidate.reference.split()[0]} {last_ref}"
+    else:
+        span_phrase = f"all at {candidate.reference}"
+
+    intervening_items = list(prox.intervening_lemmas.items())
+    intervening_items.sort(key=lambda kv: (-kv[1], kv[0]))
+    head = intervening_items[:_PROSE_INTERVENING_CAP]
+    tail_count = (
+        sum(v for _, v in intervening_items[_PROSE_INTERVENING_CAP:])
+        + prox.other_count
+    )
+    if head:
+        head_phrase = ", ".join(f"{lemma} ({count})" for lemma, count in head)
+        if tail_count > 0:
+            interv_phrase = f"intervening lemmas: {head_phrase} (+{tail_count} more)"
         else:
-            pieces.append(step.token.lemma)
-    aligned = ", ".join(pieces)
+            interv_phrase = f"intervening lemmas: {head_phrase}"
+    else:
+        interv_phrase = "no intervening tokens"
+
     return (
-        f'At {candidate.reference}: {aligned}. '
-        f"Match type: {candidate.match_type}."
+        f"Window N={prox.window_n}; span {prox.span_tokens} tokens, "
+        f"{span_phrase}{boundary_phrase}; {interv_phrase}."
     )
 
 

@@ -150,13 +150,24 @@ def translate(
     nl_query: str,
     context: TranslationContext,
     llm_client: LLMClient,
-) -> TranslationResult
+) -> TranslationSuccess | TranslationNeedsClarification
 
-class TranslationResult(BaseModel):  # frozen Pydantic v2
+class TranslationSuccess(BaseModel):  # frozen Pydantic v2
+    kind: Literal["success"] = "success"
     dsl: str                    # Generated DSL string (load-bearing field)
-    confidence: float = 1.0     # Self-assessed translation fidelity (DEC-072)
+    confidence: float = 0.0     # Self-assessed translation fidelity (DEC-072)
     alternatives: list[str] = []  # Alternative DSL interpretations if ambiguous
     explanation: str = ""       # Translator's prose justification
+
+# Slice L Decision #6: when the NL implies cross-verse proximity but is
+# silent on the window size, the translator returns this variant instead
+# of guessing a default. The route surfaces it as a 200 with a
+# ``clarification`` field; no query executes.
+class TranslationNeedsClarification(BaseModel):
+    kind: Literal["needs_clarification"] = "needs_clarification"
+    question: str
+    suggested_windows: list[int] = [20, 50, 100]
+    nl_source: str
 
 class TranslationContext(BaseModel):  # frozen Pydantic v2
     capability_registry_summary: str
@@ -238,20 +249,40 @@ LLM and is gated by both `integration` and `live_llm` markers, plus
 runtime env-var assertions for `DATABASE_URL` and `ANTHROPIC_API_KEY`.
 Default `pytest` excludes both markers.
 
-**Response envelope**: `POST /api/v1/query/nl` returns `QueryNLResponse`
-which subclasses `QueryDSLResponse` (DEC-069) and adds one field:
+**Response envelope**: `POST /api/v1/query/nl` returns `QueryNLResponse`.
+Slice L Decision #6 reshaped this from a `QueryDSLResponse` subclass into a
+two-variant flat schema (no inheritance — easier for frontend code-gen and
+clearer about the two paths). Both shapes return HTTP 200:
+
 ```python
-class QueryNLResponse(QueryDSLResponse):
-    translation: TranslationMetadata  # confidence, alternatives, explanation
+class QueryNLResponse(BaseModel):  # frozen
+    # Executed-path fields (set together when validation/result/explanation
+    # apply); ``clarification`` is None.
+    query: str
+    validation: ValidationResult | None = None
+    result: RetrievalResult | None = None
+    explanation: ExplainedResultSet | None = None
+    translation: TranslationMetadata | None = None
+    # Clarification-path field (set when the translator emitted
+    # ``Clarification:`` instead of ``DSL:``); the four pipeline fields
+    # are None.
+    clarification: ClarificationPayload | None = None
 
 class TranslationMetadata(BaseModel):  # frozen
     confidence: float
     alternatives: list[str]
     explanation: str
+
+class ClarificationPayload(BaseModel):  # frozen
+    question: str
+    suggested_windows: list[int]
+    nl_source: str
 ```
-The `query` field carries the *compiled* DSL (what the corpus actually
-saw), not the original NL — original NL is in the request body
-(transparency rule, REQ:01).
+
+On the executed path, the `query` field carries the *compiled* DSL (what
+the corpus actually saw), not the original NL — original NL is in the
+request body (transparency rule, REQ:01). On the clarification path, the
+`query` field echoes the original NL; no DSL was compiled.
 
 <!-- REQ:09.dsl-parser -->
 ### 3. DSL Parser
@@ -289,13 +320,28 @@ def validate(plan: QueryPlan, registry: CapabilityRegistry) -> ValidationResult
 def execute(plan: QueryPlan, scope: ScopeConstraint) -> list[MatchCandidate]
 
 class MatchCandidate:
-    tokens: list[Token]         # The matched token sequence
-    reference: str              # e.g., "1Cor 13:13"
-    match_type: str             # "exact", "variant", "conceptual"
-    alignment: list[StepMatch]  # How each query step mapped to corpus tokens
+    tokens: list[Token]              # The matched token sequence
+    reference: str                   # e.g., "1Cor 13:13"
+    match_type: str                  # "exact", "variant", "conceptual"
+    alignment: list[StepMatch]       # How each query step mapped to corpus tokens
+    proximity: ProximityInfo | None  # Slice L — populated when scope.unit is
+                                     # ScopeUnitWindow(n); None for verse-scope hits.
+                                     # match_type and proximity are orthogonal axes:
+                                     # a conceptual hit at window=50 is
+                                     # match_type="conceptual" AND
+                                     # proximity=ProximityInfo(window_n=50, ...).
+
+class ProximityInfo:
+    window_n: int                    # User-declared window N
+    span_tokens: int                 # Actual matched span (<= window_n)
+    crosses_verse: bool
+    crosses_chapter: bool
+    window_tokens: list[Token]       # Every token in the window
+    intervening_lemmas: dict[str, int]  # Top-20 non-matched lemmas by count
+    other_count: int                 # Tail beyond top-20
 ```
 
-**MVP implementation**: SQL-based sequence search against the tokens table. For each step in the sequence, generate candidate token positions, then verify ordering and gap constraints. This is not elegant at scale but is correct and sufficient for 138K tokens.
+**MVP implementation**: SQL-based sequence search against the tokens table. For each step in the sequence, generate candidate token positions, then verify ordering and gap constraints. Slice L adds the `ScopeUnitWindow(n)` path: anchored on the first matched token's `global_position`, every subsequent step is constrained to `[base.gp, base.gp + n]` in the same book. The COOCCURRENCE operator (`~`) executes through the same window predicate with `abs(next − prev)` arithmetic (no ordering constraint). This is not elegant at scale but is correct and sufficient for 138K tokens.
 
 **Future**: For larger corpora, replace SQL scans with indexed sequence search (inverted index + position lists).
 

@@ -639,6 +639,96 @@ class TestVariantMatchType:
         assert "variant" in ers.results[0].explanation.lower()
 
 
+class TestProximityProse:
+    """Slice L Phase 6: ProximityInfo populates the per-candidate prose and
+    propagates to ExplainedResult."""
+
+    def _windowed_candidate(self) -> MatchCandidate:
+        from src.engine.models import MatchedToken, ProximityInfo
+
+        # Two matched tokens in different verses but same chapter.
+        t1 = MatchedToken(
+            id=1, book="45", chapter=5, verse=1, position=1,
+            global_position=100, surface_form="πίστιν", normalized_form="πιστιν",
+            lemma="πίστις", pos="N",
+        )
+        t2 = MatchedToken(
+            id=2, book="45", chapter=5, verse=5, position=3,
+            global_position=120, surface_form="ἀγάπη", normalized_form="αγαπη",
+            lemma="ἀγάπη", pos="N",
+        )
+        prox = ProximityInfo(
+            window_n=50,
+            span_tokens=20,
+            crosses_verse=True,
+            crosses_chapter=False,
+            window_tokens=[t1, t2],
+            intervening_lemmas={"και": 5, "δε": 3, "ο": 2, "θεος": 1},
+            other_count=0,
+        )
+        return MatchCandidate(
+            tokens=[t1, t2],
+            reference="Rom 5:1",
+            match_type="exact",
+            alignment=[
+                StepMatch(
+                    step_index=0, node_type=NodeType.LEMMA,
+                    node_value="πίστις", resolved_lemmas=["πίστις"], token=t1,
+                ),
+                StepMatch(
+                    step_index=1, node_type=NodeType.LEMMA,
+                    node_value="ἀγάπη", resolved_lemmas=["ἀγάπη"], token=t2,
+                ),
+            ],
+            proximity=prox,
+        )
+
+    def test_prose_includes_window_n(self) -> None:
+        from src.engine.parser import parse
+
+        plan = parse("lemma:πίστις > lemma:ἀγάπη within:window(50)")
+        c = self._windowed_candidate()
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        prose = ers.results[0].explanation
+        assert "N=50" in prose
+        assert "span 20 tokens" in prose
+        assert "crossing verse boundary" in prose
+
+    def test_prose_lists_top_intervening_lemmas(self) -> None:
+        from src.engine.parser import parse
+
+        plan = parse("lemma:πίστις > lemma:ἀγάπη within:window(50)")
+        c = self._windowed_candidate()
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        prose = ers.results[0].explanation
+        # Top-5 (capped); here we have 4, so all appear.
+        assert "και" in prose
+        assert "δε" in prose
+
+    def test_explained_result_carries_proximity_field(self) -> None:
+        from src.engine.parser import parse
+
+        plan = parse("lemma:πίστις > lemma:ἀγάπη within:window(50)")
+        c = self._windowed_candidate()
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        assert ers.results[0].proximity is not None
+        assert ers.results[0].proximity.window_n == 50
+
+    def test_no_proximity_clause_when_proximity_is_none(self) -> None:
+        plan = _plan_for_concepts("faith", "hope")
+        c = _candidate([("πίστις", "faith"), ("ἐλπίς", "hope")])
+        # _candidate doesn't set proximity, so it's None.
+        result = RetrievalResult(candidates=[c], stages_used=["symbolic"])
+        ers = explain(result, plan, _supported_validation())
+        prose = ers.results[0].explanation
+        assert "N=" not in prose
+        assert "Window" not in prose
+        assert ers.results[0].proximity is None
+
+
 class TestPoseQualityFixes:
     """Confirms F-F4F5-002 and F-F4F5-003 closures: no redundant lines."""
 

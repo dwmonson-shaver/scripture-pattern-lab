@@ -82,8 +82,10 @@ CapabilityRegistry
 ├── operators: string[]                    # Supported operator types
 ├── matchModes: string[]                   # Supported match modes
 ├── scopeFields: string[]                  # Supported scope constraint fields
+├── scopeUnits: string[]                   # Executable ScopeUnit kinds (Slice L)
 ├── maxSequenceLength: integer             # Max steps in a sequence
 ├── maxGap: integer | null                 # Max gap constraint
+├── windowMaxTokens: integer               # Max n for ScopeUnitWindow (Slice L)
 ├── polaritySupport: boolean               # Is polarity matching available
 ├── inverseSupport: boolean                # Is inverse() resolution available
 ├── expansionSupport: boolean              # Are expansion directives available
@@ -97,11 +99,13 @@ CapabilityRegistry
 {
   "version": "0.1",
   "nodeTypes": ["token", "lemma", "concept", "morph", "wildcard"],
-  "operators": ["precedence", "adjacency"],
+  "operators": ["precedence", "adjacency", "cooccurrence"],
   "matchModes": ["exact", "variant", "conceptual", "hybrid"],
   "scopeFields": ["corpus", "language", "books", "unit"],
+  "scopeUnits": ["verse", "window"],
   "maxSequenceLength": 10,
   "maxGap": null,
+  "windowMaxTokens": 50,
   "polaritySupport": true,
   "inverseSupport": false,
   "expansionSupport": false,
@@ -169,9 +173,12 @@ Verify `QueryPlan.mode` is in `CapabilityRegistry.matchModes`.
 
 <!-- REQ:06.rule-10 -->
 ### 10. Scope validation
-Verify each scope field is supported. Verify corpus and language values exist in the registry.
+Verify each scope field is supported. Verify corpus and language values exist in the registry. Slice L extends rule 10 with two window-related checks:
 
-**Finding codes**: `UNSUPPORTED_SCOPE_FIELD`, `UNKNOWN_CORPUS`, `UNKNOWN_LANGUAGE`
+- `WINDOW_EXCEEDS_MAX` (error): `ScopeUnitWindow.n > windowMaxTokens`.
+- `GAP_NARROWED_BY_WINDOW` (warning, informational): a step-level `gap.max` value larger than the outer window's `n` — the executor honors both (AND-composition) but the narrowing is surfaced explicitly so the user can audit it.
+
+**Finding codes**: `UNSUPPORTED_SCOPE_FIELD`, `UNKNOWN_CORPUS`, `UNKNOWN_LANGUAGE`, `WINDOW_EXCEEDS_MAX`, `GAP_NARROWED_BY_WINDOW`
 
 <!-- REQ:06.rule-11 -->
 ### 11. Sequence length

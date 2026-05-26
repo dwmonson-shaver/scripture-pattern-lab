@@ -561,6 +561,10 @@ class ExplainedResult(BaseModel):
     match_type: Literal["exact", "variant", "conceptual"]
     score: float | None = None
     explanation: str
+    # Slice L Decision #12: mirror of MatchCandidate.proximity so the
+    # frontend chip can render N alongside "proximity" without joining back
+    # to the raw candidate list. ``None`` for verse-scope candidates.
+    proximity: ProximityInfo | None = None
 
 
 class ExplainedResultSet(BaseModel):

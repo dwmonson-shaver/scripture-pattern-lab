@@ -130,8 +130,42 @@ ScopeConstraint
 ├── corpus: string | null        # e.g., "nt", "ot", "lxx"
 ├── language: string | null      # e.g., "grc", "heb", "arc"
 ├── books: string[] | null       # e.g., ["1cor", "rom"]
-├── unit: "token" | "clause" | "verse" | "sentence" | "pericope" | "chapter" | null
+├── unit: ScopeUnit | null       # discriminated union — see below
 ```
+
+### ScopeUnit (Slice L)
+
+`ScopeUnit` is a discriminated union (Pydantic v2; tag field `kind`). Two
+siblings ship today; future slices add the rest:
+
+```
+ScopeUnit = ScopeUnitVerse | ScopeUnitWindow
+
+ScopeUnitVerse
+└── kind: "verse"                # single-verse boundary (legacy MVP unit)
+
+ScopeUnitWindow
+├── kind: "window"
+└── n: int                       # 1 ≤ n ≤ CapabilityRegistry.window_max_tokens
+                                 # window of n tokens, anchored on first match
+```
+
+Surface syntax:
+
+- `within:verse` → `ScopeUnitVerse()`
+- `within:window(N)` → `ScopeUnitWindow(n=N)`. `window(0)` is rejected at
+  parse time; `n > window_max_tokens` is rejected by validator rule 10
+  (`WINDOW_EXCEEDS_MAX`).
+
+Window execution (Slice L): anchored on the first matched token's
+`global_position`; every subsequent step lands in `[base.gp, base.gp + n]`
+within the same `book`. Book boundaries are blocked (different authors /
+scrolls); chapter boundaries are crossable (editorial overlay).
+
+`clause`, `sentence`, `pericope`, `chapter` parsed into the prior `StrEnum`
+but were inert at execute time; in Slice L they fail at parse time. Future
+slices that ship these units will add the corresponding `ScopeUnit*`
+sibling.
 
 ## Match Mode
 
