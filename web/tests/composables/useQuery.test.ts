@@ -102,6 +102,46 @@ describe('useQuery', () => {
     expect(q.pending.value).toBe(false)
   })
 
+  it('run() unwraps the H3-nested envelope production actually sends (J1-4)', async () => {
+    // The Nitro proxy throws createError({ data: envelope }); H3 nests that
+    // under a second `data` key and ofetch exposes the whole response on
+    // err.data — so the canonical envelope arrives at err.data.data. This is
+    // the shape a real browser saw as "no message / code unknown" before the
+    // unwrap fix; the envelope must still reach ErrorPanel intact.
+    fetchStub.mockRejectedValue({
+      statusCode: 422,
+      data: {
+        error: true,
+        url: '/api/sp/query/nl',
+        statusCode: 422,
+        statusMessage: 'Server Error',
+        message: '',
+        data: {
+          detail: {
+            error: 'concept_not_mapped',
+            message: "concept 'humility' is not present in the concept registry",
+            details: { concept_name: 'humility' },
+          },
+        },
+      },
+    })
+    const q = useQuery()
+    q.nlQuery.value = 'humility followed by faith'
+    await q.run()
+
+    expect(q.error.value).toEqual({
+      status: 422,
+      body: {
+        detail: {
+          error: 'concept_not_mapped',
+          message: "concept 'humility' is not present in the concept registry",
+          details: { concept_name: 'humility' },
+        },
+      },
+    })
+    expect(q.response.value).toBeNull()
+  })
+
   it('run() clears stale response/error before issuing', async () => {
     fetchStub.mockResolvedValue(SAMPLE_RESPONSE)
     const q = useQuery()

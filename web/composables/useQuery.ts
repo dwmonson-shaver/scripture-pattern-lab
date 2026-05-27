@@ -20,6 +20,30 @@ export interface ProxyErrorShape {
 }
 
 /**
+ * Extract the canonical backend error envelope (`{ detail: {...} }`) from a
+ * `$fetch` error's `.data`.
+ *
+ * The Nitro proxy re-throws backend errors via `createError({ data: envelope })`.
+ * H3 serializes that with the payload nested under a SECOND `data` key, and
+ * `ofetch` exposes the whole error response on `err.data` — so the canonical
+ * envelope actually arrives at `err.data.data`, not `err.data`. Reading it one
+ * level too shallow is what surfaced "no message / code unknown" to a user for
+ * a backend error that carried a perfectly good message (Bucket J1-4).
+ *
+ * Returns the first shape that actually carries `detail` — the H3-wrapped inner
+ * payload first, then the direct shape — else `null` so the caller synthesizes.
+ */
+export function unwrapErrorBody(raw: unknown): BackendErrorBody | null {
+  if (!raw || typeof raw !== 'object') return null
+  const inner = (raw as { data?: unknown }).data
+  if (inner && typeof inner === 'object' && 'detail' in inner) {
+    return inner as BackendErrorBody
+  }
+  if ('detail' in raw) return raw as BackendErrorBody
+  return null
+}
+
+/**
  * State + run() for the flagship NL query.
  *
  * - `nlQuery` — bound to the textbox via v-model
@@ -48,11 +72,14 @@ export const useQuery = () => {
         body: { nl_query: nlQuery.value },
       })
     } catch (err) {
-      // $fetch errors carry .status and .data (the upstream body).
-      const fetchErr = err as { status?: number; statusCode?: number; data?: BackendErrorBody }
+      // $fetch errors carry .status and .data (the proxy's error response).
+      // The canonical envelope may be H3-wrapped one level deep — see
+      // unwrapErrorBody. Fall back to a synthesized envelope only when no
+      // `detail` is present at any level (genuine network/transport failure).
+      const fetchErr = err as { status?: number; statusCode?: number; data?: unknown }
       error.value = {
         status: fetchErr.status ?? fetchErr.statusCode ?? 0,
-        body: fetchErr.data ?? {
+        body: unwrapErrorBody(fetchErr.data) ?? {
           detail: {
             error: 'network_error',
             message: 'request did not reach the proxy',
