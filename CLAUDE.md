@@ -113,5 +113,5 @@ When the user opens a session and asks "what's next?":
 - Do not write horizontal plans (all DB → all services → all API)
 - Do not put 85+ instructions in a single prompt
 - Do not invent features not in the canonical docs without a design discussion
-- Do not auto-approve concept registry entries — all mappings are human-reviewed
+- Do not auto-approve **conceptual** claims — Tier-2 conceptual groupings/equivalences (claims that different expressions "hang together", incl. cross-lemma and phrase-level mappings) are hypotheses the corpus must test and a human must validate (DEC-081, DEC-102). Tier-1 translation-history mappings (a single English word ↔ the Greek lemmas usually translated as it) MAY be auto-generated from authoritative open lexicon data, but only as machine/lexicon-sourced (`origin='lexicon_imported'`), `verification_state='unverified'`, corrigible, and NEVER auto-promoted to `human_confirmed`. See DEC-102 for the tier distinction.
 - Do not use RAG as the primary retrieval mechanism
