@@ -30,6 +30,7 @@ from src.app.schemas import (
 )
 from src.engine.models import ConceptNotMapped
 from src.engine.parser import parse
+from src.nlp.concept_article import build_educational_section
 from src.nlp.explainer import explain
 from src.nlp.llm_client import LLMClient, Message
 from src.nlp.translator import (
@@ -58,30 +59,45 @@ logger = logging.getLogger(__name__)
 # The env var is read at call time (not lifespan-scoped). The truthy set
 # matches src/app/main.py:137-142's empty-string-as-disabled convention.
 _EXPLAINER_LLM_ENV_VAR = "SPL_EXPLAINER_LLM"
-_EXPLAINER_LLM_TRUTHY = {"1", "true"}
-_EXPLAINER_LLM_FALSY = {"", "0", "false"}
+# Slice N — concept-article (Part 1 §2) LLM opt-in. Same call-time read +
+# truthy convention as the explainer opt-in. The educational article section is
+# layered ON TOP of the deterministic concept + comparative document and NEVER
+# gates auto-creation (DEC-104).
+_CONCEPT_ARTICLE_LLM_ENV_VAR = "SPL_CONCEPT_ARTICLE_LLM"
+_LLM_TRUTHY = {"1", "true"}
+_LLM_FALSY = {"", "0", "false"}
 
 
-def _explainer_llm_opted_in() -> bool:
-    """Return True iff ``SPL_EXPLAINER_LLM`` is set to a recognized truthy value.
+def _env_opted_in(env_var: str) -> bool:
+    """Return True iff ``env_var`` is set to a recognized truthy value.
 
     Unset, empty, "0", "false" (case-insensitive) → False (default).
     "1", "true" (case-insensitive) → True.
     Any other value → False + WARNING log (avoid silent misconfigure).
     """
-    raw = os.environ.get(_EXPLAINER_LLM_ENV_VAR, "")
+    raw = os.environ.get(env_var, "")
     normalized = raw.strip().lower()
-    if normalized in _EXPLAINER_LLM_TRUTHY:
+    if normalized in _LLM_TRUTHY:
         return True
-    if normalized in _EXPLAINER_LLM_FALSY:
+    if normalized in _LLM_FALSY:
         return False
     logger.warning(
         "%s=%r is not a recognized boolean value; treating as disabled. "
         "Set to '1' or 'true' to opt in.",
-        _EXPLAINER_LLM_ENV_VAR,
+        env_var,
         raw,
     )
     return False
+
+
+def _explainer_llm_opted_in() -> bool:
+    """Return True iff ``SPL_EXPLAINER_LLM`` is set to a recognized truthy value."""
+    return _env_opted_in(_EXPLAINER_LLM_ENV_VAR)
+
+
+def _concept_article_llm_opted_in() -> bool:
+    """Return True iff ``SPL_CONCEPT_ARTICLE_LLM`` is set to a truthy value."""
+    return _env_opted_in(_CONCEPT_ARTICLE_LLM_ENV_VAR)
 
 
 class ValidationUnsupported(Exception):  # noqa: N818
@@ -101,6 +117,8 @@ class ValidationUnsupported(Exception):  # noqa: N818
 def _attempt_auto_create_concept(
     concept_name: str,
     engine: Engine,
+    *,
+    article_llm: LLMClient | None = None,
 ) -> AutoCreatedConceptNote | None:
     """Deterministically auto-create a Tier-1 concept for an unmapped term.
 
@@ -111,9 +129,12 @@ def _attempt_auto_create_concept(
     note. Returns None if the term does not resolve to any corpus-present lemma
     (the caller then surfaces the honest dead-end — re-raises ConceptNotMapped).
 
-    NO LLM on this path — the concept and the comparative document section are
-    100% deterministic. The optional LLM educational section (Part 1 §2) is a
-    separate opt-in step layered on top later; it never gates auto-creation.
+    The concept and the comparative document section (Part 1 §1) are 100%
+    deterministic — NO LLM. ``article_llm`` is the OPTIONAL educational section
+    (Part 1 §2): when supplied (NL path + SPL_CONCEPT_ARTICLE_LLM opt-in), the
+    LLM explains the handed comparative evidence and the result is stored WITH
+    citations and a generated label. It NEVER feeds back into the concept and
+    NEVER gates auto-creation — an LLM failure degrades to §1-only.
     """
     resolution = resolve_english_term(concept_name, engine)
     if resolution.unresolved:
@@ -125,10 +146,16 @@ def _attempt_auto_create_concept(
     # it is retrievable later and never regenerated per query.
     if get_document(outcome.concept_name, engine) is None:
         comparative = build_comparative_section(resolution, engine)
+        educational = (
+            build_educational_section(comparative, article_llm)
+            if article_llm is not None
+            else None
+        )
         document = ConceptDocument(
             concept_name=outcome.concept_name,
             short_summary=build_short_summary(resolution),
             part1_comparative=comparative,
+            part1_educational=educational,
         )
         persist_document(document, engine)
 
@@ -253,11 +280,20 @@ def run_nl_query(
     # is unchanged from Slice H/I.
     explainer_llm = llm_client if _explainer_llm_opted_in() else None
 
+    # Slice N: if SPL_CONCEPT_ARTICLE_LLM is opted in, the same LLM client is
+    # passed into the auto-create path so a newly auto-created concept gets a
+    # cited, clearly-labeled educational article section (Part 1 §2) stored
+    # alongside the deterministic comparative section. Off by default; the
+    # concept + comparative section never depend on it. DSL path stays
+    # article-LLM-free (no client there).
+    article_llm = llm_client if _concept_article_llm_opted_in() else None
+
     dsl_response = _run_dsl_pipeline_with_optional_explainer_llm(
         dsl=translation_result.dsl,
         engine=engine,
         registry=registry,
         explainer_llm=explainer_llm,
+        article_llm=article_llm,
     )
 
     return QueryNLResponse(
@@ -280,6 +316,7 @@ def _run_dsl_pipeline_with_optional_explainer_llm(
     engine: Engine,
     registry: ConceptRegistry,
     explainer_llm: LLMClient | None,
+    article_llm: LLMClient | None = None,
 ) -> QueryDSLResponse:
     """Internal: the DSL pipeline with the explainer_llm thread + auto-create.
 
@@ -321,7 +358,9 @@ def _run_dsl_pipeline_with_optional_explainer_llm(
             if attempts >= 1:
                 raise
             attempts += 1
-            created = _attempt_auto_create_concept(exc.concept_name, engine)
+            created = _attempt_auto_create_concept(
+                exc.concept_name, engine, article_llm=article_llm
+            )
             if created is None:
                 # Unresolvable term — honest dead-end (route → 422).
                 raise

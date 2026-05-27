@@ -64,7 +64,9 @@ class TestAutoCreateAndRerun:
                 raise ConceptNotMapped("humility")
             return _fake_result()
 
-        def fake_auto_create(name: str, engine: object) -> AutoCreatedConceptNote:
+        def fake_auto_create(
+            name: str, engine: object, *, article_llm: object = None
+        ) -> AutoCreatedConceptNote:
             return AutoCreatedConceptNote(
                 concept_name=name,
                 lemmas=["ταπεινοφροσύνη"],
@@ -89,7 +91,7 @@ class TestAutoCreateAndRerun:
         def always_unmapped(*args: object, **kwargs: object) -> None:
             raise ConceptNotMapped("zzzznonsense")
 
-        def cannot_resolve(name: str, engine: object) -> None:
+        def cannot_resolve(name: str, engine: object, *, article_llm: object = None) -> None:
             return None  # unresolvable
 
         monkeypatch.setattr("src.app.orchestration.retrieve", always_unmapped)
@@ -111,7 +113,9 @@ class TestAutoCreateAndRerun:
 
         attempts = {"n": 0}
 
-        def fake_auto_create(name: str, engine: object) -> AutoCreatedConceptNote:
+        def fake_auto_create(
+            name: str, engine: object, *, article_llm: object = None
+        ) -> AutoCreatedConceptNote:
             attempts["n"] += 1
             return AutoCreatedConceptNote(
                 concept_name=name, lemmas=["x"], summary="s", document_available=True
@@ -125,3 +129,45 @@ class TestAutoCreateAndRerun:
         with pytest.raises(ConceptNotMapped):
             run_dsl_query("first", fake_engine, empty_registry)
         assert attempts["n"] == 1  # auto-create attempted exactly once
+
+
+class TestArticleLLMOptIn:
+    """The Part 1 §2 educational article LLM is opt-in and layered on top — it
+    never gates auto-creation. The /dsl path never threads an article LLM."""
+
+    def test_dsl_path_passes_no_article_llm(
+        self, monkeypatch, fake_engine, empty_registry
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_auto_create(
+            name: str, engine: object, *, article_llm: object = None
+        ) -> AutoCreatedConceptNote:
+            captured["article_llm"] = article_llm
+            return AutoCreatedConceptNote(
+                concept_name=name, lemmas=["x"], summary="s", document_available=True
+            )
+
+        calls = {"n": 0}
+
+        def flaky_retrieve(*args: object, **kwargs: object) -> RetrievalResult:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConceptNotMapped("humility")
+            return _fake_result()
+
+        monkeypatch.setattr("src.app.orchestration.retrieve", flaky_retrieve)
+        monkeypatch.setattr(
+            orchestration, "_attempt_auto_create_concept", fake_auto_create
+        )
+        run_dsl_query("humility", fake_engine, empty_registry)
+        # The /dsl surface stays article-LLM-free.
+        assert captured["article_llm"] is None
+
+    def test_opt_in_env_helper_reads_truthy(self, monkeypatch) -> None:
+        monkeypatch.setenv("SPL_CONCEPT_ARTICLE_LLM", "1")
+        assert orchestration._concept_article_llm_opted_in() is True
+        monkeypatch.setenv("SPL_CONCEPT_ARTICLE_LLM", "false")
+        assert orchestration._concept_article_llm_opted_in() is False
+        monkeypatch.delenv("SPL_CONCEPT_ARTICLE_LLM", raising=False)
+        assert orchestration._concept_article_llm_opted_in() is False
