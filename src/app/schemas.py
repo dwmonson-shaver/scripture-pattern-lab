@@ -52,6 +52,24 @@ class ClarificationPayload(BaseModel):
     nl_source: str
 
 
+class AutoCreatedConceptNote(BaseModel):
+    """Short inline summary surfaced when a query auto-created a Tier-1 concept.
+
+    Slice N (DEC-102/DEC-104): when a query references a term with no registry
+    mapping, the system auto-generates a machine/lexicon-sourced, unverified
+    concept and re-runs. This note tells the caller it happened, names the
+    lemmas, and flags that a fuller persisted document is available — so the
+    auto-creation is never silent (resolved OQ-1: not-silent output).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    concept_name: str
+    lemmas: list[str]
+    summary: str
+    document_available: bool
+
+
 class QueryDSLRequest(BaseModel):
     """Request body for POST /api/v1/query/dsl."""
 
@@ -63,9 +81,10 @@ class QueryDSLRequest(BaseModel):
 class QueryDSLResponse(BaseModel):
     """Response envelope: query echo + validation + result + explanation.
 
-    Always emits all four fields. The CLI's `--no-prose` affordance is
-    a CLI concept; service-layer consumers who want raw counts read
-    `result` and ignore `explanation.summary`.
+    Always emits the four pipeline fields. `auto_created_concept` is set only
+    when this query triggered a Tier-1 concept auto-creation (Slice N); None
+    otherwise. The CLI's `--no-prose` affordance is a CLI concept; service-layer
+    consumers who want raw counts read `result` and ignore `explanation.summary`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -74,6 +93,7 @@ class QueryDSLResponse(BaseModel):
     validation: ValidationResult
     result: RetrievalResult
     explanation: ExplainedResultSet
+    auto_created_concept: AutoCreatedConceptNote | None = None
 
 
 class ConversationTurn(BaseModel):
@@ -165,6 +185,7 @@ class QueryNLResponse(BaseModel):
     explanation: ExplainedResultSet | None = None
     translation: TranslationMetadata | None = None
     clarification: ClarificationPayload | None = None
+    auto_created_concept: AutoCreatedConceptNote | None = None
 
 
 class QueryValidateRequest(BaseModel):

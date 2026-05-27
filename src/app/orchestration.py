@@ -21,12 +21,14 @@ import os
 from sqlalchemy.engine import Engine
 
 from src.app.schemas import (
+    AutoCreatedConceptNote,
     ClarificationPayload,
     ConversationTurn,
     QueryDSLResponse,
     QueryNLResponse,
     TranslationMetadata,
 )
+from src.engine.models import ConceptNotMapped
 from src.engine.parser import parse
 from src.nlp.explainer import explain
 from src.nlp.llm_client import LLMClient, Message
@@ -36,6 +38,15 @@ from src.nlp.translator import (
     TranslationSuccess,
     translate,
 )
+from src.ontology.concept_document import (
+    ConceptDocument,
+    build_comparative_section,
+    build_short_summary,
+    get_document,
+    persist_document,
+)
+from src.ontology.concept_writer import auto_create_cited_concept
+from src.ontology.lexicon_resolver import resolve_english_term
 from src.ontology.registry import ConceptRegistry
 from src.retrieval.retrieve import retrieve
 from src.validation.registry import CapabilityRegistry
@@ -87,6 +98,48 @@ class ValidationUnsupported(Exception):  # noqa: N818
         )
 
 
+def _attempt_auto_create_concept(
+    concept_name: str,
+    engine: Engine,
+) -> AutoCreatedConceptNote | None:
+    """Deterministically auto-create a Tier-1 concept for an unmapped term.
+
+    Slice N (DEC-102/DEC-104): resolve the English term against the self-hosted
+    lexicon (NO LLM), and if it maps to corpus-present lemmas, write a
+    machine/lexicon-sourced unverified concept + persist its comparative
+    Conceptual Document (Part 1 §1) + short summary, then return the inline
+    note. Returns None if the term does not resolve to any corpus-present lemma
+    (the caller then surfaces the honest dead-end — re-raises ConceptNotMapped).
+
+    NO LLM on this path — the concept and the comparative document section are
+    100% deterministic. The optional LLM educational section (Part 1 §2) is a
+    separate opt-in step layered on top later; it never gates auto-creation.
+    """
+    resolution = resolve_english_term(concept_name, engine)
+    if resolution.unresolved:
+        return None
+
+    outcome = auto_create_cited_concept(resolution, engine)
+
+    # Persist (store-once) the deterministic comparative document + summary so
+    # it is retrievable later and never regenerated per query.
+    if get_document(outcome.concept_name, engine) is None:
+        comparative = build_comparative_section(resolution, engine)
+        document = ConceptDocument(
+            concept_name=outcome.concept_name,
+            short_summary=build_short_summary(resolution),
+            part1_comparative=comparative,
+        )
+        persist_document(document, engine)
+
+    return AutoCreatedConceptNote(
+        concept_name=outcome.concept_name,
+        lemmas=[rl.lemma for rl in resolution.resolved_lemmas],
+        summary=build_short_summary(resolution),
+        document_available=True,
+    )
+
+
 def run_dsl_query(
     dsl: str,
     engine: Engine,
@@ -108,36 +161,20 @@ def run_dsl_query(
        `RegistryRequired` on the respective failure modes.
     4. `explain(result, executable, validation)` → `ExplainedResultSet`.
 
+    Slice N (DEC-104): if step 3 raises `ConceptNotMapped` for a term that
+    resolves against the self-hosted lexicon, the unmapped concept is
+    auto-created (deterministically) and the pipeline is re-run ONCE; the
+    response carries an `auto_created_concept` note. A term that does not
+    resolve to corpus-present lemmas re-raises `ConceptNotMapped` so the route
+    returns the honest 422 ("the system says when it cannot do something yet").
+
     Returns a `QueryDSLResponse` carrying all four artifacts.
     """
-    plan = parse(dsl)
-
-    validation = validate(
-        plan,
-        CapabilityRegistry.mvp(),
-        concept_registry=registry,
-    )
-
-    if validation.status == "unsupported" or validation.executable_plan is None:
-        raise ValidationUnsupported(validation)
-
-    executable = validation.executable_plan
-
-    result = retrieve(
-        executable,
-        executable.scope,
-        engine,
-        contextualize=True,
+    return _run_dsl_pipeline_with_optional_explainer_llm(
+        dsl=dsl,
+        engine=engine,
         registry=registry,
-    )
-
-    explained = explain(result, executable, validation)
-
-    return QueryDSLResponse(
-        query=dsl,
-        validation=validation,
-        result=result,
-        explanation=explained,
+        explainer_llm=None,
     )
 
 
@@ -233,6 +270,7 @@ def run_nl_query(
             alternatives=translation_result.alternatives,
             explanation=translation_result.explanation,
         ),
+        auto_created_concept=dsl_response.auto_created_concept,
     )
 
 
@@ -243,36 +281,61 @@ def _run_dsl_pipeline_with_optional_explainer_llm(
     registry: ConceptRegistry,
     explainer_llm: LLMClient | None,
 ) -> QueryDSLResponse:
-    """Internal: identical to run_dsl_query but threads explainer_llm.
+    """Internal: the DSL pipeline with the explainer_llm thread + auto-create.
 
-    Kept separate from run_dsl_query() so that the public /api/v1/query/dsl
-    path remains explicitly LLM-free (no env-var read, no LLM dependency at
-    the DSL surface — that path is for callers who already have a DSL
-    string and have not opted into LLM augmentation).
+    Kept separate from the public run_dsl_query() docstring contract so the
+    explainer-LLM thread (Slice K) and the Tier-1 auto-create-and-retry loop
+    (Slice N) live in one place that both the /dsl and /nl paths funnel through.
+    The /api/v1/query/dsl path passes explainer_llm=None so that surface stays
+    explicitly LLM-free for the explanation; auto-creation itself is always
+    LLM-free regardless of this flag.
+
+    On a `ConceptNotMapped` from retrieve, attempt a deterministic auto-create
+    of the unmapped term and retry the pipeline ONCE (bounded — a single retry,
+    no loop). If the term does not resolve, or a *different* concept is still
+    unmapped after the retry, the exception propagates so the route returns the
+    honest 422.
     """
-    plan = parse(dsl)
-    validation = validate(
-        plan,
-        CapabilityRegistry.mvp(),
-        concept_registry=registry,
-    )
-    if validation.status == "unsupported" or validation.executable_plan is None:
-        raise ValidationUnsupported(validation)
-    executable = validation.executable_plan
-    result = retrieve(
-        executable,
-        executable.scope,
-        engine,
-        contextualize=True,
-        registry=registry,
-    )
-    explained = explain(result, executable, validation, llm_client=explainer_llm)
-    return QueryDSLResponse(
-        query=dsl,
-        validation=validation,
-        result=result,
-        explanation=explained,
-    )
+    note: AutoCreatedConceptNote | None = None
+    attempts = 0
+    while True:
+        plan = parse(dsl)
+        validation = validate(
+            plan,
+            CapabilityRegistry.mvp(),
+            concept_registry=registry,
+        )
+        if validation.status == "unsupported" or validation.executable_plan is None:
+            raise ValidationUnsupported(validation)
+        executable = validation.executable_plan
+        try:
+            result = retrieve(
+                executable,
+                executable.scope,
+                engine,
+                contextualize=True,
+                registry=registry,
+            )
+        except ConceptNotMapped as exc:
+            # Bounded single retry: only attempt auto-create on the first miss.
+            if attempts >= 1:
+                raise
+            attempts += 1
+            created = _attempt_auto_create_concept(exc.concept_name, engine)
+            if created is None:
+                # Unresolvable term — honest dead-end (route → 422).
+                raise
+            note = created
+            continue  # re-run the pipeline now that the concept exists
+
+        explained = explain(result, executable, validation, llm_client=explainer_llm)
+        return QueryDSLResponse(
+            query=dsl,
+            validation=validation,
+            result=result,
+            explanation=explained,
+            auto_created_concept=note,
+        )
 
 
 def run_validate_only(dsl: str, registry: ConceptRegistry) -> ValidationResult:
