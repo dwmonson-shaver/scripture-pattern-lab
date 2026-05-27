@@ -135,6 +135,31 @@ This section is the structural commitment behind that decision. It encodes four 
 
 The seed-script discipline that realizes this commitment: every row inserted at seed time lands `origin='curated'`, `verification_state='unverified'`, `confidence=NULL`. Nothing in the seed flips to `'corpus_observed'` or `'human_confirmed'` — those transitions are downstream slice work.
 
+**Tier-1 lexicon-imported concepts (DEC-102/DEC-104).** A query for a term with no registry mapping now triggers deterministic Tier-1 auto-generation: the term is resolved against the self-hosted lexicon (below) to the MorphGNT lemmas usually translated as it AND present in the corpus, and a concept is written with `origin='lexicon_imported'`, `verification_state='unverified'`, `confidence=NULL`. This is a sourced prior (a single English word ↔ its usual Greek lemmas — "almost citing a dictionary"), NOT a conceptual claim, and is **never** auto-promoted to `'corpus_observed'` or `'human_confirmed'`. No LLM touches this write path. Tier-2 conceptual groupings (different underlying Greek that "hangs together") remain a human-validated later-slice concern (DEC-081, scoped to Tier 2).
+
+<!-- REQ:08.lexicon-sourcing -->
+## Lexicon Sourcing — Self-Hosted Open Datasets (Tier-1)
+
+Tier-1 auto-generation rests on a self-hosted, permissively-licensed lexicon stack (DEC-103), ingested once into Postgres like the corpus (no runtime API dependency, <10 MB). Three datasets, each vendored under `data/raw/lexicon/` (provenance + licenses in that directory's README):
+
+1. **`jtauber/greek-lemma-mappings`** (CC BY-SA 4.0) — the MorphGNT-lemma ↔ Strong's bridge. Its lemma keys byte-match the SBLGNT corpus lemmas by construction (same author), so it reconciles Strong's to the exact lemma forms in `tokens`. Loaded into `lemma_strongs (morphgnt_lemma, strongs)`.
+2. **STEPBible TBESG** (CC BY 4.0) — the Strong's ↔ English-gloss reverse-lookup source (Abbott-Smith based). Loaded into `strongs_glosses (strongs, lemma, gloss, source='tbesg')`.
+3. **Dodson Greek Lexicon** (Public Domain) — gloss fallback. Loaded into `strongs_glosses (..., source='dodson')`.
+
+The reverse-lookup pipeline (deterministic, NO LLM): `English term → strongs_glosses.gloss ILIKE '%term%' → Strong's set → lemma_strongs bridge → MorphGNT lemma forms → INNER JOIN tokens (corpus-presence filter) → resolved lemmas + their corpus verse citations`. A lemma absent from the loaded corpus is dropped (it cannot be queried); a term that maps to no corpus-present lemma resolves as *unresolved* and the query returns the honest `concept_not_mapped` 422 (DEC-006). Schema: `data/schemas/03_lexicon.sql`; ingest CLI: `scripts/db/ingest_lexicon.py` (wholesale, two-factor `--truncate` + `SPL_LEXICON_CONFIRM_TRUNCATE=1` gate, exit codes 0/1/2/3 — mirrors the corpus/seed ingests). The lexicon is the *cited authority*; the corpus is the *grounding*; an LLM is at most an assembler/explainer (below), never the source of truth.
+
+<!-- REQ:08.concept-document -->
+## Conceptual Document — Persisted Two-Part Article
+
+Every Tier-1 auto-creation yields a SHORT inline summary in the query interaction AND a persisted, linkable long article; BOTH the concept and the article persist (stored on first creation, retrieved later — **never regenerated per query**). The article is a first-class per-concept entity (`concept_documents` table, `data/schemas/04_concept_documents.sql`) with two parts:
+
+- **Part 1 = the Tier-1 article (now)**, two clearly-labeled sections:
+  - **§1 Pure comparative lexicon analysis** — DETERMINISTIC, NO LLM: which Greek lemmas, which Strong's, the usual English renderings, the corpus verse references. A factual comparison drawn straight from the ingested datasets + corpus. No opinion, no assertion.
+  - **§2 LLM-generated educational analysis** — explicitly labeled as generated. Beginner-friendly prose where the LLM is strictly an EXPLAINER/ASSEMBLER of the §1 evidence it is handed; it cites its sources and is stored WITH those citations. It NEVER feeds back into the concept's lemma set or verification state. Opt-in (`SPL_CONCEPT_ARTICLE_LLM`), NL path only; on LLM unavailable/FALLBACK/empty it degrades to §1-only (the concept + §1 never depend on it).
+- **Part 2 = the Tier-2 grouping artifact (later slice)** — a structural placeholder/slot only this slice (always NULL).
+
+The epistemic line is structural: the **concept** (lemma set, origin, verification state, cited corpus verses) is regenerable-proof ground truth (DEC-024); the **article §2** is regenerable commentary layered on top (DEC-081, DEC-106). The persisted document is retrieved via `GET /api/v1/concepts/{name}/document` (404 if not yet generated).
+
 <!-- REQ:08.ingestion-pipeline -->
 ## Ingestion Pipeline — MVP
 

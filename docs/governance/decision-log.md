@@ -1181,8 +1181,8 @@
 - Alternatives considered: (a) single gated flow for all concept creation (Cut A) — rejected: wrong ceremony for Tier 1, and it left the dead-end. (b) LLM-invents-the-mapping — rejected as the authority (not verifiable); LLM is at most an assembler/explainer of cited evidence.
 - Confidence: High on the tier distinction (user-originated, domain-grounded). Medium on Tier-2 mechanics (weighted graph, phrase members) — that's a later slice's design.
 - Made-by: user reframe 2026-05-26; orchestrator captured + researched.
-- Commit: pending (Slice N implementation). Governance landed this session: CLAUDE.md scoped rule + this DEC.
-- Files: `CLAUDE.md` (What Not To Do — scoped rule); `thoughts/design-concept-layers-2026-05-26.md`; (impl) `src/ontology/`, `data/schemas/`, lexicon ingest.
+- Commit: governance `a549160` (CLAUDE.md scoped rule + this DEC). Tier-1 implemented in Slice N: `afca1d4` (auto-create writer enforcing `origin='lexicon_imported'`/`verification_state='unverified'`/never-promoted), `b7c0a65` (wire-in + dead-end killer). Tier-2 + Tier-3 remain later-slice scope.
+- Files: `CLAUDE.md` (What Not To Do — scoped rule); `thoughts/design-concept-layers-2026-05-26.md`; `src/ontology/concept_writer.py`, `src/ontology/lexicon_resolver.py`, `src/app/orchestration.py`, `data/schemas/03_lexicon.sql`.
 - Spec refs: REQ:08.registry-epistemics, REQ:09.api-gateway.
 - Cross-refs: DEC-024, DEC-081 (scoped to Tier 2), DEC-103 (lexicon sourcing); memory [[concept-model-two-layers]]; supersedes the Cut A framing in `design-concept-curator-refresh-2026-05-26.md`.
 
@@ -1194,7 +1194,69 @@
 - Alternatives considered: hosted API (API.Bible / IQ Bible / Bolls.life) — rejected as primary (no clean reverse lookup; restrictive caching/redistribution; SLA risk). openscriptures/strongs — skipped (GPL-3 copyleft; TBESG+Dodson cover it under friendlier licenses).
 - Confidence: High that the data exists/bridges; verify exact repo paths, licenses, and TAGNT/TBESG column layouts at implementation (a few items were search-only, not fetch-verified).
 - Made-by: orchestrator (Sonnet research, Opus synthesis) 2026-05-26.
-- Commit: pending (Slice N lexicon ingest).
-- Files: (impl) lexicon ingest script + `data/` lexicon tables + MorphGNT↔Strong's join.
-- Spec refs: REQ:08.registry-epistemics.
+- Commit: implemented in Slice N — `f40c297` (schema + parsers + Core mirrors), `a1c74cd` (loader + ingest CLI). jtauber lemma keys verified to byte-match the SBLGNT corpus lemmas (NFC; 952/952 in 1Co), so the MorphGNT↔Strong's bridge holds by construction. Datasets vendored under `data/raw/lexicon/` (~6.7 MB, gitignored like the corpus); provenance + licenses in `data/raw/lexicon/README.md`.
+- Files: `data/schemas/03_lexicon.sql`; `src/ingestion/lexicon/{datasets,db,loader}.py`; `scripts/db/ingest_lexicon.py`; `data/raw/lexicon/README.md`.
+- Spec refs: REQ:08.registry-epistemics, REQ:08.lexicon-sourcing (new).
 - Cross-refs: DEC-102 (Tier-1 auto-generation this feeds); DEC-024 (lexicon = cited prior, corpus = ground truth).
+
+## DEC-104 — Tier-1 auto-create-and-rerun on the unmapped-term path (the dead-end killer)
+- Status: Accepted.
+- Question: When a query references a term with no registry mapping, what should happen now that Tier-1 concepts may auto-generate (DEC-102)?
+- Decision: On `ConceptNotMapped` from `retrieve()`, the orchestration pipeline deterministically resolves the term against the self-hosted lexicon (DEC-103), and if it maps to ≥1 corpus-present lemma, auto-creates a machine/lexicon-sourced unverified concept (`auto_create_cited_concept`), persists its comparative Conceptual Document + short summary, and **re-runs the pipeline ONCE** (a bounded single retry — no loop). A term that does not resolve to any corpus-present lemma **re-raises `ConceptNotMapped`** so the route returns the honest 422 ("the system says when it cannot do something yet"). Both `/api/v1/query/dsl` and `/api/v1/query/nl` funnel through the shared pipeline helper, so both get the behavior; `QueryNLResponse` propagates the note.
+- Rationale: kills the real `concept_not_mapped` dead-end a user hit, without weakening the honest-failure contract for genuinely unresolvable terms. The single-retry bound prevents any spin if a *different* concept is still unmapped after the first auto-create. NO LLM on this path — concept creation is deterministic.
+- Alternatives considered: (a) auto-create silently with no surfacing — rejected (OQ-1 resolution: not-silent). (b) unbounded retry loop — rejected (could spin on multi-unmapped queries; one bounded retry is sufficient because each retry can only resolve one term and a second miss is honest). 
+- Confidence: High.
+- Made-by: orchestrator 2026-05-26.
+- Commit: `b7c0a65`.
+- Files: `src/app/orchestration.py` (`_attempt_auto_create_concept`, the retry loop in `_run_dsl_pipeline_with_optional_explainer_llm`); `src/app/schemas.py` (`AutoCreatedConceptNote` + envelope fields); `src/app/routes/concepts.py`.
+- Spec refs: REQ:09.api-gateway, REQ:08.registry-epistemics.
+- Cross-refs: DEC-006 (says when it cannot), DEC-102, DEC-103.
+
+## DEC-105 — Auto-creation surfaces a short inline note (not-silent output, OQ-1)
+- Status: Accepted.
+- Question: Should Tier-1 auto-creation be silent (just run the query) or surfaced to the caller?
+- Decision: **Not silent.** Every auto-creation attaches an `AutoCreatedConceptNote` to the response envelope (concept name, the lemmas, a short summary stating the machine-sourced/unverified status honestly, and `document_available`). The short summary is deterministic (`build_short_summary`). The full long article is the persisted Conceptual Document (DEC-106), linked via the `GET /api/v1/concepts/{name}/document` route.
+- Rationale: the lemma set is the one place Tier-1 can be wrong; the user must be able to see and correct it (the concept is corrigible). Silence would hide a prior the user should be able to inspect.
+- Confidence: High.
+- Made-by: orchestrator 2026-05-26 (resolves design OQ-1).
+- Commit: `b7c0a65`, `b47820b`.
+- Files: `src/app/schemas.py`, `src/ontology/concept_document.py` (`build_short_summary`).
+- Spec refs: REQ:09.api-gateway, REQ:01.transparent-evidence.
+- Cross-refs: DEC-104, DEC-106.
+
+## DEC-106 — Persisted two-part Conceptual Document; deterministic concept vs cited LLM commentary
+- Status: Accepted.
+- Question: How is the long article stored, and how is the epistemic line between the concept (ground truth) and any LLM commentary kept structural rather than aspirational?
+- Decision: A first-class **persisted** per-concept document (`concept_documents` table, `04_concept_documents.sql`) with two parts. **Part 1** = the Tier-1 article: §1 a **deterministic** comparative lexicon section (lemmas, Strong's, usual renderings, corpus verse refs — NO LLM, no assertion) and §2 a clearly-labeled, **cited, LLM-generated** educational section that is an EXPLAINER/ASSEMBLER of the §1 evidence only. **Part 2** = a structural placeholder for the Tier-2 grouping artifact (always None this slice). The document is **stored once on first creation and retrieved later — never regenerated per query** (`persist_document` is ON CONFLICT DO NOTHING). The LLM §2 NEVER feeds back into the concept's lemma set or verification state; on LLM unavailable/FALLBACK/empty it degrades to §1-only. The concept (lemma set + origin + verification state) is the regenerable-proof ground truth; the article is regenerable commentary.
+- Rationale: makes DEC-024/DEC-081 structural for this feature — the concept is 100% lexicon/corpus-sourced and the LLM can only ever produce labeled, cited commentary on top of handed evidence, with no write path back to the concept. Store-once keeps the article stable and cheap (no per-query LLM cost).
+- Alternatives considered: (a) regenerate the article per query — rejected (cost + instability + would blur "the concept is fixed"). (b) one undifferentiated article — rejected (the deterministic/LLM split is the whole point; the reader must know which sentences are sourced data vs generated prose).
+- Confidence: High.
+- Made-by: orchestrator 2026-05-26.
+- Commit: `b47820b` (entity + deterministic §1 + persistence), `894fb61` (LLM §2).
+- Files: `data/schemas/04_concept_documents.sql`; `src/ontology/concept_document.py`; `src/nlp/concept_article.py`; `src/nlp/prompts/concept_article_prompt.py`.
+- Spec refs: REQ:08.concept-document (new), REQ:09.api-gateway.
+- Cross-refs: DEC-024, DEC-081, DEC-102, DEC-061 (deterministic-first LLM-layered pattern), DEC-090 (explainer LLM opt-in pattern this mirrors).
+
+## DEC-107 — Educational article LLM is opt-in (SPL_CONCEPT_ARTICLE_LLM), NL path only, never gates auto-creation
+- Status: Accepted.
+- Question: When/whether is the LLM §2 generated, and on which surface?
+- Decision: The §2 educational section is generated only when `SPL_CONCEPT_ARTICLE_LLM` is truthy AND an LLM client is available — which in practice is the `/api/v1/query/nl` path (the `/dsl` path stays article-LLM-free, mirroring its explainer-LLM-free stance). Read at call time (same convention as `SPL_EXPLAINER_LLM`, DEC-090). The §2 NEVER gates auto-creation: the concept + §1 always persist regardless, and any LLM failure degrades to §1-only.
+- Rationale: keeps the deterministic dead-end killer fully functional with no LLM dependency; the article prose is an opt-in enhancement, not a prerequisite. Reuses the established explainer-opt-in env-var pattern.
+- Confidence: High.
+- Made-by: orchestrator 2026-05-26.
+- Commit: `894fb61`.
+- Files: `src/app/orchestration.py` (`_concept_article_llm_opted_in`, `_env_opted_in`, article_llm threading).
+- Spec refs: REQ:09.api-gateway, REQ:09.nl-to-dsl.
+- Cross-refs: DEC-090 (SPL_EXPLAINER_LLM opt-in pattern), DEC-106.
+
+## DEC-108 — Slice N phased vertically: deterministic dead-end-killer first, LLM article layered on top
+- Status: Accepted.
+- Question: In what order do the slice's pieces land, given the design's "runnable payoff first" goal?
+- Decision: Phases N1→N5 ship the deterministic core (lexicon ingest → resolver → concept writer → wire-in + short summary) so the observable dead-end-killer payoff lands and is provable WITHOUT any LLM; N6 persists the two-part document (deterministic §1); N7 layers the cited LLM §2 on top; N8 closes (governance + review). Each phase is independently testable and committed separately.
+- Rationale: matches CLAUDE.md vertical-slicing + the design's "deterministic payoff first" instruction; the LLM article builds on a concept layer already proven correct.
+- Confidence: High.
+- Made-by: orchestrator 2026-05-26.
+- Commit: `f40c297`..`894fb61` (the N1–N7 chain).
+- Files: `thoughts/structure-concept-layers-2026-05-26.md` (the phase outline).
+- Spec refs: —.
+- Cross-refs: DEC-102, DEC-104, DEC-106.
