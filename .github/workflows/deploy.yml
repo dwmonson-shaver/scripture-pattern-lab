@@ -1,8 +1,18 @@
 name: Deploy to Cloudflare Workers
 
+# The Nuxt web app lives under `web/`. Every `run:` step in this job
+# executes inside `web/` via the `defaults` block below — the workflow
+# itself lives at repo root (GitHub Actions only auto-discovers
+# `.github/workflows/` at the repository root, not nested folders).
+# Non-`run` steps (cache, wrangler-action) get explicit web/ paths
+# because `defaults.run.working-directory` doesn't apply to them.
+
 on:
   push:
     branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +27,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
 
@@ -29,9 +42,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            node_modules
-            .nuxt
-          key: build-${{ runner.os }}-node20-${{ hashFiles('package.json') }}
+            web/node_modules
+            web/.nuxt
+          key: build-${{ runner.os }}-node20-${{ hashFiles('web/package.json') }}
           restore-keys: |
             build-${{ runner.os }}-node20-
 
@@ -64,4 +77,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web
           command: deploy
