@@ -85,4 +85,5 @@ class TestModels:
             ),
         )
         assert doc.part1_educational is None
-        assert doc.part2_grouping_placeholder is None
+        assert doc.part2_grouping is None
+        assert doc.part2_grouping_pointer is None

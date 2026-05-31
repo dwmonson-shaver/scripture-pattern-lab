@@ -99,7 +99,8 @@ def test_exit_gate_unmapped_term_auto_creates_and_runs(engine: Engine) -> None:
         r.lemma == "ταπεινοφροσύνη" for r in document.part1_comparative.rows
     )
     assert document.part1_educational is None
-    assert document.part2_grouping_placeholder is None
+    assert document.part2_grouping is None
+    assert document.part2_grouping_pointer is None
 
 
 def test_unresolvable_term_still_dead_ends(engine: Engine) -> None:

@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.ontology.book_codes import bb_to_display
+from src.ontology.concept_grouping import GroupingPointer, Tier2Grouping
 from src.ontology.lexicon_resolver import (
     LexiconResolution,
     corpus_verse_refs_for_lemma,
@@ -115,7 +116,19 @@ class EducationalArticleSection(BaseModel):
 
 
 class ConceptDocument(BaseModel):
-    """The persisted two-part Conceptual Document."""
+    """The persisted two-part Conceptual Document.
+
+    Part 2 (Tier-2 grouping) takes one of three shapes (Slice O):
+      * ``part2_grouping`` — full Tier2Grouping, present ONLY on the anchor
+        concept's document (DEC-113 anchor model).
+      * ``part2_grouping_pointer`` — GroupingPointer back to the anchor(s),
+        present on non-anchor member documents.
+      * both ``None`` — concept is not yet a member of any grouping.
+
+    These are mutually exclusive on a single document (an anchor doesn't also
+    carry a pointer to itself); the reader populates whichever the JSONB shape
+    indicates.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -123,7 +136,8 @@ class ConceptDocument(BaseModel):
     short_summary: str
     part1_comparative: ComparativeLexiconSection
     part1_educational: EducationalArticleSection | None = None
-    part2_grouping_placeholder: dict | None = None  # Tier-2 slot; None this slice
+    part2_grouping: Tier2Grouping | None = None
+    part2_grouping_pointer: GroupingPointer | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -204,23 +218,58 @@ def persist_document(doc: ConceptDocument, engine: Engine) -> None:
     existing document (store-once semantics; the document is retrieved later,
     not regenerated per query). To refresh the LLM §2 specifically, a future
     explicit-regenerate path will UPDATE — out of scope here.
+
+    Part 2 grouping is also stored on initial persist when present. Grouping
+    UPDATES (write/rewrite after the document already exists) go through
+    ``src.ontology.concept_grouping.write_grouping`` which performs an explicit
+    UPDATE on the part2_grouping column.
     """
+    if doc.part2_grouping is not None:
+        part2_blob: dict | None = doc.part2_grouping.model_dump(mode="json")
+    elif doc.part2_grouping_pointer is not None:
+        part2_blob = doc.part2_grouping_pointer.model_dump(mode="json")
+    else:
+        part2_blob = None
     with engine.begin() as connection:
         connection.execute(
             pg_insert(concept_documents_table)
             .values(
                 concept_name=doc.concept_name,
                 short_summary=doc.short_summary,
-                part1_comparative=doc.part1_comparative.model_dump(),
+                part1_comparative=doc.part1_comparative.model_dump(mode="json"),
                 part1_educational=(
-                    doc.part1_educational.model_dump()
+                    doc.part1_educational.model_dump(mode="json")
                     if doc.part1_educational is not None
                     else None
                 ),
-                part2_grouping=doc.part2_grouping_placeholder,
+                part2_grouping=part2_blob,
             )
             .on_conflict_do_nothing(index_elements=["concept_name"])
         )
+
+
+def _decode_part2(blob: dict | None) -> tuple[Tier2Grouping | None, GroupingPointer | None]:
+    """Auto-detect Tier-2 blob shape — full grouping vs pointer vs nothing.
+
+    Both Tier2Grouping and GroupingPointer have non-overlapping required
+    fields ('members' vs 'grouping_anchors'), so the discriminator is
+    unambiguous. On parse failure we log and return (None, None) rather than
+    propagate — DEC-114 R2 mitigation: a future schema drift on the JSONB
+    blob must NOT make the entire document unreadable.
+    """
+    if not isinstance(blob, dict):
+        return (None, None)
+    try:
+        if "members" in blob:
+            return (Tier2Grouping.model_validate(blob), None)
+        if "grouping_anchors" in blob:
+            return (None, GroupingPointer.model_validate(blob))
+    except Exception:  # noqa: BLE001 — see docstring
+        # Surfaced as None to the caller; a future curator slice may attach a
+        # log line + bucket-ticket here. For now the contract is "stale shape
+        # degrades to no grouping rendered" not "stale shape breaks the doc".
+        return (None, None)
+    return (None, None)
 
 
 def get_document(concept_name: str, engine: Engine) -> ConceptDocument | None:
@@ -236,6 +285,7 @@ def get_document(concept_name: str, engine: Engine) -> ConceptDocument | None:
         row = connection.execute(stmt).first()
     if row is None:
         return None
+    grouping, pointer = _decode_part2(row.part2_grouping)
     return ConceptDocument(
         concept_name=row.concept_name,
         short_summary=row.short_summary,
@@ -247,5 +297,6 @@ def get_document(concept_name: str, engine: Engine) -> ConceptDocument | None:
             if row.part1_educational is not None
             else None
         ),
-        part2_grouping_placeholder=row.part2_grouping,
+        part2_grouping=grouping,
+        part2_grouping_pointer=pointer,
     )

@@ -34,8 +34,9 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import Engine, select, update
 
-from src.ontology.registry import Origin, VerificationState
+from src.ontology.registry import Origin, VerificationState, concepts_table
 
 # DEC-115 Layer A: the only verification_state this writer ever emits.
 GROUPING_VSTATE: VerificationState = "unverified"
@@ -125,3 +126,158 @@ class GroupingPointer(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     grouping_anchors: list[str] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Persistence — writer + readers
+#
+# DEC-115 Layer A: write_grouping() takes NO verification_state parameter.
+# The only value it ever writes is GROUPING_VSTATE. Combined with Layer B's
+# model-level Literal + validator, this means a Tier-2 grouping CANNOT be
+# auto-promoted to 'human_confirmed' from any code path through this module.
+# ---------------------------------------------------------------------------
+
+
+def _all_member_concepts_exist(member_names: list[str], engine: Engine) -> set[str]:
+    """Return the subset of names NOT present in the concepts table.
+
+    Empty set = all exist. Caller raises ValueError naming the missing ones.
+    """
+    with engine.connect() as connection:
+        present_rows = connection.execute(
+            select(concepts_table.c.name).where(concepts_table.c.name.in_(member_names))
+        ).scalars().all()
+    return set(member_names) - set(present_rows)
+
+
+def write_grouping(grouping: Tier2Grouping, engine: Engine) -> Tier2Grouping:
+    """Persist a Tier-2 grouping. Returns the (validated, persisted) grouping.
+
+    DEC-115 Layer A: this function has NO verification_state parameter — the
+    only value ever written is GROUPING_VSTATE='unverified'. The grouping
+    argument is itself guarded by Layer B (Pydantic Literal + model_validator).
+
+    Idempotent: re-writing the same grouping (same anchor + same member set)
+    UPDATEs the existing anchor row in-place (last writer wins for rationale +
+    confidences); member pointer rows are merged additively (a concept may be
+    a member of multiple groupings).
+
+    Raises:
+      ValueError if any member concept does not exist (OQ-2 resolution: this
+        slice does NOT auto-create members; the seed CLI does the Tier-1
+        auto-create up front).
+      ValueError if the anchor concept document does not yet exist (DEC-106
+        store-once: a grouping is layered ON TOP of an existing document).
+    """
+    from src.ontology.concept_document import concept_documents_table
+
+    member_names = [m.concept_name for m in grouping.members]
+    missing = _all_member_concepts_exist(member_names, engine)
+    if missing:
+        raise ValueError(
+            f"cannot write grouping anchored on {grouping.anchor_name!r}: "
+            f"these member concepts do not exist: {sorted(missing)!r}. "
+            "Auto-create them via the Slice-N path first."
+        )
+
+    blob = grouping.model_dump(mode="json")
+    non_anchor = [n for n in member_names if n != grouping.anchor_name]
+
+    with engine.begin() as connection:
+        # Anchor doc must already exist (DEC-106 store-once).
+        anchor_row = connection.execute(
+            select(concept_documents_table.c.id).where(
+                concept_documents_table.c.concept_name == grouping.anchor_name
+            )
+        ).first()
+        if anchor_row is None:
+            raise ValueError(
+                f"anchor document for {grouping.anchor_name!r} does not exist; "
+                "call persist_document(...) first to lay down the Tier-1 doc, "
+                "then write the Tier-2 grouping on top."
+            )
+        # Layer A in action: only GROUPING_VSTATE is in the blob (the model
+        # already enforces that). We never look at a caller-supplied
+        # verification_state because the function has no such parameter.
+        connection.execute(
+            update(concept_documents_table)
+            .where(concept_documents_table.c.concept_name == grouping.anchor_name)
+            .values(part2_grouping=blob)
+        )
+
+        # Pointer rows on each non-anchor member. Merge additively: a concept
+        # may already be a member of another grouping (the pointer's anchor
+        # list grows). If the member doc doesn't exist yet, skip the pointer
+        # write — the pointer is a navigational nicety, not load-bearing data
+        # (the canonical store remains the anchor's grouping blob).
+        for member_name in non_anchor:
+            row = connection.execute(
+                select(concept_documents_table.c.part2_grouping).where(
+                    concept_documents_table.c.concept_name == member_name
+                )
+            ).first()
+            if row is None:
+                continue
+            existing = row.part2_grouping if isinstance(row.part2_grouping, dict) else None
+            existing_anchors: list[str] = []
+            if existing is not None and "grouping_anchors" in existing:
+                existing_anchors = list(existing.get("grouping_anchors") or [])
+            if grouping.anchor_name not in existing_anchors:
+                existing_anchors.append(grouping.anchor_name)
+            pointer = GroupingPointer(grouping_anchors=existing_anchors)
+            connection.execute(
+                update(concept_documents_table)
+                .where(concept_documents_table.c.concept_name == member_name)
+                .values(part2_grouping=pointer.model_dump(mode="json"))
+            )
+    return grouping
+
+
+def read_grouping_for_anchor(
+    anchor_name: str, engine: Engine
+) -> Tier2Grouping | None:
+    """Read the canonical grouping blob from the anchor's document.
+
+    Returns None if the anchor's document doesn't exist, has no part2_grouping
+    blob, or the blob is a GroupingPointer (the concept is a member of
+    another grouping, not an anchor).
+    """
+    from src.ontology.concept_document import concept_documents_table
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(concept_documents_table.c.part2_grouping).where(
+                concept_documents_table.c.concept_name == anchor_name
+            )
+        ).first()
+    if row is None or not isinstance(row.part2_grouping, dict):
+        return None
+    if "members" not in row.part2_grouping:
+        return None  # it's a pointer, not an anchor blob
+    try:
+        return Tier2Grouping.model_validate(row.part2_grouping)
+    except Exception:  # noqa: BLE001
+        # Schema drift on JSONB → no grouping rendered, not a broken doc.
+        return None
+
+
+def read_grouping_pointer(
+    concept_name: str, engine: Engine
+) -> GroupingPointer | None:
+    """Read the GroupingPointer for a non-anchor member, if present."""
+    from src.ontology.concept_document import concept_documents_table
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(concept_documents_table.c.part2_grouping).where(
+                concept_documents_table.c.concept_name == concept_name
+            )
+        ).first()
+    if row is None or not isinstance(row.part2_grouping, dict):
+        return None
+    if "grouping_anchors" not in row.part2_grouping:
+        return None
+    try:
+        return GroupingPointer.model_validate(row.part2_grouping)
+    except Exception:  # noqa: BLE001
+        return None

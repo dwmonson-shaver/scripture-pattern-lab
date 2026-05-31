@@ -84,7 +84,8 @@ def test_persist_then_get_roundtrips(engine: Engine) -> None:
     assert fetched.concept_name == _NAME
     assert fetched.part1_comparative.rows[0].lemma == "πίστις"
     assert fetched.part1_educational is None
-    assert fetched.part2_grouping_placeholder is None
+    assert fetched.part2_grouping is None
+    assert fetched.part2_grouping_pointer is None
 
 
 def test_get_returns_none_when_absent(engine: Engine) -> None:

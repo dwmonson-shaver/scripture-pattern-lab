@@ -58,9 +58,10 @@ class TestDocumentRoute:
         body = resp.json()
         assert body["concept_name"] == "humility"
         assert body["part1_comparative"]["rows"][0]["lemma"] == "ταπεινοφροσύνη"
-        # Part 1 §2 (LLM) absent on the deterministic path; Part 2 placeholder null.
+        # Part 1 §2 (LLM) absent on the deterministic path; Part 2 absent.
         assert body["part1_educational"] is None
-        assert body["part2_grouping_placeholder"] is None
+        assert body["part2_grouping"] is None
+        assert body["part2_grouping_pointer"] is None
 
     def test_404_when_no_document(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
