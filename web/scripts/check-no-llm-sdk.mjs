@@ -16,7 +16,7 @@
 // new dependency addition substantively against DEC-081 rather than
 // relying on this script alone.
 
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const OUTPUT_DIR = '.output'

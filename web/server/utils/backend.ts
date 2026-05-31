@@ -83,7 +83,7 @@ export async function proxyToBackend<TReq, TRes>(
       },
       body: JSON.stringify(opts.body),
     })
-  } catch (err) {
+  } catch {
     // Network-layer failure (DNS, TLS, connection refused). Don't leak
     // raw error text — it can include the upstream URL.
     throw {

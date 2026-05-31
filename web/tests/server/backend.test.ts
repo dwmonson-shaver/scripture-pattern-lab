@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { proxyToBackend, type BackendError } from '~~/server/utils/backend'
+import { proxyToBackend } from '~~/server/utils/backend'
 
 const SAMPLE_NL_REQUEST = { nl_query: 'sequences where faith leads to hope' }
 const SAMPLE_NL_RESPONSE = {
