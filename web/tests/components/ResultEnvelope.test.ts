@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { mountWithVuetify } from '../test-utils'
 import ResultEnvelope from '~~/components/ResultEnvelope.vue'
-import type { QueryNLResponse } from '~~/types/backend'
+import type { QueryNLResponse } from '~~/types/api'
 
 const SAMPLE: QueryNLResponse = {
   query: 'faith > hope > love',
   validation: {
     status: 'supported',
-    executable_plan: {},
+    executable_plan: null,
     findings: [],
     engine_version: '0.1',
     grounding: 'prior-grounded',
@@ -140,7 +140,9 @@ describe('ResultEnvelope', () => {
   it('does not crash on empty alternatives list', () => {
     const noAlts: QueryNLResponse = {
       ...SAMPLE,
-      translation: { ...SAMPLE.translation, alternatives: [] },
+      // SAMPLE.translation is non-null by construction; assert for the new
+      // optional-shape generated type.
+      translation: { ...SAMPLE.translation!, alternatives: [] },
     }
     const wrapper = mountWithVuetify(ResultEnvelope, { props: { response: noAlts } })
     expect(wrapper.exists()).toBe(true)

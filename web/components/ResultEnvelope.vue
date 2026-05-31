@@ -1,7 +1,20 @@
 <script setup lang="ts">
-import type { QueryNLResponse, ValidationStatus } from '~~/types/backend'
+import type { QueryNLResponse, ValidationStatus } from '~~/types/api'
 
-const props = defineProps<{ response: QueryNLResponse }>()
+/**
+ * Caller contract: this component renders the **executed** shape of
+ * `QueryNLResponse` (Slice L Decision #6 — the four pipeline fields
+ * populated). The clarification shape (all four null) is the parent's
+ * job to surface; not this component's concern.
+ */
+type ExecutedQueryNLResponse = QueryNLResponse & {
+  validation: NonNullable<QueryNLResponse['validation']>
+  result: NonNullable<QueryNLResponse['result']>
+  explanation: NonNullable<QueryNLResponse['explanation']>
+  translation: NonNullable<QueryNLResponse['translation']>
+}
+
+const props = defineProps<{ response: ExecutedQueryNLResponse }>()
 
 const statusColor = computed(() => {
   const s = props.response.validation.status as ValidationStatus
@@ -16,7 +29,7 @@ const groundingLabel = computed(() => {
   // "evidence-grounded" → "Evidence-Grounded"
   return g
     .split('-')
-    .map((p) => p[0].toUpperCase() + p.slice(1))
+    .map((p: string) => p[0].toUpperCase() + p.slice(1))
     .join('-')
 })
 
@@ -162,7 +175,7 @@ const observedAlt = computed(() =>
         The observed ordering accounts for
         {{ observedAlt.count }} of
         {{
-          contextualization.alternative_orderings.reduce((sum, a) => sum + a.count, 0)
+          contextualization.alternative_orderings.reduce((sum: number, a) => sum + a.count, 0)
         }}
         total occurrences across all orderings.
       </p>

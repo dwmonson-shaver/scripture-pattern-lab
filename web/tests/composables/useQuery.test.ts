@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useQuery } from '~~/composables/useQuery'
-import type { QueryNLResponse } from '~~/types/backend'
+import type { QueryNLResponse } from '~~/types/api'
 
 const SAMPLE_RESPONSE: QueryNLResponse = {
   query: 'faith > hope > love',
   validation: {
     status: 'supported',
-    executable_plan: {},
+    executable_plan: null,
     findings: [],
     engine_version: '0.1',
     grounding: 'prior-grounded',

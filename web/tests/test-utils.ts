@@ -10,7 +10,7 @@
  * explicitly here so component tests see the real DOM the user sees.
  */
 
-import { mount, type MountingOptions } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import type { Component } from 'vue'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
@@ -18,18 +18,23 @@ import * as directives from 'vuetify/directives'
 
 import GreekText from '../components/GreekText.vue'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyMountOpts = Record<string, any>
+
 export function mountWithVuetify<T extends Component>(
   component: T,
-  options: MountingOptions<unknown> = {},
+  options: AnyMountOpts = {},
 ) {
   const vuetify = createVuetify({ components, directives })
+  const existingPlugins = (options.global?.plugins ?? []) as unknown[]
+  const existingComponents = (options.global?.components ?? {}) as Record<string, Component>
   return mount(component, {
     ...options,
     global: {
       ...(options.global ?? {}),
-      plugins: [...((options.global?.plugins as unknown[]) ?? []), vuetify],
+      plugins: [...existingPlugins, vuetify],
       components: {
-        ...((options.global?.components as Record<string, Component>) ?? {}),
+        ...existingComponents,
         GreekText,
       },
     },

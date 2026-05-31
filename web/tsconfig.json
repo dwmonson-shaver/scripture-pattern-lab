@@ -1,3 +1,14 @@
 {
-  "extends": "./.nuxt/tsconfig.json"
+  "extends": "./.nuxt/tsconfig.json",
+  "exclude": [
+    "dist",
+    ".data",
+    "node_modules",
+    "node_modules/runtime/server",
+    "node_modules/dist/runtime/server",
+    ".output",
+    "vitest.config.ts",
+    "eslint.config.mjs"
+  ]
 }
+

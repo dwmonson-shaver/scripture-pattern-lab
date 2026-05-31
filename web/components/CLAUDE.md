@@ -16,6 +16,11 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
 - `ResultEnvelope.vue` — renders compiled DSL + result + explanation + contextualization
 - `ErrorPanel.vue` — renders the backend error envelope (`body.detail.error` dispatch)
 - `GreekText.vue` — wraps polytonic Greek strings with `.text-grc`
+- `AutoCreatedConceptNote.vue` — first-class surface for Slice N (DEC-102/104/105)
+  Tier-1 auto-creation event. Renders the backend's authoritative
+  "machine/lexicon-sourced — unverified — starting prior" wording verbatim,
+  the pulled-in lemmas in Greek, and (when `document_available`) a link to
+  `/concept/:name` (the persisted two-part Conceptual Document view).
 
 ## Dependencies
 

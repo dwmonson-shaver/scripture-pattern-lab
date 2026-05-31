@@ -1,4 +1,4 @@
-import type { BackendErrorBody, QueryNLResponse } from '~~/types/backend'
+import type { BackendErrorBody, QueryNLResponse } from '~~/types/api'
 
 /**
  * Client-visible error shape. Parallel to but deliberately not identical

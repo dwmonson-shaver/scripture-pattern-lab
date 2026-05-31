@@ -2,6 +2,28 @@
 definePageMeta({ title: 'Scripture Pattern Lab' })
 
 const { nlQuery, pending, response, error, run } = useQuery()
+
+/**
+ * The NL response has two shapes (Slice L Decision #6): executed (four
+ * pipeline fields populated) vs. clarification (all four null). Narrow
+ * here so `<ResultEnvelope>` gets the executed shape it expects. The
+ * clarification UI is out of scope for this slice — when it lands it
+ * will branch off `response.value?.clarification` independently.
+ */
+const executedResponse = computed(() => {
+  const r = response.value
+  if (!r) return null
+  if (!r.validation || !r.result || !r.explanation || !r.translation) return null
+  return {
+    ...r,
+    validation: r.validation,
+    result: r.result,
+    explanation: r.explanation,
+    translation: r.translation,
+  }
+})
+
+const autoCreatedNote = computed(() => response.value?.auto_created_concept ?? null)
 </script>
 
 <template>
@@ -19,7 +41,9 @@ const { nlQuery, pending, response, error, run } = useQuery()
 
       <ErrorPanel v-if="error" :error="error" />
 
-      <ResultEnvelope v-if="response" :response="response" />
+      <AutoCreatedConceptNote v-if="autoCreatedNote" :note="autoCreatedNote" />
+
+      <ResultEnvelope v-if="executedResponse" :response="executedResponse" />
     </v-col>
   </v-row>
 </template>
