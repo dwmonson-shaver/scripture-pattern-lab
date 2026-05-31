@@ -65,7 +65,8 @@ describe('GET /api/sp/concepts/:name/document', () => {
         generated_from: ['TBESG'],
       },
       part1_educational: null,
-      part2_grouping_placeholder: null,
+      part2_grouping: null,
+      part2_grouping_pointer: null,
     }
     const fetchSpy = vi.fn(
       async () =>

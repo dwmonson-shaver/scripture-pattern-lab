@@ -3,7 +3,7 @@ import { mountWithVuetify } from '../test-utils'
 import ConceptDocumentView from '~~/components/ConceptDocumentView.vue'
 import ComparativeLexiconSection from '~~/components/ComparativeLexiconSection.vue'
 import EducationalArticleSection from '~~/components/EducationalArticleSection.vue'
-import Tier2GroupingPlaceholder from '~~/components/Tier2GroupingPlaceholder.vue'
+import Tier2GroupingSection from '~~/components/Tier2GroupingSection.vue'
 import type { ConceptDocument } from '~~/types/api'
 
 // Auto-imports don't resolve under Vitest, so register the child
@@ -11,7 +11,7 @@ import type { ConceptDocument } from '~~/types/api'
 const globalComponents = {
   ComparativeLexiconSection,
   EducationalArticleSection,
-  Tier2GroupingPlaceholder,
+  Tier2GroupingSection,
 }
 
 const DOC_WITH_ARTICLE: ConceptDocument = {
@@ -35,12 +35,35 @@ const DOC_WITH_ARTICLE: ConceptDocument = {
     generated: true,
     model_label: 'claude-opus-4-7',
   },
-  part2_grouping_placeholder: null,
+  part2_grouping: null,
+  part2_grouping_pointer: null,
 }
 
 const DOC_WITHOUT_ARTICLE: ConceptDocument = {
   ...DOC_WITH_ARTICLE,
   part1_educational: null,
+}
+
+const DOC_WITH_GROUPING: ConceptDocument = {
+  ...DOC_WITH_ARTICLE,
+  part2_grouping: {
+    anchor_name: 'humility',
+    members: [
+      { concept_name: 'humility', confidence: 0.95, note: null },
+      { concept_name: 'meekness', confidence: 0.85, note: null },
+      { concept_name: 'lowliness', confidence: 0.75, note: null },
+    ],
+    rationale: 'Humility cluster: ταπεινός / πραΰς family',
+    origin: 'curated',
+    verification_state: 'unverified',
+    created_at: '2026-05-31T00:00:00Z',
+  },
+}
+
+const DOC_WITH_POINTER: ConceptDocument = {
+  ...DOC_WITH_ARTICLE,
+  concept_name: 'meekness',
+  part2_grouping_pointer: { grouping_anchors: ['humility'] },
 }
 
 describe('ConceptDocumentView', () => {
@@ -97,12 +120,31 @@ describe('ConceptDocumentView', () => {
     expect(wrapper.find('[data-testid="educational-article-absent"]').exists()).toBe(true)
   })
 
-  it('always renders the Tier-2 grouping placeholder', () => {
+  it('renders the Tier-2 placeholder when concept is not yet in any grouping', () => {
     const wrapper = mountWithVuetify(ConceptDocumentView, {
       props: { document: DOC_WITH_ARTICLE },
       global: { components: globalComponents },
     })
     expect(wrapper.find('[data-testid="tier2-grouping-placeholder"]').exists()).toBe(true)
+  })
+
+  it('renders the full Tier-2 grouping when the document is an anchor (Slice O)', () => {
+    const wrapper = mountWithVuetify(ConceptDocumentView, {
+      props: { document: DOC_WITH_GROUPING },
+      global: { components: globalComponents },
+    })
+    expect(wrapper.find('[data-testid="tier2-grouping-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tier2-grouping-placeholder"]').exists()).toBe(false)
+  })
+
+  it('renders the pointer card when the document is a member (Slice O)', () => {
+    const wrapper = mountWithVuetify(ConceptDocumentView, {
+      props: { document: DOC_WITH_POINTER },
+      global: { components: globalComponents },
+    })
+    expect(wrapper.find('[data-testid="tier2-grouping-pointer"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tier2-grouping-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tier2-grouping-placeholder"]').exists()).toBe(false)
   })
 
   it('renders sections in document order: comparative before educational before tier2', () => {

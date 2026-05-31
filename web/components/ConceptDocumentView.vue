@@ -4,13 +4,15 @@ import type { ConceptDocument } from '~~/types/api'
 /**
  * Top-level renderer for the persisted Conceptual Document (DEC-106).
  *
- * Renders three sections in order:
+ * Renders four sections in order:
  *   1. Header (concept name + short summary + epistemic chip)
  *   2. Part 1 §1 — Comparative lexicon (deterministic)
  *   3. Part 1 §2 — LLM-generated educational article (clearly labeled)
  *      (omitted when `part1_educational` is null — store-once means an
  *       early-version document may exist without §2)
- *   4. Part 2 — Tier-2 grouping placeholder (always rendered as stub)
+ *   4. Part 2 — Tier-2 grouping section (anchor view / member-pointer
+ *      view / not-yet-a-member placeholder, decided by Tier2GroupingSection
+ *      from `document.part2_grouping` and `document.part2_grouping_pointer`)
  *
  * The §1 / §2 visual distinction (different colors, different chips,
  * different surface treatments) is intentional and load-bearing per
@@ -64,7 +66,10 @@ defineProps<{ document: ConceptDocument }>()
       stored once on first creation.)
     </v-alert>
 
-    <!-- Part 2 — Tier-2 placeholder -->
-    <Tier2GroupingPlaceholder />
+    <!-- Part 2 — Tier-2 grouping section (anchor / member / placeholder) -->
+    <Tier2GroupingSection
+      :grouping="document.part2_grouping ?? null"
+      :pointer="document.part2_grouping_pointer ?? null"
+    />
   </div>
 </template>

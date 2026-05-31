@@ -25,10 +25,16 @@ export function useConceptDocument(name: Ref<string> | string) {
     () => `/api/sp/concepts/${encodeURIComponent(nameRef.value)}/document`,
   )
 
+  // Bucket-NP1-2 fix (DEC-117): lazy: true so a 404 / 500 during SSR direct
+  // URL load surfaces as an inline `<ErrorPanel>` via the normalized error
+  // ref below, instead of throwing a stack page from the server-side fetch.
+  // Client-side navigation (e.g. clicking the link in <AutoCreatedConceptNote>)
+  // already used the inline path; this aligns direct-URL behavior.
   const { data, pending, error, refresh } = useFetch<ConceptDocument>(url, {
     key: () => `concept-document-${nameRef.value}`,
     watch: [nameRef],
     server: true,
+    lazy: true,
   })
 
   const normalizedError = computed<ProxyErrorShape | null>(() => {

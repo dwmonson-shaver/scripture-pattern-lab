@@ -195,7 +195,8 @@ const SAMPLE_DOC_RESPONSE = {
   short_summary: 'auto-created Tier-1 prior pending corpus review',
   part1_comparative: { english_term: 'humility', rows: [], generated_from: ['stub'] },
   part1_educational: null,
-  part2_grouping_placeholder: null,
+  part2_grouping: null,
+  part2_grouping_pointer: null,
 }
 
 describe('getFromBackend', () => {

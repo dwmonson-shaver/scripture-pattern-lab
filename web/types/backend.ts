@@ -286,6 +286,11 @@ export interface components {
         /**
          * ConceptDocument
          * @description The persisted two-part Conceptual Document.
+         *
+         *   Part 2 (Tier-2 grouping) takes one of three shapes (Slice O):
+         *     * part2_grouping — full Tier2Grouping on the anchor concept's doc
+         *     * part2_grouping_pointer — GroupingPointer on a member concept's doc
+         *     * both null — concept not yet a member of any grouping
          */
         ConceptDocument: {
             /** Concept Name */
@@ -294,10 +299,48 @@ export interface components {
             short_summary: string;
             part1_comparative: components["schemas"]["ComparativeLexiconSection"];
             part1_educational?: components["schemas"]["EducationalArticleSection"] | null;
-            /** Part2 Grouping Placeholder */
-            part2_grouping_placeholder?: {
-                [key: string]: unknown;
-            } | null;
+            part2_grouping?: components["schemas"]["Tier2Grouping"] | null;
+            part2_grouping_pointer?: components["schemas"]["GroupingPointer"] | null;
+        };
+        /**
+         * GroupingMember
+         * @description One member of a Tier-2 grouping with its per-edge confidence.
+         */
+        GroupingMember: {
+            /** Concept Name */
+            concept_name: string;
+            /** Confidence */
+            confidence: number;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * GroupingPointer
+         * @description Pointer stored on a non-anchor member's document, listing the
+         *     anchor concept(s) whose document carries the canonical grouping blob.
+         */
+        GroupingPointer: {
+            /** Grouping Anchors */
+            grouping_anchors: string[];
+        };
+        /**
+         * Tier2Grouping
+         * @description Persisted Tier-2 grouping claim. ALWAYS verification_state='unverified'
+         *     (DEC-081 / DEC-115 runtime guard).
+         */
+        Tier2Grouping: {
+            /** Anchor Name */
+            anchor_name: string;
+            /** Members */
+            members: components["schemas"]["GroupingMember"][];
+            /** Rationale */
+            rationale: string;
+            /** Origin */
+            origin?: "curated" | "ai_suggested";
+            /** Verification State */
+            verification_state?: "unverified";
+            /** Created At */
+            created_at: string;
         };
         /**
          * ConceptSummary
