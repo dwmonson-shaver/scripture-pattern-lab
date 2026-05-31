@@ -1260,3 +1260,55 @@
 - Files: `thoughts/structure-concept-layers-2026-05-26.md` (the phase outline).
 - Spec refs: —.
 - Cross-refs: DEC-102, DEC-104, DEC-106.
+
+## DEC-109 — Auto-create note placement: above the result card, not inside it
+- Status: Accepted.
+- Question: Where on the home page should the Slice N `auto_created_concept` envelope field render?
+- Decision: Render `<AutoCreatedConceptNote>` as a standalone `v-card` above `<ResultEnvelope>` whenever `response.auto_created_concept` is set, on both the executed and (future) clarification response branches. The component renders the backend's `summary` field verbatim, the lemmas wrapped in `<GreekText>` chips, and surfaces a `v-btn` linking to `/concept/:name` only when `document_available === true`.
+- Rationale: the note describes a meta-event ("the system added a Tier-1 concept before running your query") that happened BEFORE the matches were retrieved. Placing it inside the result card would imply it's a property of those matches; placing it above keeps the epistemic line clean. Surfacing the backend summary VERBATIM (no paraphrase) preserves the load-bearing "machine/lexicon-sourced — unverified — starting prior" wording that DEC-105 added for not-silent disclosure.
+- Alternatives considered: (a) inline at the top of the result card — rejected (blurs the meta vs match boundary); (b) toast/snackbar — rejected (transient; the unverified-prior disclosure must persist as long as the result does); (c) accordion behind a chip on the result card — rejected (hides the not-silent contract DEC-105 closed).
+- Confidence: High.
+- Made-by: orchestrator 2026-05-31.
+- Commit: `a5123a4`.
+- Files: `web/components/AutoCreatedConceptNote.vue`; `web/pages/index.vue`; `web/tests/components/AutoCreatedConceptNote.test.ts`.
+- Spec refs: REQ:08.lexicon-sourcing, REQ:09.api-gateway (consumer).
+- Cross-refs: DEC-081, DEC-105, DEC-106.
+
+## DEC-110 — Concept Document page route shape: singular `/concept/:name`, plural `/api/v1/concepts/:name/document`
+- Status: Accepted.
+- Question: What URL should the user-facing Conceptual Document view live at, and how does the proxy route relate to the backend route?
+- Decision: User-facing page at `/concept/:name` (singular, no `/document` suffix). Server proxy at `/api/sp/concepts/:name/document` (mirrors the backend 1:1). The route params and proxy URL re-encode the concept name so spaces, Greek, and `/` survive the round trip.
+- Rationale: the singular URL reads more naturally for a single-document view ("the concept page for X"). The proxy URL stays plural+suffix so the proxy↔backend mirror is mechanical — no surprise mappings. Future Tier-2 surfaces (groupings, curator state) can hang off `/concept/:name` as additional sections without changing the route shape.
+- Alternatives considered: (a) mirror the backend 1:1 (`/concepts/:name/document`) on the page route — rejected (more verbose and reads less naturally); (b) `/c/:name` short alias — rejected (premature optimization; one extra character isn't worth the obscurity).
+- Confidence: High.
+- Made-by: orchestrator 2026-05-31.
+- Commit: `4956dfa`.
+- Files: `web/pages/concept/[name].vue`; `web/composables/useConceptDocument.ts`; `web/server/api/sp/concepts/[name]/document.get.ts`.
+- Spec refs: REQ:08.concept-document (consumer), REQ:09.api-gateway (consumer).
+- Cross-refs: DEC-106.
+
+## DEC-111 — Epistemic split enforced by two separate cards with contrasting surface treatment
+- Status: Accepted.
+- Question: How does the Conceptual Document view make the §1 (deterministic) vs §2 (LLM-generated) distinction visually unmistakable to a reader who skims?
+- Decision: Two separate `v-card` components with intentionally distinct surface treatments. §1 (`ComparativeLexiconSection.vue`): outlined variant, green "Lexicon data" `v-chip` with `mdi-database-check-outline` icon, leading caption "Lemmas and verse references pulled directly from open-licensed lexicon data. No LLM, no opinion." §2 (`EducationalArticleSection.vue`): tonal purple card, "LLM-generated commentary" `v-chip` with `mdi-robot-outline` icon, leading `v-alert` disclaimer "Treat it as a starting prior, not a confirmed claim — the deterministic table in section 1 is the ground truth." The §1-before-§2 ordering is enforced by a test invariant in `ConceptDocumentView.test.ts`.
+- Rationale: DEC-106 makes the epistemic split the WHOLE POINT of the two-part document. A reader who skims must immediately register which section is ground-truth data vs cited LLM commentary — collapsing the visual distinction would dilute the project's epistemic charter (DEC-024). Color (green vs purple) + surface treatment (outlined vs tonal) + icon (database vs robot) + leading explanatory text are layered redundancies so the distinction survives color-blindness, screen readers, and missed icons.
+- Alternatives considered: (a) one card with internal section headers — rejected (the visual distinction collapses); (b) a tabbed view — rejected (hides §1 OR §2 from view at any one time, which is exactly what the epistemic charter forbids); (c) color only — rejected (single-layer distinction; fails for color-blind readers).
+- Confidence: High.
+- Made-by: orchestrator 2026-05-31.
+- Commit: `4956dfa`.
+- Files: `web/components/ConceptDocumentView.vue`; `web/components/ComparativeLexiconSection.vue`; `web/components/EducationalArticleSection.vue`; `web/components/Tier2GroupingPlaceholder.vue`; `web/tests/components/ConceptDocumentView.test.ts` (ordering invariant).
+- Spec refs: REQ:08.concept-document (consumer).
+- Cross-refs: DEC-024, DEC-081, DEC-106.
+
+## DEC-112 — GitHub Actions workflow at `.github/workflows/` repo root with `defaults.run.working-directory: web` + `paths:` filter
+- Status: Accepted.
+- Question: How does the CI workflow live with the Nuxt app being in `web/`?
+- Decision: Workflow file at `.github/workflows/deploy.yml` (repo root — GitHub Actions does not discover workflows in subdirectories). Inside the job, `defaults.run.working-directory: web` so every `npm run` step works unchanged. `actions/cache` paths get explicit `web/` prefixes (the cache step ignores `defaults.run`). `cloudflare/wrangler-action@v3` gets `workingDirectory: web` so it finds `wrangler.toml`. `on.push.paths` is filtered to `[web/**, .github/workflows/deploy.yml]` so backend-only commits don't churn the Worker deploy. Required GitHub Secrets documented in `.github/workflows/README.md`.
+- Rationale: closes Bucket Workflow-1 (info finding from the 2026-05-30 prod-smoke). The previous location `web/.github/workflows/deploy.yml` was structurally invisible to GitHub Actions, so the CI pipeline never fired once after Slice J1 shipped (the J1-4 frontend fix sat un-deployed until manual `wrangler deploy`). The `paths:` filter is the smallest add that keeps backend-only commits (which are most commits) from spinning up a Worker build/deploy cycle they don't affect.
+- Alternatives considered: (a) keep the workflow under `web/.github/` — rejected (GitHub Actions cannot see it); (b) restructure the repo so `web/` is the root — rejected (would orphan the `src/`, `docs/`, `tests/` trees and break the existing backend dev workflow); (c) no `paths:` filter — rejected (would deploy the Worker on every backend commit, wasting CI minutes and confusing the deployment audit trail).
+- Confidence: High.
+- Made-by: orchestrator 2026-05-31.
+- Commit: `c37f5d0`.
+- Files: `.github/workflows/deploy.yml`; `.github/workflows/README.md` (new).
+- Spec refs: —.
+- Cross-refs: prod-smoke Workflow-1 (`docs/reviews/review-slice-n-prod-smoke-2026-05-30.md`).
