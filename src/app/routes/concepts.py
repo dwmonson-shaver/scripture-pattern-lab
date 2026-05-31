@@ -3,9 +3,10 @@
 `GET /api/v1/concepts` exposes the registry contents (DEC-076: flat list of
 `ConceptSummary` with embedded lemma lists; not paginated at MVP scale —
 Bucket 9). `GET /api/v1/concepts/{name}/document` (Slice N) returns the
-persisted two-part Conceptual Document for a concept (the comparative lexicon
-section + optional LLM educational section + Tier-2 placeholder), stored once
-and retrieved later — never regenerated per query.
+persisted two-part Conceptual Document for a concept: the comparative lexicon
+section + optional LLM educational section + optional Tier-2 grouping (Slice O
+— either a full grouping on an anchor concept or a pointer on a member),
+stored once and retrieved later — never regenerated per query.
 """
 
 from __future__ import annotations
