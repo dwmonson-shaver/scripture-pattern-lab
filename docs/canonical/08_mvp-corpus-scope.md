@@ -156,9 +156,26 @@ Every Tier-1 auto-creation yields a SHORT inline summary in the query interactio
 - **Part 1 = the Tier-1 article (now)**, two clearly-labeled sections:
   - **§1 Pure comparative lexicon analysis** — DETERMINISTIC, NO LLM: which Greek lemmas, which Strong's, the usual English renderings, the corpus verse references. A factual comparison drawn straight from the ingested datasets + corpus. No opinion, no assertion.
   - **§2 LLM-generated educational analysis** — explicitly labeled as generated. Beginner-friendly prose where the LLM is strictly an EXPLAINER/ASSEMBLER of the §1 evidence it is handed; it cites its sources and is stored WITH those citations. It NEVER feeds back into the concept's lemma set or verification state. Opt-in (`SPL_CONCEPT_ARTICLE_LLM`), NL path only; on LLM unavailable/FALLBACK/empty it degrades to §1-only (the concept + §1 never depend on it).
-- **Part 2 = the Tier-2 grouping artifact (later slice)** — a structural placeholder/slot only this slice (always NULL).
+- **Part 2 = the Tier-2 grouping artifact** — formerly a placeholder; SHIPPED in Slice O (see `REQ:08.tier-2-groupings` below). The `part2_grouping` JSONB column on `concept_documents` carries either a full Tier-2 `Tier2Grouping` (when the concept is the grouping anchor) or a `GroupingPointer` (when the concept is a non-anchor member), discriminated by the JSONB shape. NULL when the concept is not yet part of any grouping.
 
-The epistemic line is structural: the **concept** (lemma set, origin, verification state, cited corpus verses) is regenerable-proof ground truth (DEC-024); the **article §2** is regenerable commentary layered on top (DEC-081, DEC-106). The persisted document is retrieved via `GET /api/v1/concepts/{name}/document` (404 if not yet generated).
+The epistemic line is structural: the **concept** (lemma set, origin, verification state, cited corpus verses) is regenerable-proof ground truth (DEC-024); the **article §2** is regenerable commentary layered on top (DEC-081, DEC-106); the **Tier-2 grouping** is a hypothesis the corpus + a human must validate (DEC-081, DEC-115). The persisted document is retrieved via `GET /api/v1/concepts/{name}/document` (404 if not yet generated).
+
+<!-- REQ:08.tier-2-groupings -->
+## Tier-2 Conceptual Groupings (Slice O)
+
+A **Tier-2 grouping** is a claim that 2+ existing concepts "hang together" conceptually — distinct from Tier-1 lexicon translation mappings (DEC-102) and from the binary asymmetric `polarity_claims` / `inverse_claims` tables. Tier-2 is the curator territory where DEC-081 actually bites: every grouping is a HYPOTHESIS the corpus + a human must validate.
+
+**Persistence (Slice O — DEC-114).** Groupings persist as JSONB on the existing `concept_documents.part2_grouping` column. Two shapes share that slot:
+- The grouping **anchor** concept's document carries the full `Tier2Grouping` blob: `{ anchor_name, members: [{concept_name, confidence ∈ [0,1], note?}], rationale, origin ∈ {curated, ai_suggested}, verification_state, created_at }`.
+- Every non-anchor **member** concept's document carries a `GroupingPointer { grouping_anchors: [str] }` back to the anchor(s). A concept may belong to multiple groupings; the pointer's anchor list grows additively.
+
+**Runtime DEC-081 enforcement (Slice O — DEC-115).** Two-layer guard:
+- **Layer A (structural):** `src/ontology/concept_grouping.py::write_grouping(...)` accepts NO `verification_state` parameter. The only value ever written is the module constant `GROUPING_VSTATE: Literal['unverified']`. This is the same pattern `auto_create_cited_concept` uses for Tier-1 — new caller paths cannot bypass.
+- **Layer B (model-level):** `Tier2Grouping.verification_state` is typed `Literal['unverified']` (Pydantic rejects any other value at construction) AND a `model_validator` re-asserts the invariant with a DEC-081-named error message, catching documented bypasses like `model_construct` when their output round-trips through `model_validate`. Layer B-i is load-bearing; B-ii names DEC-081 for audit/debug.
+
+**What's NOT in scope for Slice O (deliberately bucketed for future Tier-2 slices):** phrase-valued members (DSL fragments as members); the "same Greek, different English" evidence finder (blocked on per-token English column); LLM evidence-assembly / white-paper-style commentary; promotion-to-`human_confirmed` write path (the curator workflow — exactly what the runtime guard exists to prevent from being added by accident yet); match-type expansion (`expanded` / `grouping`).
+
+**Worked example.** `scripts/db/seed_humility_grouping.py` (DEC-116) seeds the humility/meekness/lowliness cluster — the concrete bridge for Bucket-N3 (Tier-1 narrow recall: TBESG glosses verb/adjective forms as "humble"/"humble oneself" rather than the noun, so the Tier-1 path produced only `ταπεινοφροσύνη` for "humility"; the Tier-2 grouping bridges that recall gap by surfacing the wider conceptual neighborhood).
 
 <!-- REQ:08.ingestion-pipeline -->
 ## Ingestion Pipeline — MVP

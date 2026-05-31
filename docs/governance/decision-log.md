@@ -1312,3 +1312,72 @@
 - Files: `.github/workflows/deploy.yml`; `.github/workflows/README.md` (new).
 - Spec refs: —.
 - Cross-refs: prod-smoke Workflow-1 (`docs/reviews/review-slice-n-prod-smoke-2026-05-30.md`).
+
+## DEC-113 — Tier-2 grouping anchor model: one anchor, full blob on anchor doc, pointers on members
+- Status: Accepted.
+- Question: How is a Tier-2 grouping persisted across multiple concept documents?
+- Decision: A grouping is anchored to ONE concept document (the "anchor"). The anchor's `concept_documents.part2_grouping` JSONB column carries the full `Tier2Grouping` blob (members + per-edge confidence + rationale + verification_state + origin + created_at). Every non-anchor member's `concept_documents.part2_grouping` column carries a lightweight `GroupingPointer{grouping_anchors: [str]}` back to the anchor; a single concept may be a member of multiple groupings, so the pointer's anchor list is additive across writes.
+- Rationale: matches DEC-106's per-concept-document store-once contract — each document is the canonical store for its own concept's view of the world. Avoids a separate `concept_groupings` relational table (premature relationalization for a single-anchor wedge slice). Pointers make any member concept navigable back to the canonical store in one fetch. Idempotent writes are simple because the anchor row's blob is updated in place; pointer writes are merged additively without conflict.
+- Alternatives considered: (a) a separate `concept_groupings` table — rejected for this slice as premature relationalization (no query yet needs graph traversal); a future slice can extract the table from the JSONB if a real query justifies it. (b) Symmetric storage (every member carries the full grouping) — rejected (write amplification + drift risk across copies). (c) Pointer-only (anchor concept also stores only a pointer to a separate row) — rejected (loses the per-concept-document store-once symmetry).
+- Confidence: High (low-stakes, structural).
+- Made-by: orchestrator 2026-05-31 [autonomous].
+- Commit: `c2eaac8` (Phase O1) + `951082f` (Phase O2).
+- Files: `src/ontology/concept_grouping.py`; `src/ontology/concept_document.py`.
+- Spec refs: REQ:08.tier-2-groupings; REQ:08.concept-document (extended).
+- Cross-refs: DEC-106, DEC-114.
+
+## DEC-114 — Tier-2 grouping persistence shape: JSONB on existing `part2_grouping` column, no new table
+- Status: Accepted.
+- Question: Where do Tier-2 groupings live in the schema?
+- Decision: Use the existing `concept_documents.part2_grouping JSONB NULL` column (already in the schema since Slice N as a "always NULL for now" placeholder for Tier-2). Two distinct JSONB shapes share the column, discriminated unambiguously by a single field: `Tier2Grouping` carries `members` (an array); `GroupingPointer` carries `grouping_anchors` (an array). The reader auto-detects the shape via key presence and degrades to `(None, None)` on `model_validate` failure rather than blowing up the whole document (R2 mitigation — future schema drift on the blob must not make documents unreadable).
+- Rationale: zero schema migration for the slice. The column was structurally provisioned for exactly this purpose. Discriminating on field presence rather than a `type` tag keeps the wire format minimal and the writer simple (the model itself IS the discriminator). Degrading on parse failure is the same "store-once retrieve-later" discipline the LLM article (§2) uses — staleness should never cascade into broken reads.
+- Alternatives considered: (a) new `concept_groupings` table — rejected (DEC-113 rationale). (b) Two new columns (`part2_grouping_blob` + `part2_grouping_pointer_blob`) — rejected (column proliferation for a wedge slice; the discriminator is trivially recoverable from the existing single column). (c) `type` tag inside the blob — rejected (single-field-presence discriminator is enough and slightly leaner).
+- Confidence: High (low-stakes, schema-light).
+- Made-by: orchestrator 2026-05-31 [autonomous].
+- Commit: `951082f` (Phase O2).
+- Files: `src/ontology/concept_grouping.py`; `src/ontology/concept_document.py` (`_decode_part2`, extended `persist_document`).
+- Spec refs: REQ:08.tier-2-groupings.
+- Cross-refs: DEC-106, DEC-113.
+
+## DEC-115 — Runtime DEC-081 guard: two-layer enforcement (structural Layer A + model-level Layer B)
+- Status: Accepted. **FLAG FOR USER — high-stakes, touches DEC-081 charter directly.**
+- Question: How is DEC-081's "Tier-2 groupings are NEVER auto-promoted to `human_confirmed`" enforced at runtime (not just convention + tests)?
+- Decision: Two layers, both runtime, both tested.
+  - **Layer A (structural):** `src/ontology/concept_grouping.py::write_grouping(grouping, engine)` accepts NO `verification_state` parameter. The only value ever written is the module-level constant `GROUPING_VSTATE: VerificationState = "unverified"`. This is the same pattern `auto_create_cited_concept` (Slice N) uses for Tier-1 concepts. Verified by `tests/integration/test_concept_grouping_writer.py::TestLayerAStructuralGuard::test_write_grouping_has_no_verification_state_parameter` which introspects `inspect.signature(write_grouping)`.
+  - **Layer B-i (model-level Pydantic Literal):** `Tier2Grouping.verification_state` is typed `Literal['unverified']`. Pydantic rejects any other value at construction time with a `ValidationError`. Verified by `tests/unit/test_concept_grouping_models.py::test_verification_state_literal_rejects_human_confirmed` and `..._rejects_corpus_observed`.
+  - **Layer B-ii (model_validator audit reaffirmation):** `_guard_dec_081` model_validator names DEC-081 explicitly in its `ValueError` message. Catches documented bypasses (e.g. `Tier2Grouping.model_construct(...)` whose output round-trips through `model_validate`) and produces a debuggable error trail naming the breached invariant.
+- What this does NOT protect against: raw SQL `UPDATE concept_documents SET part2_grouping = ...` from outside the writer path. Acceptable for this slice because (a) no such code exists today, (b) DB-level CHECK constraints on JSONB are awkward, (c) the guard is at the application boundary where new code is most likely to creep in. A future curator-promotion slice (which deliberately writes `human_confirmed` from explicit human input) is the natural place to revisit whether a DB-level trigger CHECK is also warranted.
+- Rationale: prior slices (N+) documented DEC-081 enforcement as "convention + test assertion, not runtime guard" (research §Q8). This slice introduces the first NEW writer to the registry's verification_state surface in months, and the second tier (Tier-2) is where DEC-081 actually bites — so it's the right moment to convert "convention" into "structural + runtime." Layer A protects against new caller paths; Layer B protects against direct model instantiation in test code, future MCP tools, or any code path that bypasses the writer. Belt-and-suspenders is deliberate.
+- Alternatives considered: (a) Layer A only — rejected (a future MCP tool might construct `Tier2Grouping(verification_state='human_confirmed', ...)` and skip the writer entirely). (b) Layer B only — rejected (a future writer that took a `verification_state` parameter could pass `'unverified'` today and `'human_confirmed'` tomorrow without re-reading the model's Literal). (c) DB CHECK on the JSONB — rejected (Postgres JSONB constraints are awkward, the application boundary is where new code creeps in, and a CHECK can be added later if the curator slice proves the application guard insufficient).
+- Confidence: High on the structural design; **flagging for user ratification because any change to DEC-081 enforcement shape is project-charter territory and should be ratified at slice close even if the implementation is correct.**
+- Made-by: orchestrator 2026-05-31 [FLAG — high-stakes; implemented autopilot, ratify at close].
+- Commit: `c2eaac8` (Phase O1 Layer B) + `951082f` (Phase O2 Layer A).
+- Files: `src/ontology/concept_grouping.py`; `tests/unit/test_concept_grouping_models.py`; `tests/integration/test_concept_grouping_writer.py`.
+- Spec refs: REQ:08.tier-2-groupings.
+- Cross-refs: DEC-024, DEC-081 (the charter this enforces), DEC-102.
+
+## DEC-116 — Worked-example seed for the humility/meekness/lowliness cluster (Bucket-N3 bridge)
+- Status: Accepted.
+- Question: What concrete grouping does Slice O ship as a demo + reproducible test fixture?
+- Decision: `scripts/db/seed_humility_grouping.py` seeds the humility cluster: anchor `humility` (confidence 0.95) + members `meekness` (0.85) and `lowliness` (0.75), rationale naming Bucket-N3 explicitly. The script auto-creates each member concept via the Slice-N Tier-1 path (`resolve_english_term` → `auto_create_cited_concept`) up front, persists the Conceptual Document for each, then writes the Tier-2 grouping. Idempotent: re-running with the same member set is a documented no-op. Degrades gracefully: if Bucket-N3's narrow TBESG recall fails to resolve a specific member, the script prints a `[skip]` line and continues with whatever members were resolvable (the anchor must always resolve, else exit 2 with a hint to run `ingest_lexicon.py`).
+- Rationale: Bucket-N3 (from the 2026-05-30 prod-smoke) named "Tier-1 narrow gloss recall — `humility` → 1 lemma vs design's anticipated 3–5" as the canonical Tier-2 worked-example trigger. The humility cluster IS the bridge Bucket-N3 was waiting for: Tier-2's job is to surface `ταπεινός` / `πραΰς` as conceptual neighbors of `ταπεινοφροσύνη` even when TBESG glosses each verb/adjective form as "humble"/"humble oneself" rather than "humility." Hand-picked confidences (0.95/0.85/0.75) are illustrative — real per-edge confidence weighting is a future scoring slice's territory; the slice's value is the runnable observable surface, not the precision of the weights.
+- Alternatives considered: (a) Auto-pick the cluster from corpus co-occurrence — rejected (premature; the slice's job is the persistence + guard infrastructure, not the cluster-discovery algorithm). (b) Demo a different cluster (e.g. faith/hope/love which are already seeded as concepts) — rejected (Bucket-N3 names humility specifically; demoing the bucket's real-data case strengthens the closure justification). (c) Skip the seed entirely and write groupings only from tests — rejected (loses the reproducible-demo property; the seed IS the user-runnable smoke test of the slice end-to-end).
+- Confidence: High (low-stakes; fixture-shaped).
+- Made-by: orchestrator 2026-05-31 [autonomous].
+- Commit: `fb31f0e` (Phase O4).
+- Files: `scripts/db/seed_humility_grouping.py`; `tests/integration/test_seed_humility_grouping.py`.
+- Spec refs: REQ:08.tier-2-groupings (worked example).
+- Cross-refs: DEC-102 (Tier-1 path it builds on), DEC-104 (auto-create infrastructure), prod-smoke Bucket-N3.
+
+## DEC-117 — Bucket-NP1-2 closure scoped into Slice O: `useConceptDocument` adds `lazy: true`
+- Status: Accepted.
+- Question: Bucket-NP1-2 named the `useConceptDocument` composable's missing `lazy: true` option as a defensive fix for direct-URL SSR load (404/500 throws an SSR stack page instead of inline `<ErrorPanel>`). Slice O touches the Conceptual Document view to add the Tier-2 grouping section — should the bucket fix land here?
+- Decision: Yes. Bucket-NP1-2's trigger ("next frontend slice touching `useConceptDocument` or `pages/concept/[name].vue`") fires on this slice. The fix is one option-object key added to the existing `useFetch` call. The composable's pre-existing `normalizedError` ref already does the inline-error work; `lazy: true` simply changes the SSR behavior to use that path instead of throwing.
+- Rationale: matches the slice-start bucket-triage discipline (CLAUDE.md "Slice Boundaries"). Triggers that fire on a slice get scoped IN rather than re-deferred. The fix is one line; deferring it would mean the next frontend slice has to re-touch this composable again, doubling the touch.
+- Alternatives considered: (a) Re-defer to a dedicated frontend hardening slice — rejected (the trigger fires; deferring would be a "filed and forgotten" anti-pattern). (b) Add a server-side error handler instead — rejected (more code for the same outcome; `lazy: true` is the idiomatic Nuxt fix). (c) Bigger refactor to remove the `normalizedError` shim — rejected (out of scope for this slice).
+- Confidence: High (low-stakes, single-line fix).
+- Made-by: orchestrator 2026-05-31 [autonomous].
+- Commit: `e26cd70` (Phase O5).
+- Files: `web/composables/useConceptDocument.ts`.
+- Spec refs: REQ:09.tier-2-groupings-api (consumer).
+- Cross-refs: prior Bucket-NP1-2 row in `docs/governance/reviews-log.md`.

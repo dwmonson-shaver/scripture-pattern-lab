@@ -66,6 +66,7 @@ The backend is decomposed into logical components with clear boundaries, but the
 - `POST /api/v1/query/validate` — Accept DSL, return ValidationResult without executing. **Slice I.** Per DEC-079, all `validation.status` values (supported/partial/unsupported) return HTTP 200; the only 422 path is `parse_error` on malformed DSL. Response shape: `QueryValidateResponse{query, validation}` — mirrors QueryDSLResponse minus the unused `result` and `explanation` fields.
 - `GET /api/v1/capabilities` — Return current capability registry. **Slice I.** Per DEC-075, response_model is `CapabilityRegistry` directly (no envelope wrapping). UI clients can branch on the `version` field for forward compat.
 - `GET /api/v1/concepts` — Return concept registry. **Slice I.** Optional `language` query param (default `"grc"`). Per DEC-076, flat list of `ConceptSummary{name, description, verification_state, lemma_count, lemmas}` with embedded lemma lists. Not paginated at MVP scale (Bucket 9 trigger when registry grows past ~500 rows). Concepts with no lemmas in the requested language still appear with `lemmas=[]` (forward-compat invariant for multi-language registry growth).
+- `GET /api/v1/concepts/{name}/document` — Return the persisted Conceptual Document for a concept (Slice N; extended Slice O — see `REQ:09.tier-2-groupings-api`). Response shape: `ConceptDocument{concept_name, short_summary, part1_comparative, part1_educational, part2_grouping, part2_grouping_pointer}`. 404 if not generated.
 - `GET /api/v1/health` — Health check (Slice G; liveness only per DEC-066).
 
 **Input/output format**: JSON. Requests and responses use typed schemas.
@@ -137,6 +138,18 @@ all upstream code is sync (`engine.connect()`, `validate()`,
 `retrieve()`, `explain()`); FastAPI offloads sync handlers to a
 thread pool, which is correct here. SQLAlchemy `Engine` is
 thread-safe across `connect()` calls.
+
+<!-- REQ:09.tier-2-groupings-api -->
+**Tier-2 grouping fields on `GET /api/v1/concepts/{name}/document`** (Slice O, additive — no new route per DEC-110 split-route precedent). The `ConceptDocument` response gains two mutually-exclusive nullable fields:
+
+```python
+class ConceptDocument(BaseModel):
+    ...
+    part2_grouping: Tier2Grouping | None = None              # set on anchor docs
+    part2_grouping_pointer: GroupingPointer | None = None    # set on member docs
+```
+
+`Tier2Grouping = {anchor_name, members: [{concept_name, confidence, note?}], rationale, origin ∈ {curated, ai_suggested}, verification_state == 'unverified', created_at}`. `GroupingPointer = {grouping_anchors: [str]}`. The `verification_state` field is structurally pinned to `'unverified'` over the wire (DEC-081 / DEC-115 runtime guard — see `REQ:08.tier-2-groupings`); the response is the same regardless of who's calling, so clients can rely on the invariant without re-asserting it.
 
 <!-- REQ:09.nl-to-dsl -->
 ### 2. NL-to-DSL Service
