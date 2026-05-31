@@ -253,9 +253,22 @@ def _decode_part2(blob: dict | None) -> tuple[Tier2Grouping | None, GroupingPoin
 
     Both Tier2Grouping and GroupingPointer have non-overlapping required
     fields ('members' vs 'grouping_anchors'), so the discriminator is
-    unambiguous. On parse failure we log and return (None, None) rather than
-    propagate — DEC-114 R2 mitigation: a future schema drift on the JSONB
-    blob must NOT make the entire document unreadable.
+    unambiguous IF the writer respects the invariant. On parse failure we log
+    and return (None, None) rather than propagate — DEC-114 R2 mitigation:
+    a future schema drift on the JSONB blob must NOT make the entire document
+    unreadable.
+
+    **Discriminator-priority discipline (O-CLOSE-001):** `_decode_part2`
+    checks 'members' BEFORE 'grouping_anchors'. The writer
+    (`write_grouping`) guarantees these two keys are MUTUALLY EXCLUSIVE on a
+    single row: an anchor concept's blob has 'members' (the full Tier2Grouping
+    shape) and no 'grouping_anchors'; a member concept's blob has
+    'grouping_anchors' (the GroupingPointer shape) and no 'members'. Any
+    future writer that produces both keys on a single row WILL be silently
+    interpreted as a `Tier2Grouping` here (and as a `GroupingPointer` by the
+    sibling `read_grouping_pointer` reader), causing the two readers to
+    disagree on the same row. Maintain the writer invariant; do not relax it
+    without updating both readers in lockstep.
     """
     if not isinstance(blob, dict):
         return (None, None)
