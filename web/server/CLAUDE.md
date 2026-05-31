@@ -13,7 +13,10 @@ Nitro server runtime. Routes in `api/`, utilities in `utils/`.
 ## Key Files (post Phase J1.2)
 
 - `api/sp/query/nl.post.ts` — proxies the NL query route to the backend
-- `utils/backend.ts` — typed fetch wrapper that injects the bearer token
+- `api/sp/concepts/[name]/document.get.ts` — proxies the persisted
+  Conceptual Document (Slice N, DEC-106)
+- `utils/backend.ts` — typed fetch wrappers (`proxyToBackend` for POST,
+  `getFromBackend` for GET) that inject the bearer token
 
 ## Dependencies
 

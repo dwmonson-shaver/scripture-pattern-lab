@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { proxyToBackend } from '~~/server/utils/backend'
+import { getFromBackend, proxyToBackend } from '~~/server/utils/backend'
 
 const SAMPLE_NL_REQUEST = { nl_query: 'sequences where faith leads to hope' }
 const SAMPLE_NL_RESPONSE = {
@@ -187,5 +187,139 @@ describe('proxyToBackend', () => {
     })
     const [url] = (fetchSpy as unknown as { mock: { calls: [string][] } }).mock.calls[0]
     expect(url).toBe('https://backend.test/api/v1/query/nl')
+  })
+})
+
+const SAMPLE_DOC_RESPONSE = {
+  concept_name: 'humility',
+  short_summary: 'auto-created Tier-1 prior pending corpus review',
+  part1_comparative: { english_term: 'humility', rows: [], generated_from: ['stub'] },
+  part1_educational: null,
+  part2_grouping_placeholder: null,
+}
+
+describe('getFromBackend', () => {
+  it('forwards GET with bearer auth and Accept: application/json', async () => {
+    const fetchSpy = mockFetchOk(SAMPLE_DOC_RESPONSE)
+    await getFromBackend({
+      config: baseConfig,
+      path: '/api/v1/concepts/humility/document',
+      fetchImpl: fetchSpy,
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const [url, init] = (fetchSpy as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0]
+    expect(url).toBe('https://backend.test/api/v1/concepts/humility/document')
+    expect(init.method).toBe('GET')
+    const headers = init.headers as Record<string, string>
+    expect(headers.Authorization).toBe('Bearer test-token-abc')
+    expect(headers.Accept).toBe('application/json')
+    // No body on a GET.
+    expect(init.body).toBeUndefined()
+  })
+
+  it('returns the backend body on 2xx', async () => {
+    const fetchSpy = mockFetchOk(SAMPLE_DOC_RESPONSE)
+    const result = await getFromBackend({
+      config: baseConfig,
+      path: '/api/v1/concepts/humility/document',
+      fetchImpl: fetchSpy,
+    })
+    expect(result).toEqual(SAMPLE_DOC_RESPONSE)
+  })
+
+  it('propagates upstream 404 envelope unchanged', async () => {
+    const upstreamErrorBody = {
+      detail: {
+        error: 'concept_document_not_found',
+        message: 'no document for concept "humility"',
+        details: null,
+      },
+    }
+    const fetchSpy = mockFetchStatus(404, upstreamErrorBody)
+    await expect(
+      getFromBackend({
+        config: baseConfig,
+        path: '/api/v1/concepts/humility/document',
+        fetchImpl: fetchSpy,
+      }),
+    ).rejects.toMatchObject({ status: 404, body: upstreamErrorBody })
+  })
+
+  it('rejects with backend_misconfigured when URL is unset', async () => {
+    const fetchSpy = mockFetchOk(SAMPLE_DOC_RESPONSE)
+    await expect(
+      getFromBackend({
+        config: { url: '', token: 'tok' },
+        path: '/api/v1/concepts/humility/document',
+        fetchImpl: fetchSpy,
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      body: { detail: { error: 'backend_misconfigured' } },
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects with backend_misconfigured when token is unset', async () => {
+    const fetchSpy = mockFetchOk(SAMPLE_DOC_RESPONSE)
+    await expect(
+      getFromBackend({
+        config: { url: 'https://backend.test', token: '' },
+        path: '/api/v1/concepts/humility/document',
+        fetchImpl: fetchSpy,
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      body: { detail: { error: 'backend_misconfigured' } },
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects with backend_unreachable on network error', async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('connection refused')
+    }) as unknown as typeof globalThis.fetch
+    await expect(
+      getFromBackend({
+        config: baseConfig,
+        path: '/api/v1/concepts/humility/document',
+        fetchImpl: fetchSpy,
+      }),
+    ).rejects.toMatchObject({
+      status: 502,
+      body: { detail: { error: 'backend_unreachable' } },
+    })
+  })
+
+  it('rejects with backend_response_not_json on non-JSON body', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response('<html>500</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+    ) as unknown as typeof globalThis.fetch
+    await expect(
+      getFromBackend({
+        config: baseConfig,
+        path: '/api/v1/concepts/humility/document',
+        fetchImpl: fetchSpy,
+      }),
+    ).rejects.toMatchObject({
+      status: 502,
+      body: { detail: { error: 'backend_response_not_json' } },
+    })
+  })
+
+  it('strips trailing slash from backend URL before concatenating path', async () => {
+    const fetchSpy = mockFetchOk(SAMPLE_DOC_RESPONSE)
+    await getFromBackend({
+      config: { url: 'https://backend.test/', token: 'tok' },
+      path: '/api/v1/concepts/humility/document',
+      fetchImpl: fetchSpy,
+    })
+    const [url] = (fetchSpy as unknown as { mock: { calls: [string][] } }).mock.calls[0]
+    expect(url).toBe('https://backend.test/api/v1/concepts/humility/document')
   })
 })

@@ -13,7 +13,13 @@ Auto-imported composables. Named `use*.ts`.
 ## Key Files
 
 - `useThemeToggle.ts` — wraps Vuetify's `useTheme()`, persists to `localStorage` (client-only, via `onMounted` and `import.meta.client`)
-- (Phase J1.3) `useQuery.ts` — state + `$fetch` wrapper around `/api/sp/query/nl`
+- `useQuery.ts` — state + `$fetch` wrapper around `/api/sp/query/nl`. Also
+  exports `unwrapErrorBody` + `ProxyErrorShape` (re-used by other composables
+  so the H3-wrapping error-extraction logic lives in one place).
+- `useConceptDocument.ts` — Slice N (DEC-106 / DEC-110): SSR-safe `useFetch`
+  wrapper around `/api/sp/concepts/:name/document`. Returns
+  `{ document, pending, error, refresh }` with `error` normalized to the
+  same `ProxyErrorShape` `useQuery` produces.
 
 ## Dependencies
 

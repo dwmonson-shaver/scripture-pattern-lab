@@ -34,17 +34,20 @@ export interface ProxyOpts<TReq> {
   fetchImpl?: typeof globalThis.fetch
 }
 
+export interface GetProxyOpts {
+  config: BackendConfig
+  path: string
+  // Optional fetch override for testing.
+  fetchImpl?: typeof globalThis.fetch
+}
+
 /**
- * Forward a JSON POST to the backend with bearer auth.
- *
- * Throws a `BackendError` on non-2xx responses; caller is expected to
- * translate this into an H3 createError so Nitro mirrors the upstream
- * status + body to the browser.
+ * Assert the backend URL + token are configured. Both proxy entry points
+ * (POST and GET) need the same precondition; pulling it out keeps the
+ * error envelope identical regardless of method.
  */
-export async function proxyToBackend<TReq, TRes>(
-  opts: ProxyOpts<TReq>,
-): Promise<TRes> {
-  if (!opts.config.url) {
+function assertConfigured(config: BackendConfig): void {
+  if (!config.url) {
     throw {
       status: 500,
       body: {
@@ -57,7 +60,7 @@ export async function proxyToBackend<TReq, TRes>(
     } satisfies BackendError
   }
 
-  if (!opts.config.token) {
+  if (!config.token) {
     throw {
       status: 500,
       body: {
@@ -69,6 +72,19 @@ export async function proxyToBackend<TReq, TRes>(
       },
     } satisfies BackendError
   }
+}
+
+/**
+ * Forward a JSON POST to the backend with bearer auth.
+ *
+ * Throws a `BackendError` on non-2xx responses; caller is expected to
+ * translate this into an H3 createError so Nitro mirrors the upstream
+ * status + body to the browser.
+ */
+export async function proxyToBackend<TReq, TRes>(
+  opts: ProxyOpts<TReq>,
+): Promise<TRes> {
+  assertConfigured(opts.config)
 
   const fetchFn = opts.fetchImpl ?? globalThis.fetch
   const url = `${opts.config.url.replace(/\/+$/, '')}${opts.path}`
@@ -101,6 +117,68 @@ export async function proxyToBackend<TReq, TRes>(
   // Pass through the response body for both success and error cases.
   // The backend returns JSON; if it doesn't (very unusual), we surface
   // a generic error rather than crashing.
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    throw {
+      status: 502,
+      body: {
+        detail: {
+          error: 'backend_response_not_json',
+          message: 'backend returned a non-JSON response',
+          details: null,
+        },
+      },
+    } satisfies BackendError
+  }
+
+  if (!response.ok) {
+    throw { status: response.status, body } satisfies BackendError
+  }
+
+  return body as TRes
+}
+
+/**
+ * Forward a GET to the backend with bearer auth. Same error contract as
+ * `proxyToBackend` so the browser sees an identical envelope shape
+ * regardless of HTTP verb.
+ *
+ * Slice N (DEC-106): introduced for `/api/v1/concepts/{name}/document`,
+ * the persisted two-part Conceptual Document. The caller is responsible
+ * for URL-encoding the path segments inside `path`.
+ */
+export async function getFromBackend<TRes>(
+  opts: GetProxyOpts,
+): Promise<TRes> {
+  assertConfigured(opts.config)
+
+  const fetchFn = opts.fetchImpl ?? globalThis.fetch
+  const url = `${opts.config.url.replace(/\/+$/, '')}${opts.path}`
+
+  let response: Response
+  try {
+    response = await fetchFn(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${opts.config.token}`,
+        Accept: 'application/json',
+      },
+    })
+  } catch {
+    throw {
+      status: 502,
+      body: {
+        detail: {
+          error: 'backend_unreachable',
+          message: 'could not reach the backend',
+          details: null,
+        },
+      },
+    } satisfies BackendError
+  }
+
   let body: unknown
   try {
     body = await response.json()
