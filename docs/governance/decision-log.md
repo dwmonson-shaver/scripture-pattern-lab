@@ -1340,7 +1340,7 @@
 - Cross-refs: DEC-106, DEC-113.
 
 ## DEC-115 — Runtime DEC-081 guard: two-layer enforcement (structural Layer A + model-level Layer B)
-- Status: Accepted. **FLAG FOR USER — high-stakes, touches DEC-081 charter directly.**
+- Status: Accepted. **Ratified by user 2026-05-31 at slice close.**
 - Question: How is DEC-081's "Tier-2 groupings are NEVER auto-promoted to `human_confirmed`" enforced at runtime (not just convention + tests)?
 - Decision: Two layers, both runtime, both tested.
   - **Layer A (structural):** `src/ontology/concept_grouping.py::write_grouping(grouping, engine)` accepts NO `verification_state` parameter. The only value ever written is the module-level constant `GROUPING_VSTATE: VerificationState = "unverified"`. This is the same pattern `auto_create_cited_concept` (Slice N) uses for Tier-1 concepts. Verified by `tests/integration/test_concept_grouping_writer.py::TestLayerAStructuralGuard::test_write_grouping_has_no_verification_state_parameter` which introspects `inspect.signature(write_grouping)`.
@@ -1350,7 +1350,7 @@
 - Rationale: prior slices (N+) documented DEC-081 enforcement as "convention + test assertion, not runtime guard" (research §Q8). This slice introduces the first NEW writer to the registry's verification_state surface in months, and the second tier (Tier-2) is where DEC-081 actually bites — so it's the right moment to convert "convention" into "structural + runtime." Layer A protects against new caller paths; Layer B protects against direct model instantiation in test code, future MCP tools, or any code path that bypasses the writer. Belt-and-suspenders is deliberate.
 - Alternatives considered: (a) Layer A only — rejected (a future MCP tool might construct `Tier2Grouping(verification_state='human_confirmed', ...)` and skip the writer entirely). (b) Layer B only — rejected (a future writer that took a `verification_state` parameter could pass `'unverified'` today and `'human_confirmed'` tomorrow without re-reading the model's Literal). (c) DB CHECK on the JSONB — rejected (Postgres JSONB constraints are awkward, the application boundary is where new code creeps in, and a CHECK can be added later if the curator slice proves the application guard insufficient).
 - Confidence: High on the structural design; **flagging for user ratification because any change to DEC-081 enforcement shape is project-charter territory and should be ratified at slice close even if the implementation is correct.**
-- Made-by: orchestrator 2026-05-31 [FLAG — high-stakes; implemented autopilot, ratify at close].
+- Made-by: orchestrator 2026-05-31 [autopilot]; ratified by user 2026-05-31.
 - Commit: `c2eaac8` (Phase O1 Layer B) + `951082f` (Phase O2 Layer A).
 - Files: `src/ontology/concept_grouping.py`; `tests/unit/test_concept_grouping_models.py`; `tests/integration/test_concept_grouping_writer.py`.
 - Spec refs: REQ:08.tier-2-groupings.
