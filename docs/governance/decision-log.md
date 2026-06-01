@@ -1381,3 +1381,21 @@
 - Files: `web/composables/useConceptDocument.ts`.
 - Spec refs: REQ:09.tier-2-groupings-api (consumer).
 - Cross-refs: prior Bucket-NP1-2 row in `docs/governance/reviews-log.md`.
+
+## DEC-118 — Backport DEC-115 three-layer guard to Tier-1 concept writer
+- Status: Accepted. Ratified by user 2026-05-31 at slice close (same turn as DEC-115).
+- Question: Research §Q8 (`thoughts/research-concept-relationships-2026-05-31.md`) flagged that the original Tier-1 `auto_create_cited_concept` path enforced DEC-081 via convention + tests only, with no runtime guard. Slice O added a three-layer guard for Tier-2 (DEC-115). Should the same shape be backported to Tier-1?
+- Decision: Yes. `ConceptCreationOutcome` (the auto-create writer's outcome model) is narrowed:
+  - **Layer A (structural):** `auto_create_cited_concept(...)` already had no `verification_state` or `origin` parameter; this is now asserted by `tests/unit/test_concept_writer.py::TestLayerAStructuralGuard` via `inspect.signature`.
+  - **Layer B-i (Pydantic Literal):** `ConceptCreationOutcome.origin: Literal["lexicon_imported"]` and `ConceptCreationOutcome.verification_state: Literal["unverified"]`. Pydantic rejects any other value at construction.
+  - **Layer B-ii (model_validator):** `_guard_dec_081` re-asserts both invariants with DEC-081-named errors, mirroring the Tier-2 grouping guard.
+- Scope distinction from Tier-2: the Tier-2 grouping model (`Tier2Grouping`) is locked because Tier-2 groupings *cannot be promoted at all* until a curator slice ships. For Tier-1, the broader `Origin` / `VerificationState` Literals in `registry.py` remain unchanged because the existing `concepts` table legitimately holds `curated` / `corpus_observed` / `human_confirmed` rows (from `seed_registry.py` and from any future curator path). Only the *auto-create writer's outcome shape* is narrowed — that is the only place a Tier-1 row enters the table without explicit human input.
+- What this does NOT protect against: raw SQL `INSERT INTO concepts(..., verification_state='human_confirmed', ...)` from outside the writer path. Acceptable because (a) no such code exists today, (b) the guard catches the application-level write surface where new code is most likely to creep in, (c) a future curator-promotion slice is the natural place to revisit DB-level CHECK constraints if needed (same conclusion as DEC-115's "what this does NOT protect" clause).
+- Rationale: User ratified DEC-115 and explicitly asked for the backport in the same turn — the symmetry argument is strong (research found Tier-1 had the gap DEC-115 closed for Tier-2). One-line addition of `Literal` typing + a model_validator. Belt-and-suspenders is deliberate, matching DEC-115's shape.
+- Alternatives considered: (a) Layer A only — rejected (same logic as DEC-115; future writer-signature regression could re-introduce the gap). (b) Backport B-i only without B-ii — rejected for symmetry with DEC-115 (the debuggable error trail is the load-bearing piece of B-ii). (c) Apply Literal to `registry.py`'s `Origin` / `VerificationState` themselves — rejected (those types are correctly used by the broader read-side; the auto-create writer is the only sub-surface that should be locked).
+- Confidence: High (structural + mirrors a freshly-ratified pattern; trivial to maintain).
+- Made-by: Claude 2026-05-31 (immediately after DEC-115 ratification, in response to "and backport").
+- Commit: (this commit).
+- Files: `src/ontology/concept_writer.py`; `tests/unit/test_concept_writer.py`.
+- Spec refs: REQ:08.registry-epistemics (the DEC-081 charter rule this enforces).
+- Cross-refs: DEC-081 (charter), DEC-102 (Tier-1 lexicon-imported tier this writer serves), DEC-115 (the Tier-2 guard this backports from), research artifact §Q8 (the gap finding that motivated this).

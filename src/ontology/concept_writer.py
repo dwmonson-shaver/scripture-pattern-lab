@@ -15,6 +15,24 @@ MAY be auto-generated — but only as machine-sourced + unverified + correctable
 NO LLM touches this path. The concept is the ground truth of Tier 1; any LLM
 commentary (Phase N7) is layered on top and never feeds back here.
 
+DEC-081 runtime guard (backported from DEC-115 / Tier-2 in Slice O):
+
+    Layer A (structural): ``auto_create_cited_concept(...)`` accepts NO
+        ``verification_state`` or ``origin`` parameter. The only values ever
+        written are the module constants ``LEXICON_VSTATE`` (always
+        ``'unverified'``) and ``LEXICON_ORIGIN`` (always ``'lexicon_imported'``).
+    Layer B-i (model-level Pydantic Literal): ``ConceptCreationOutcome``'s
+        ``origin`` and ``verification_state`` are typed
+        ``Literal['lexicon_imported']`` and ``Literal['unverified']``. Pydantic
+        rejects any other value at construction.
+    Layer B-ii (model_validator audit): ``_guard_dec_081`` re-asserts the
+        invariant with a DEC-081-named error so any bypass (model_construct,
+        future writer that takes a parameter, etc.) produces a debuggable
+        trail naming the breached charter rule.
+
+The Tier-2 grouping writer's guard (``src/ontology/concept_grouping.py``) is
+the source of this shape; this module is the parallel guard for Tier-1.
+
 Per DEC-025 this is ingestion-shaped registry mutation: it imports the
 ``Table`` mirrors directly, not the read-only ``ConceptRegistry`` reader, and
 writes inside a single ``engine.begin()`` transaction with ON CONFLICT DO
@@ -23,7 +41,9 @@ NOTHING for idempotency (same discipline as ``scripts/db/seed_registry.py``).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -40,7 +60,15 @@ LEXICON_VSTATE: VerificationState = "unverified"
 
 
 class ConceptCreationOutcome(BaseModel):
-    """Result of an auto-create attempt. Frozen value object."""
+    """Result of an auto-create attempt. Frozen value object.
+
+    DEC-081 Layer B-i: ``origin`` and ``verification_state`` are pinned to
+    ``Literal['lexicon_imported']`` and ``Literal['unverified']``. This is the
+    auto-create writer's outcome shape — it describes what THIS writer emits,
+    not the read-side state of arbitrary registry rows. The broader
+    ``Origin`` / ``VerificationState`` Literals live in ``registry.py`` for
+    reader-side use (concepts in any verification state may be read).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -48,8 +76,30 @@ class ConceptCreationOutcome(BaseModel):
     created: bool  # a new concept row was written this call
     reused_existing: bool  # an existing concept already covered the term
     lemmas_written: list[str]
-    origin: Origin
-    verification_state: VerificationState
+    origin: Literal["lexicon_imported"]
+    verification_state: Literal["unverified"]
+
+    @model_validator(mode="after")
+    def _guard_dec_081(self) -> "ConceptCreationOutcome":
+        # Layer B-ii: defense in depth. Pydantic's Literal already rejects
+        # bad values at construction; this re-assertion exists so any bypass
+        # (e.g. model_construct, a future writer signature regression that
+        # adds a verification_state parameter, direct __setattr__) still
+        # produces a DEC-081-named error trail.
+        if self.verification_state != "unverified":
+            raise ValueError(
+                "DEC-081 violation: Tier-1 auto-create NEVER emits a non-'unverified' "
+                f"verification_state; got {self.verification_state!r}. Promotion to "
+                "'human_confirmed' / 'corpus_observed' requires explicit human input "
+                "through a curator path that does not exist yet."
+            )
+        if self.origin != "lexicon_imported":
+            raise ValueError(
+                "DEC-081 violation: Tier-1 auto-create NEVER emits a non-'lexicon_imported' "
+                f"origin; got {self.origin!r}. Only the lexicon-sourced prior is allowed "
+                "on this write path (DEC-102)."
+            )
+        return self
 
 
 def find_existing_concept_id(name: str, engine: Engine) -> int | None:
