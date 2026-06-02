@@ -16,7 +16,7 @@ defineProps<{ section: EducationalArticleSection }>()
 
 <template>
   <v-card
-    color="purple"
+    color="accent"
     variant="tonal"
     class="pa-6 mb-4"
     data-testid="educational-article-section"
@@ -24,7 +24,7 @@ defineProps<{ section: EducationalArticleSection }>()
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
       <v-chip
         size="small"
-        color="purple"
+        color="accent"
         variant="flat"
         prepend-icon="mdi-robot-outline"
         data-testid="educational-article-badge"

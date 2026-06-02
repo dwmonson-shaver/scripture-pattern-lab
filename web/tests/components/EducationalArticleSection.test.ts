@@ -60,11 +60,16 @@ describe('EducationalArticleSection', () => {
     expect(wrapper.find('[data-testid="educational-article-sources"]').exists()).toBe(false)
   })
 
-  it('uses a visually distinct color (purple) from the deterministic section (green/info)', () => {
+  it('uses a semantic theme color visibly distinct from the deterministic §1 (DEC-111)', () => {
     // DEC-111 / "visibly distinct" rule: the §2 card must NOT share the
-    // §1 color treatment. Spot-check via the badge color attribute.
+    // §1 color treatment. We assert the semantic theme token (`accent` —
+    // purple in the project palette) rather than the literal palette name
+    // so the theme remains the single source of truth for the visual
+    // distinction (Codex Slice-NP1 P3-002 / DEC-118 follow-up).
     const wrapper = mountWithVuetify(EducationalArticleSection, { props: { section: SAMPLE } })
     const html = wrapper.html()
-    expect(html).toContain('purple')
+    expect(html).toContain('accent')
+    // Negative: must not regress to the hardcoded palette literal.
+    expect(html).not.toContain('color="purple"')
   })
 })

@@ -25,7 +25,17 @@ beforeEach(() => {
     lastHandler = handler as (event: MockEvent) => Promise<unknown>
     return handler
   }
-  globalScope.getRouterParam = (event: MockEvent, key: string) => event.routerParams[key]
+  // h3 v1.x default: returns the RAW (URL-encoded) value; only decodes
+  // when called with `{ decode: true }`. Mirror that contract so the
+  // unit test catches double-encode regressions (Codex Slice-NP1 P2).
+  globalScope.getRouterParam = (
+    event: MockEvent,
+    key: string,
+    opts?: { decode?: boolean },
+  ) => {
+    const raw = event.routerParams[key]
+    return opts?.decode ? decodeURIComponent(raw) : raw
+  }
   globalScope.useRuntimeConfig = (event: MockEvent) => event.runtimeConfig
   globalScope.createError = (opts: { statusCode: number; data: unknown }) => {
     lastCreateErrorCall = opts
@@ -88,7 +98,7 @@ describe('GET /api/sp/concepts/:name/document', () => {
     )
   })
 
-  it('URL-encodes concept names with spaces and Greek characters', async () => {
+  it('URL-encodes concept names with spaces (no double-encode)', async () => {
     const fetchSpy = vi.fn(
       async () =>
         new Response('{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}', {
@@ -99,11 +109,37 @@ describe('GET /api/sp/concepts/:name/document', () => {
     globalScope.fetch = fetchSpy as unknown as typeof globalThis.fetch
 
     const handler = await loadHandler()
-    await handler(makeEvent('fear of the lord'))
+    // h3 stores router params URL-encoded; the proxy must decode + re-encode
+    // exactly once. Double-encoding would produce `fear%2520of%2520...`.
+    await handler(makeEvent('fear%20of%20the%20lord'))
     const [url] = fetchSpy.mock.calls[0] as unknown as [string]
     expect(url).toBe(
       'https://backend.test/api/v1/concepts/fear%20of%20the%20lord/document',
     )
+    expect(url).not.toContain('%2520')
+  })
+
+  it('round-trips Greek characters without double-encoding', async () => {
+    // Regression guard for Codex Slice-NP1 P2 (DEC-118 follow-up):
+    // h3 v1.x getRouterParam without `{ decode: true }` returns the raw
+    // %-encoded segment; the prior implementation re-encoded that, giving
+    // the backend %25CF%2584... instead of the expected %CF%84...
+    const greek = 'ταπεινοφροσύνη'
+    const encoded = encodeURIComponent(greek)
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response('{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    )
+    globalScope.fetch = fetchSpy as unknown as typeof globalThis.fetch
+
+    const handler = await loadHandler()
+    await handler(makeEvent(encoded))
+    const [url] = fetchSpy.mock.calls[0] as unknown as [string]
+    expect(url).toBe(`https://backend.test/api/v1/concepts/${encoded}/document`)
+    expect(url).not.toContain('%25')
   })
 
   it('rejects empty / whitespace concept names with 400', async () => {

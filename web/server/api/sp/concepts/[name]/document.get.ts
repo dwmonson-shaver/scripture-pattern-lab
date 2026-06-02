@@ -13,7 +13,12 @@ import { getFromBackend, type BackendError } from '~~/server/utils/backend'
  * request the backend would reject anyway.
  */
 export default defineEventHandler(async (event) => {
-  const rawName = getRouterParam(event, 'name')
+  // h3 v1.x `getRouterParam` returns the RAW (URL-encoded) value by
+  // default — pass `{ decode: true }` so spaces / Greek / slashes arrive
+  // as the literal concept name. Re-encoding without decoding would
+  // double-encode (`%20` → `%2520`) and the backend would never find the
+  // concept (fixed under DEC-118 follow-up per Codex Slice-NP1 P2).
+  const rawName = getRouterParam(event, 'name', { decode: true })
   if (!rawName || rawName.trim().length === 0) {
     throw createError({
       statusCode: 400,
@@ -29,9 +34,8 @@ export default defineEventHandler(async (event) => {
 
   const runtimeConfig = useRuntimeConfig(event)
 
-  // `getRouterParam` returns the decoded value. Re-encode the segment
-  // (not the slashes) when building the upstream URL so spaces, Greek,
-  // and `/` characters in concept names survive the round trip.
+  // Re-encode the now-decoded segment (single round trip end to end)
+  // so spaces / Greek / `/` survive transport to the backend.
   const encoded = encodeURIComponent(rawName)
   const path = `/api/v1/concepts/${encoded}/document`
 
