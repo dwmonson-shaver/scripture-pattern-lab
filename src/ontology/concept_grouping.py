@@ -219,6 +219,23 @@ def write_grouping(grouping: Tier2Grouping, engine: Engine) -> Tier2Grouping:
             if row is None:
                 continue
             existing = row.part2_grouping if isinstance(row.part2_grouping, dict) else None
+            # Refuse to clobber an anchor blob (data-loss guard, Bucket-O1
+            # → Codex Slice-O P0): if this member's part2_grouping already
+            # holds an anchor blob (has "members"), that means the concept
+            # is anchor of a different grouping. Silently overwriting with
+            # a pointer would lose the other grouping's data. Multi-role
+            # membership (one concept anchors G1 and is member of G2)
+            # requires a storage-model change; raise loudly until that
+            # design lands.
+            if existing is not None and "members" in existing:
+                raise ValueError(
+                    f"anchor-blob clobber: cannot write pointer for "
+                    f"{member_name!r} because that concept is already the "
+                    f"anchor of another grouping. Multi-role membership "
+                    f"(one concept as anchor of one grouping AND member of "
+                    f"another) requires a storage-model change — see "
+                    f"Bucket-O1 in docs/governance/reviews-log.md."
+                )
             existing_anchors: list[str] = []
             if existing is not None and "grouping_anchors" in existing:
                 existing_anchors = list(existing.get("grouping_anchors") or [])

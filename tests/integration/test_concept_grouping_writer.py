@@ -177,3 +177,47 @@ class TestErrorPaths:
         with pytest.raises(ValueError) as exc:
             write_grouping(_humility_grouping(), engine)
         assert "anchor document" in str(exc.value)
+
+    def test_pointer_write_refuses_to_clobber_existing_anchor_blob(
+        self, engine: Engine
+    ) -> None:
+        """Codex Slice-O P0 / DEC-118 follow-up: write_grouping must NOT
+        silently overwrite an anchor blob with a pointer when a member is
+        already an anchor of another grouping (multi-role membership). Until
+        the storage model supports both roles (Bucket-O1), the writer must
+        raise instead of clobbering.
+        """
+        # Write a grouping G1 where _NAMES[1] is the anchor (so _NAMES[1]'s
+        # part2_grouping holds an anchor blob with "members").
+        g1 = Tier2Grouping(
+            anchor_name=_NAMES[1],
+            members=[
+                GroupingMember(concept_name=_NAMES[1], confidence=0.9),
+                GroupingMember(concept_name=_NAMES[2], confidence=0.8),
+            ],
+            rationale="G1 — anchored on _NAMES[1]",
+            created_at=datetime.now(tz=UTC),
+        )
+        write_grouping(g1, engine)
+
+        # Now try to write G2 where _NAMES[0] is the anchor and _NAMES[1] is
+        # a member. That would attempt to overwrite _NAMES[1]'s existing
+        # anchor blob (from G1) with a pointer — should raise.
+        g2 = Tier2Grouping(
+            anchor_name=_NAMES[0],
+            members=[
+                GroupingMember(concept_name=_NAMES[0], confidence=0.95),
+                GroupingMember(concept_name=_NAMES[1], confidence=0.85),
+            ],
+            rationale="G2 — anchored on _NAMES[0], collides with G1 on _NAMES[1]",
+            created_at=datetime.now(tz=UTC),
+        )
+        with pytest.raises(ValueError) as exc:
+            write_grouping(g2, engine)
+        assert "anchor-blob clobber" in str(exc.value)
+        assert _NAMES[1] in str(exc.value)
+
+        # Sanity: G1's anchor blob is intact (no partial overwrite).
+        fetched = read_grouping_for_anchor(_NAMES[1], engine)
+        assert fetched is not None
+        assert fetched.anchor_name == _NAMES[1]
