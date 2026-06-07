@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# bin/exit-gate — Run the DATABASE_URL-gated integration tests.
+#
+# These exercise real DB + (for live_llm-marked tests) real Anthropic.
+# Without DATABASE_URL set they collect-but-skip; this wrapper enforces
+# loud failure if the env var is missing so you don't get a green-by-skip.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${DATABASE_URL:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is required (export it or set it in .env)." >&2
+  exit 1
+fi
+
+echo "[bin/exit-gate] pytest -v (integration, DATABASE_URL set)"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uvcache}"
+exec uv run pytest tests/integration -v -m "integration or live_llm" "$@"

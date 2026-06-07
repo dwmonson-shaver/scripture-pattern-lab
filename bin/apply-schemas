@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# bin/apply-schemas — Apply every data/schemas/*.sql to DATABASE_URL.
+#
+# Thin alias for scripts/db/apply_schemas.sh — both load .env themselves
+# and both are idempotent (CREATE ... IF NOT EXISTS).
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[bin/apply-schemas] running scripts/db/apply_schemas.sh"
+exec bash scripts/db/apply_schemas.sh

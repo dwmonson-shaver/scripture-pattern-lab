@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# bin/smoke-prod — End-to-end smoke of the live Render backend.
+#
+# Sends "what is humility?" to /api/v1/query/nl with the bearer token,
+# pretty-prints the response. Pass any other phrase as $1 to override.
+#
+# Requires SPL_BEARER_TOKEN to be set (export it or put in .env).
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${SPL_BEARER_TOKEN:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+
+if [ -z "${SPL_BEARER_TOKEN:-}" ]; then
+  echo "SPL_BEARER_TOKEN is required (export it or set it in .env)." >&2
+  exit 1
+fi
+
+BACKEND_URL="${SPL_BACKEND_URL:-https://scripture-pattern-lab-api.onrender.com}"
+QUERY="${1:-what is humility?}"
+
+echo "[bin/smoke-prod] POST $BACKEND_URL/api/v1/query/nl  (\"$QUERY\")"
+curl -sS -X POST "$BACKEND_URL/api/v1/query/nl" \
+  -H "Authorization: Bearer $SPL_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg q "$QUERY" '{nl_query: $q}')" \
+  | jq .

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# bin/ingest-lexicon — One-time lexicon load (TBESG + Dodson + jtauber).
+#
+# Idempotent at the script level: ingest_lexicon.py refuses to re-run
+# against a populated lexicon table unless --truncate is passed.
+# Forwards any flags ($@) to the underlying Python.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${DATABASE_URL:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is required (export it or set it in .env)." >&2
+  exit 1
+fi
+
+echo "[bin/ingest-lexicon] uv run scripts/db/ingest_lexicon.py"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uvcache}"
+exec uv run scripts/db/ingest_lexicon.py "$@"

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# bin/deploy-worker — Manual Cloudflare Worker deploy (CI fallback).
+#
+# Once the 3 GH Secrets (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
+# NUXT_BACKEND_URL) are set, `git push` triggers .github/workflows/deploy.yml
+# and this script is unnecessary. Use this when CI is unavailable.
+#
+# Requires `npx wrangler login` to have run once on this machine.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${NUXT_BACKEND_URL:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+
+NUXT_BACKEND_URL="${NUXT_BACKEND_URL:-https://scripture-pattern-lab-api.onrender.com}"
+
+echo "[bin/deploy-worker] install + gen:types + build + check + wrangler deploy"
+cd web
+npm install
+NUXT_BACKEND_URL="$NUXT_BACKEND_URL" npm run gen:types
+npm run build
+npm run check:no-llm-sdk
+exec npx wrangler deploy

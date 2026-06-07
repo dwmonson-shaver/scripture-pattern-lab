@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# bin/seed-humility — Seed the Tier-2 humility/meekness/lowliness grouping.
+#
+# Worked example from DEC-116 (Bucket-N3 bridge): writes the persisted
+# Conceptual Document for each member via the Slice-N Tier-1 path, then
+# writes the Tier-2 grouping on top. Deterministic, no LLM, idempotent
+# (re-running with the same member set is a documented no-op).
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${DATABASE_URL:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is required (export it or set it in .env)." >&2
+  exit 1
+fi
+
+echo "[bin/seed-humility] uv run scripts/db/seed_humility_grouping.py"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uvcache}"
+exec uv run scripts/db/seed_humility_grouping.py "$@"
