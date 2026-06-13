@@ -129,6 +129,52 @@ class GroupingPointer(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Curator promotion (Slice P, Scope B) — the FIRST human-gated write path.
+#
+# DEC-119: curator_state is a SEPARATE fact from the grouping blob's
+# verification_state (which stays Literal['unverified'] forever — the
+# auto-create guard is untouched). curator_state lives in the append-only
+# grouping_promotions audit table; the current state is derived from the
+# latest row (DEC-124). Promotion NEVER mutates part2_grouping.
+#
+# DEC-120: every advance past 'unverified' is a HUMAN action (an actor +
+# rationale). The corpus never advances state on its own; deterministic
+# evidence only informs the human.
+# ---------------------------------------------------------------------------
+
+#: The curator lifecycle reuses the registry's VerificationState vocabulary.
+CuratorState = VerificationState  # Literal['unverified','corpus_observed','human_confirmed']
+
+#: Forward-only transition map. A promotion's to_state must be in the set
+#: allowed from the grouping's current curator_state. No skips, no demotion
+#: (demotion/re-open is explicitly out of scope this slice).
+_ALLOWED_ADVANCE: dict[CuratorState, set[CuratorState]] = {
+    "unverified": {"corpus_observed"},
+    "corpus_observed": {"human_confirmed"},
+    "human_confirmed": set(),
+}
+
+
+class PromotionRecord(BaseModel):
+    """One append-only curator promotion event (mirrors a grouping_promotions row).
+
+    The ``evidence_snapshot`` is INERT DATA — a frozen ``GroupingEvidence``
+    dump capturing what the human saw at decision time. It is never rehydrated
+    into a grouping with an elevated state (DEC-126).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    anchor_name: str = Field(min_length=1, max_length=64)
+    from_state: CuratorState
+    to_state: CuratorState
+    actor: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    evidence_snapshot: dict
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
 # Persistence — writer + readers
 #
 # DEC-115 Layer A: write_grouping() takes NO verification_state parameter.
