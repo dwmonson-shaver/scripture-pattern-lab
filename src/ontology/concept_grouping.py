@@ -45,6 +45,7 @@ from sqlalchemy import (
     Table,
     Text,
     func,
+    insert,
     select,
     update,
 )
@@ -404,3 +405,114 @@ def read_grouping_pointer(
         return GroupingPointer.model_validate(row.part2_grouping)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Curator promotion writer (Slice P, Scope B)
+#
+# DEC-119/120/124/126: the ONLY sanctioned path past the auto-promotion ban.
+# It is human-actored (actor + rationale), evidence-gated (a GroupingEvidence
+# snapshot the human reviewed), forward-only, and append-only. It NEVER touches
+# concept_documents.part2_grouping — the grouping blob's verification_state
+# stays 'unverified' forever (the auto-create guard is untouched). It has NO
+# parameter and NO code path that constructs a Tier2Grouping with an elevated
+# state; the snapshot is inert data.
+# ---------------------------------------------------------------------------
+
+
+def promote_grouping(
+    anchor_name: str,
+    *,
+    to_state: CuratorState,
+    actor: str,
+    rationale: str,
+    evidence_snapshot: dict,
+    engine: Engine,
+) -> PromotionRecord:
+    """Record a human-actored advance of a grouping's curator state.
+
+    ``evidence_snapshot`` is a ``GroupingEvidence`` dump the human reviewed
+    (passed in by the app layer — ``src.ontology`` never imports
+    ``src.retrieval``). Appends one ``grouping_promotions`` row and returns the
+    recorded :class:`PromotionRecord`. Does NOT mutate the grouping blob.
+
+    Raises ``ValueError`` if: ``to_state`` is not a real advance target; the
+    actor or rationale is empty (DEC-120: promotion is human-driven, audited);
+    the evidence snapshot is missing or does not match the anchor (DEC-120:
+    evidence-gated); the grouping does not exist; or the transition is not a
+    legal forward advance from the current curator state (DEC-124).
+    """
+    # Pure argument validations first (no DB) — clear errors before any I/O.
+    if to_state not in ("corpus_observed", "human_confirmed"):
+        raise ValueError(
+            f"cannot promote to {to_state!r}; valid advance targets are "
+            "'corpus_observed' or 'human_confirmed' ('unverified' is the "
+            "born state, not a promotion target)."
+        )
+    if not actor.strip():
+        raise ValueError(
+            "promotion requires a non-empty actor — DEC-120: every advance past "
+            "'unverified' is a human action, recorded for audit."
+        )
+    if not rationale.strip():
+        raise ValueError("promotion requires a non-empty rationale.")
+    if not isinstance(evidence_snapshot, dict) or not evidence_snapshot:
+        raise ValueError(
+            "promotion must carry the corpus evidence the human reviewed — "
+            "DEC-120: promotion is evidence-gated, never blind."
+        )
+    if evidence_snapshot.get("anchor_name") != anchor_name:
+        raise ValueError(
+            "evidence snapshot does not match the grouping being promoted "
+            f"(snapshot anchor={evidence_snapshot.get('anchor_name')!r}, "
+            f"promoting={anchor_name!r})."
+        )
+
+    # The grouping must exist before it can be promoted.
+    if read_grouping_for_anchor(anchor_name, engine) is None:
+        raise ValueError(
+            f"no grouping anchored on {anchor_name!r} to promote (write the "
+            "grouping first)."
+        )
+
+    with engine.begin() as connection:
+        # Read the current state inside the transaction for the legality check.
+        latest = connection.execute(
+            select(grouping_promotions_table.c.to_state)
+            .where(grouping_promotions_table.c.anchor_name == anchor_name)
+            .order_by(
+                grouping_promotions_table.c.created_at.desc(),
+                grouping_promotions_table.c.id.desc(),
+            )
+            .limit(1)
+        ).first()
+        from_state: CuratorState = latest.to_state if latest is not None else "unverified"
+        if to_state not in _ALLOWED_ADVANCE[from_state]:
+            allowed = sorted(_ALLOWED_ADVANCE[from_state])
+            raise ValueError(
+                f"illegal curator transition {from_state!r} -> {to_state!r}; "
+                f"allowed from {from_state!r}: {allowed!r}. Promotion is "
+                "forward-only and single-step (DEC-124)."
+            )
+        inserted = connection.execute(
+            insert(grouping_promotions_table)
+            .values(
+                anchor_name=anchor_name,
+                from_state=from_state,
+                to_state=to_state,
+                actor=actor,
+                rationale=rationale,
+                evidence_snapshot=evidence_snapshot,
+            )
+            .returning(grouping_promotions_table.c.created_at)
+        ).first()
+
+    return PromotionRecord(
+        anchor_name=anchor_name,
+        from_state=from_state,
+        to_state=to_state,
+        actor=actor,
+        rationale=rationale,
+        evidence_snapshot=evidence_snapshot,
+        created_at=inserted.created_at,
+    )
