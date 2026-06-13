@@ -1399,3 +1399,106 @@
 - Files: `src/ontology/concept_writer.py`; `tests/unit/test_concept_writer.py`.
 - Spec refs: REQ:08.registry-epistemics (the DEC-081 charter rule this enforces).
 - Cross-refs: DEC-081 (charter), DEC-102 (Tier-1 lexicon-imported tier this writer serves), DEC-115 (the Tier-2 guard this backports from), research artifact §Q8 (the gap finding that motivated this).
+
+## DEC-119 — Curator state is a SEPARATE field from the grouping blob's `verification_state`
+- Status: Accepted.
+- Question: Slice P adds a human curator promotion path (`unverified → corpus_observed → human_confirmed`). The grouping blob's `Tier2Grouping.verification_state` is `Literal["unverified"]` (DEC-115 Layer B-i). How does a promoted state get stored without weakening that guard?
+- Decision: The promoted state is a SEPARATE fact called `curator_state`, stored in the append-only `grouping_promotions` audit log (DEC-124), NOT on the grouping blob. The blob's `verification_state` stays `Literal["unverified"]` forever — it records *provenance* ("born unverified, auto-written"). `curator_state` records *human judgment* ("a curator advanced it"). The identifier `verification_state` is never reused for the curator fact, and the blob's field is omitted from the response in favor of the derived `curator_state`.
+- Rationale: Keeps the auto-create/auto-group DEC-081 guard's Literal + validator untouched (their tests stay green verbatim). Provenance and human judgment are genuinely distinct facts; modeling them as two fields is correct (adversarial review: SOUND).
+- Alternatives considered: (a) Widen `Tier2Grouping.verification_state` to the full Literal and route promotion through a dedicated fn — rejected (weakens the construction-time guard; a bug could then construct an elevated blob via the auto path). (b) A mutable `curator_state` column as the source of truth — rejected (drifts from the audit log; DEC-124 makes the log authoritative).
+- Confidence: High (review-confirmed; preserves the strictest guard).
+- Made-by: orchestrator 2026-06-13 [autonomous, fallback-review-confirmed].
+- Commits: `ba25792` (P4), `c8347b4` (P5), `76dccfb` (P6).
+- Files: `src/ontology/concept_grouping.py`; `src/app/schemas.py`; `src/app/routes/concepts.py`.
+- Spec refs: REQ:08.registry-epistemics, REQ:08.curator-promotion.
+- Cross-refs: DEC-081, DEC-115 (the guard this preserves), DEC-124 (the authoritative store).
+
+## DEC-120 — Evidence REPORTS, it never PROMOTES; every advance past `unverified` is human-actored
+- Status: Accepted. **Revised after the fallback adversarial design review caught a confirmation-bias trap in the original draft.**
+- Question: Should `corpus_observed` be settable deterministically when corpus co-occurrence evidence meets a threshold (framed as "measurement, not endorsement")?
+- Decision: NO. The deterministic co-occurrence signal lives OFF the lifecycle axis as a descriptive `cooccurrence_threshold_met: bool` on `GroupingEvidence`; it gates and advances nothing. Both real advances are human actions recorded with an actor + rationale: `corpus_observed` = a human reviewed the corpus evidence and judges it relevant; `human_confirmed` = a human endorses the grouping as conceptually sound.
+- Rationale: The original auto-`corpus_observed` design placed a deterministic count on the `unverified→corpus_observed→human_confirmed` endorsement ladder — advancing a prior's standing without a human and making `corpus_observed` a mandatory pre-confirmation rung. That inverts DEC-024/DEC-081 ("test priors, don't confirm them"): co-occurrence of two words (e.g. love/hate, life/death) is NOT evidence of conceptual neighborhood — antonyms co-occur constantly. "Measurement vs endorsement" doesn't hold when the measurement sits on the endorsement axis. Evidence must inform the human, never advance the object.
+- Alternatives considered: (a) Auto-`corpus_observed` with a docstring caveat — rejected (review finding 1, HIGH: the shared enum makes it a partial endorsement regardless of prose). (b) Two states only (`unverified → human_confirmed`) — viable but the registry's `VerificationState` already has three; keeping `corpus_observed` as a *human-actored* "evidence reviewed & judged relevant" rung is a meaningful intermediate.
+- Confidence: High (review-driven correction of a charter-critical error).
+- Made-by: orchestrator 2026-06-13 [autonomous]; corrected per fallback review.
+- Commits: `b3a76a5` (P1 models), `84430af` (P2 evidence).
+- Files: `src/retrieval/grouping_evidence.py`; `src/ontology/concept_grouping.py`.
+- Spec refs: REQ:08.grouping-evidence, REQ:08.curator-promotion, REQ:08.registry-epistemics.
+- Cross-refs: DEC-024 (corpus is ground truth), DEC-081 (no auto-promote), review `review-claude-fallback-slice-p-design-2026-06-13.md` (findings 1–2).
+
+## DEC-121 — `GroupingEvidence` reports match-type/inverse + raw counts, not a bare co-occurrence number
+- Status: Accepted.
+- Question: What does the evidence finder report per member pair?
+- Decision: Per unordered member pair: resolved primary lemmas, `match_count`, capped `sample_refs`, `window_n`, `is_declared_inverse` (does the registry already declare this pair an inverse/polarity opposite?), and the descriptive `cooccurrence_threshold_met`. Plus a `computed_note` carrying the honest framing ("co-occurrence is NOT confirmation"). A member that resolves to no corpus lemma yields zero-evidence (lemma `None`, count 0) rather than silence (Bucket-N3).
+- Rationale: A bare count misleads (review finding 2, HIGH): antonyms/co-pericope terms co-occur trivially. Surfacing the inverse flag + raw counts + sample refs lets the human judge *relevance*, not frequency. Reuses the Slice-L engine (`~` cooccurrence + `within:window(N)`) via the canonical compile-to-DSL path.
+- Alternatives considered: (a) Return only a boolean "observed" — rejected (loses the signal the human needs). (b) Anchor-vs-each-member only (not all pairs) — rejected (all-pairs is more complete; member sets are small).
+- Confidence: High.
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: `84430af` (P2).
+- Files: `src/retrieval/grouping_evidence.py`; `tests/unit/test_grouping_evidence.py`; `tests/integration/test_grouping_evidence.py`.
+- Spec refs: REQ:08.grouping-evidence, REQ:09.pattern-engine (engine reuse).
+- Cross-refs: DEC-093..097 (Slice-L window/cooccurrence engine), Bucket-N3.
+
+## DEC-122 — Evidence module lives in `src/retrieval/grouping_evidence.py`
+- Status: Accepted.
+- Question: Where does the engine-orchestrating evidence module live without violating architecture boundaries?
+- Decision: `src/retrieval/grouping_evidence.py`. The promotion *writer* stays in `src/ontology/concept_grouping.py`; the app layer computes evidence (retrieval) and passes the snapshot INTO the ontology writer, so `src/ontology` never imports `src/retrieval`.
+- Rationale: `src/retrieval` already imports the engine and is "multi-stage retrieval orchestration" (CLAUDE.md); `src/ontology` imports the engine nowhere and is "registry access" — evidence there would be the first boundary violation. `src/scoring` is for ranking; a new `src/evidence` would duplicate retrieval. (Review: SOUND, verified against the tree.)
+- Alternatives considered: (a) `src/ontology/grouping_evidence.py` — rejected (boundary violation). (b) New `src/evidence/` package — rejected (duplicates retrieval's responsibility).
+- Confidence: High (review-confirmed against the import graph).
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: `84430af` (P2).
+- Files: `src/retrieval/grouping_evidence.py`.
+- Spec refs: REQ:08.grouping-evidence.
+- Cross-refs: CLAUDE.md architecture boundaries; design OQ-6 (import direction).
+
+## DEC-123 — Promotion API: `POST /api/v1/concepts/{name}/grouping/promote`
+- Status: Accepted.
+- Question: How is curator promotion exposed over HTTP, and how does the read surface change?
+- Decision: `POST /api/v1/concepts/{name}/grouping/promote` (bearer-authed via the existing global middleware) with body `{to_state ∈ {corpus_observed, human_confirmed}, rationale}`, returning `{anchor_name, from_state, curator_state, audit_id}`. 404 when no grouping is anchored on the concept; 409 on an illegal (non-forward / skip) transition; 422 on a bad target or empty rationale. The document GET (`ConceptDocumentResponse`) additively gains `grouping_evidence` (anchor docs only) and `curator_state` (derived).
+- Rationale: Mirrors existing route conventions; write is bearer-gated; read changes are additive/backward-compatible. The app layer is the correct seam where retrieval (evidence) meets ontology (writer).
+- Alternatives considered: (a) A discriminated response envelope — rejected (additive optional fields are simpler for the frontend). (b) PUT semantics — rejected (promotion is an event/append, not an idempotent replace).
+- Confidence: High.
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: `76dccfb` (P6).
+- Files: `src/app/routes/concepts.py`; `src/app/schemas.py`.
+- Spec refs: REQ:09.tier-2-groupings-api, REQ:08.curator-promotion.
+- Cross-refs: DEC-092 (bearer auth), DEC-119 (curator_state), DEC-124 (audit log).
+
+## DEC-124 — Append-only `grouping_promotions` table is the authoritative source of curator state
+- Status: Accepted.
+- Question: Where is curator state stored, and how is "current state" derived?
+- Decision: An append-only `grouping_promotions` table (`05_grouping_promotions.sql`): `{id, anchor_name FK, from_state, to_state, actor, rationale, evidence_snapshot JSONB, created_at}`. Nothing is updated or deleted. `current_curator_state(anchor)` returns the `to_state` of the latest row (by `created_at`, `id`), or `'unverified'` if none. The `evidence_snapshot` freezes the `GroupingEvidence` the human reviewed at decision time — inert data, never rehydrated into an elevated-state grouping (DEC-126).
+- Rationale: The charter requires promotion be auditable. A single append-only source of truth avoids drift between a mutable column and the log (review finding 3, MEDIUM).
+- Alternatives considered: (a) A mutable `curator_state` column on `concept_documents` — rejected (two sources of truth). (b) Storing state inside the grouping blob — rejected (DEC-119: blob stays unverified).
+- Confidence: High.
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: `ba25792` (P4).
+- Files: `data/schemas/05_grouping_promotions.sql`; `src/ontology/concept_grouping.py`; `tests/integration/test_grouping_promotions.py`.
+- Spec refs: REQ:08.curator-promotion.
+- Cross-refs: DEC-119, DEC-120, DEC-123.
+
+## DEC-125 — Frontend curator surface (evidence panel + promote control)
+- Status: Accepted (design); **implementation OWED — Phase 7, not yet built.**
+- Question: How does the curator interact with evidence + promotion in the UI?
+- Decision: Extend `Tier2GroupingSection.vue` with a read-only evidence panel (per-pair counts + sample refs + match-type/inverse flag) + a curator-state chip + a promote control (disabled unless preconditions met), behind the existing bearer auth, via a `server/api/sp/.../grouping/promote.post.ts` proxy and a `useGroupingPromote` action; `useConceptDocument` carries `grouping_evidence` + `curator_state`. UI copy must NOT imply the corpus "confirmed" anything.
+- Rationale: This is the observable interactive surface the slice targets. Deferred in-session because the web Definition of Done (lint/typecheck/vitest/no-llm-sdk) needs the web toolchain + a deployed backend for `gen:types`.
+- Confidence: High (design); implementation pending.
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: (pending Phase 7).
+- Files (planned): `web/components/Tier2GroupingSection.vue`; `web/server/api/sp/concepts/[name]/grouping/promote.post.ts`; `web/composables/useConceptDocument.ts`; `web/composables/useGroupingPromote.ts`; `web/types/`.
+- Spec refs: REQ:09.tier-2-groupings-api (consumer).
+- Cross-refs: DEC-081 (no LLM SDK in the frontend), DEC-123 (the API it calls).
+
+## DEC-126 — Anti-regression test on the promotion path (the DEC-081 guard must not weaken)
+- Status: Accepted.
+- Question: How do we guarantee the new promotion path does not silently weaken the auto-create/auto-group DEC-081 guard during implementation or later edits?
+- Decision: An explicit anti-regression test asserts: (a) `write_grouping` still takes no `verification_state` parameter; (b) `Tier2Grouping` still rejects any non-`unverified` literal; (c) `promote_grouping` accepts no `Tier2Grouping` and no `verification_state` and has no path to construct/persist an elevated-state blob; (d) behaviourally, after promotion the grouping blob's `verification_state` is still `'unverified'`.
+- Rationale: Doc-level "keep it unchanged" is insufficient (review finding 4, MEDIUM); the strongest guard in the project must be enforced by a test on the NEW path, not just convention.
+- Alternatives considered: (a) Rely on existing auto-create guard tests — rejected (they don't cover the promotion path). (b) DB CHECK constraint — out of scope (same conclusion as DEC-115/118's "what this does NOT protect").
+- Confidence: High.
+- Made-by: orchestrator 2026-06-13 [autonomous].
+- Commit: `c8347b4` (P5).
+- Files: `tests/unit/test_concept_grouping_promotion.py`; `tests/integration/test_grouping_promotions.py`.
+- Spec refs: REQ:08.registry-epistemics, REQ:08.curator-promotion.
+- Cross-refs: DEC-081, DEC-115, DEC-118 (the guard lineage this protects).

@@ -66,7 +66,8 @@ The backend is decomposed into logical components with clear boundaries, but the
 - `POST /api/v1/query/validate` — Accept DSL, return ValidationResult without executing. **Slice I.** Per DEC-079, all `validation.status` values (supported/partial/unsupported) return HTTP 200; the only 422 path is `parse_error` on malformed DSL. Response shape: `QueryValidateResponse{query, validation}` — mirrors QueryDSLResponse minus the unused `result` and `explanation` fields.
 - `GET /api/v1/capabilities` — Return current capability registry. **Slice I.** Per DEC-075, response_model is `CapabilityRegistry` directly (no envelope wrapping). UI clients can branch on the `version` field for forward compat.
 - `GET /api/v1/concepts` — Return concept registry. **Slice I.** Optional `language` query param (default `"grc"`). Per DEC-076, flat list of `ConceptSummary{name, description, verification_state, lemma_count, lemmas}` with embedded lemma lists. Not paginated at MVP scale (Bucket 9 trigger when registry grows past ~500 rows). Concepts with no lemmas in the requested language still appear with `lemmas=[]` (forward-compat invariant for multi-language registry growth).
-- `GET /api/v1/concepts/{name}/document` — Return the persisted Conceptual Document for a concept (Slice N; extended Slice O — see `REQ:09.tier-2-groupings-api`). Response shape: `ConceptDocument{concept_name, short_summary, part1_comparative, part1_educational, part2_grouping, part2_grouping_pointer}`. 404 if not generated.
+- `GET /api/v1/concepts/{name}/document` — Return the persisted Conceptual Document for a concept (Slice N; extended Slice O + Slice P — see `REQ:09.tier-2-groupings-api`). Response shape: `ConceptDocumentResponse{concept_name, short_summary, part1_comparative, part1_educational, part2_grouping, part2_grouping_pointer, grouping_evidence, curator_state}` (Slice P adds the last two; `grouping_evidence` is set only on anchor docs). 404 if not generated.
+- `POST /api/v1/concepts/{name}/grouping/promote` — **Slice P.** Advance a Tier-2 grouping's curator state (the first Tier-2 write route; bearer-authed). Body `GroupingPromoteRequest{to_state ∈ {corpus_observed, human_confirmed}, rationale}`; returns `GroupingPromoteResponse{anchor_name, from_state, curator_state, audit_id}`. 404 if no grouping is anchored on the concept; 409 on an illegal (skip / non-forward) transition; 422 on a bad target or empty rationale. See `REQ:08.curator-promotion`.
 - `GET /api/v1/health` — Health check (Slice G; liveness only per DEC-066).
 
 **Input/output format**: JSON. Requests and responses use typed schemas.
@@ -150,6 +151,18 @@ class ConceptDocument(BaseModel):
 ```
 
 `Tier2Grouping = {anchor_name, members: [{concept_name, confidence, note?}], rationale, origin ∈ {curated, ai_suggested}, verification_state == 'unverified', created_at}`. `GroupingPointer = {grouping_anchors: [str]}`. The `verification_state` field is structurally pinned to `'unverified'` over the wire (DEC-081 / DEC-115 runtime guard — see `REQ:08.tier-2-groupings`); the response is the same regardless of who's calling, so clients can rely on the invariant without re-asserting it.
+
+**Slice P additions (corpus evidence + curator state).** The response model becomes `ConceptDocumentResponse(ConceptDocument)` — a subclass in the app layer (the new fields can't live on the ontology `ConceptDocument` because `src.ontology` must not import `src.retrieval`):
+
+```python
+class ConceptDocumentResponse(ConceptDocument):
+    grouping_evidence: GroupingEvidence | None = None   # anchor docs only; None otherwise
+    curator_state: str = "unverified"                   # derived from the audit log (DEC-124)
+```
+
+`GroupingEvidence = {anchor_name, window_n, pairs: [EvidencePair], computed_note}` and `EvidencePair = {member_a, member_b, lemma_a, lemma_b, match_count, sample_refs, window_n, is_declared_inverse, cooccurrence_threshold_met}`. Evidence is deterministic corpus co-occurrence, computed on demand for anchor documents; it REPORTS, it never advances state (DEC-120/121). `curator_state` is distinct from the blob's `verification_state` (which stays `'unverified'` forever, DEC-119) and is advanced only by the human-gated promote route below.
+
+**`POST /api/v1/concepts/{name}/grouping/promote`** (Slice P, the first Tier-2 write route; bearer-authed). `GroupingPromoteRequest{to_state ∈ {corpus_observed, human_confirmed}, rationale}` → `GroupingPromoteResponse{anchor_name, from_state, curator_state, audit_id}`. The app layer computes the corpus evidence (retrieval) and hands the snapshot to `src/ontology/concept_grouping.py::promote_grouping`, which appends a row to the `grouping_promotions` audit log — forward-only, single-step, human-actored, evidence-gated (DEC-123/124). 404 if no grouping is anchored on the concept; 409 on an illegal transition; 422 on a bad target/empty rationale. The promotion writer never touches `part2_grouping` and cannot construct an elevated-state grouping (DEC-126).
 
 <!-- REQ:09.nl-to-dsl -->
 ### 2. NL-to-DSL Service
