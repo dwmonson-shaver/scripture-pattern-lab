@@ -34,7 +34,21 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import Engine, select, update
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Engine,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    func,
+    select,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 
 from src.ontology.registry import Origin, VerificationState, concepts_table
 
@@ -172,6 +186,52 @@ class PromotionRecord(BaseModel):
     rationale: str = Field(min_length=1)
     evidence_snapshot: dict
     created_at: datetime
+
+
+# Table mirror (canonical SQL: data/schemas/05_grouping_promotions.sql).
+# Append-only audit log; the authoritative source of truth for curator_state.
+_promotions_metadata: MetaData = MetaData()
+
+grouping_promotions_table = Table(
+    "grouping_promotions",
+    _promotions_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "anchor_name",
+        String(64),
+        ForeignKey("concepts.name", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    ),
+    Column("from_state", String(20), nullable=False),
+    Column("to_state", String(20), nullable=False),
+    Column("actor", Text, nullable=False),
+    Column("rationale", Text, nullable=False),
+    Column("evidence_snapshot", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+
+def current_curator_state(anchor_name: str, engine: Engine) -> CuratorState:
+    """Derive a grouping's curator state from its latest promotion row.
+
+    Returns ``'unverified'`` when no promotion has been recorded (DEC-124: the
+    audit log is authoritative; absence of a row means the grouping is still in
+    its born-unverified state). Never reads ``part2_grouping`` — provenance and
+    curator judgment are separate facts (DEC-119).
+    """
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(grouping_promotions_table.c.to_state)
+            .where(grouping_promotions_table.c.anchor_name == anchor_name)
+            .order_by(
+                grouping_promotions_table.c.created_at.desc(),
+                grouping_promotions_table.c.id.desc(),
+            )
+            .limit(1)
+        ).first()
+    if row is None:
+        return "unverified"
+    return row.to_state  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
