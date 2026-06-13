@@ -14,7 +14,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.engine.models import ExplainedResultSet, RetrievalResult
+from src.ontology.concept_document import ConceptDocument
 from src.ontology.registry import ConceptSummary
+from src.retrieval.grouping_evidence import GroupingEvidence
 from src.validation.validator import ValidationResult
 
 
@@ -224,6 +226,24 @@ class ConceptsResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     concepts: list[ConceptSummary]
+
+
+class ConceptDocumentResponse(ConceptDocument):
+    """GET /api/v1/concepts/{name}/document body (Slice P, Scope C).
+
+    Subclasses the ontology ``ConceptDocument`` so its fields stay at the top
+    level (frontend-compatible) and adds read-only corpus evidence. The field
+    lives in the app layer — NOT on the ontology model — because
+    ``src.ontology`` must never import ``src.retrieval`` (architecture
+    boundary, design OQ-6).
+
+    ``grouping_evidence`` is populated only for anchor documents (those that
+    carry a full Tier-2 grouping); ``None`` for member/pointer or Tier-1-only
+    documents. Evidence REPORTS corpus co-occurrence; it NEVER advances a
+    grouping's curator state (DEC-120).
+    """
+
+    grouping_evidence: GroupingEvidence | None = None
 
 
 class ErrorResponse(BaseModel):

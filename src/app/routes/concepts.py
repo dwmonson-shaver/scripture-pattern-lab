@@ -15,9 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.engine import Engine
 
 from src.app.dependencies import get_concept_registry, get_engine
-from src.app.schemas import ConceptsResponse, ErrorResponse
-from src.ontology.concept_document import ConceptDocument, get_document
+from src.app.schemas import ConceptDocumentResponse, ConceptsResponse, ErrorResponse
+from src.ontology.concept_document import get_document
 from src.ontology.registry import ConceptRegistry
+from src.retrieval.grouping_evidence import compute_grouping_evidence
 
 router = APIRouter()
 
@@ -33,18 +34,23 @@ def get_concepts(
 
 @router.get(
     "/api/v1/concepts/{name}/document",
-    response_model=ConceptDocument,
+    response_model=ConceptDocumentResponse,
 )
 def get_concept_document(
     name: str,
     engine: Engine = Depends(get_engine),
-) -> ConceptDocument:
+) -> ConceptDocumentResponse:
     """Return the persisted Conceptual Document for ``name``.
 
     404 if no document has been generated for the concept yet (e.g. a curated
     seed concept that was never auto-created, or an unknown name). The document
     is the deterministic comparative section plus an optional, clearly-labeled
     LLM educational section — the article persists, never regenerated per query.
+
+    Slice P: for anchor documents (those carrying a full Tier-2 grouping), the
+    response also includes read-only ``grouping_evidence`` — deterministic
+    corpus co-occurrence measured per member pair. Evidence informs a human
+    curator; it never advances the grouping's state (DEC-120).
     """
     document = get_document(name, engine)
     if document is None:
@@ -60,4 +66,7 @@ def get_concept_document(
                 details={"concept_name": name},
             ).model_dump(),
         )
-    return document
+    evidence = None
+    if document.part2_grouping is not None:
+        evidence = compute_grouping_evidence(document.part2_grouping, engine)
+    return ConceptDocumentResponse(**document.model_dump(), grouping_evidence=evidence)

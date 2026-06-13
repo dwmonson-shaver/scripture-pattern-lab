@@ -24,6 +24,22 @@ from src.ontology.concept_grouping import (
     GroupingPointer,
     Tier2Grouping,
 )
+from src.retrieval.grouping_evidence import EvidencePair, GroupingEvidence
+
+
+def _stub_evidence() -> GroupingEvidence:
+    return GroupingEvidence(
+        anchor_name="humility",
+        window_n=50,
+        pairs=[
+            EvidencePair(
+                member_a="humility", member_b="meekness",
+                lemma_a="ταπεινοφροσύνη", lemma_b="πραΰτης",
+                match_count=2, sample_refs=["EPH 4:2"], window_n=50,
+                cooccurrence_threshold_met=True,
+            )
+        ],
+    )
 
 
 def _document() -> ConceptDocument:
@@ -68,6 +84,8 @@ class TestDocumentRoute:
         assert body["part1_educational"] is None
         assert body["part2_grouping"] is None
         assert body["part2_grouping_pointer"] is None
+        # Slice P: no grouping → no evidence computed.
+        assert body["grouping_evidence"] is None
 
     def test_404_when_no_document(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -115,6 +133,11 @@ class TestTier2GroupingThroughRoute:
             "src.app.routes.concepts.get_document",
             lambda name, engine: _anchor_document(),
         )
+        # Slice P: anchor docs trigger evidence computation — stub it (no DB).
+        monkeypatch.setattr(
+            "src.app.routes.concepts.compute_grouping_evidence",
+            lambda grouping, engine: _stub_evidence(),
+        )
         resp = client.get("/api/v1/concepts/humility/document")
         assert resp.status_code == 200
         body = resp.json()
@@ -128,6 +151,11 @@ class TestTier2GroupingThroughRoute:
         }
         # Epistemic line over the wire: DEC-081 unverified ALWAYS.
         assert body["part2_grouping"]["verification_state"] == "unverified"
+        # Slice P: read-only corpus evidence rides alongside the grouping.
+        assert body["grouping_evidence"] is not None
+        assert body["grouping_evidence"]["anchor_name"] == "humility"
+        assert body["grouping_evidence"]["pairs"][0]["match_count"] == 2
+        assert "NOT confirmation" in body["grouping_evidence"]["computed_note"]
 
     def test_member_doc_carries_pointer_in_response(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -142,6 +170,8 @@ class TestTier2GroupingThroughRoute:
         assert body["part2_grouping"] is None
         assert body["part2_grouping_pointer"] is not None
         assert body["part2_grouping_pointer"]["grouping_anchors"] == ["humility"]
+        # Members carry a pointer, not an anchor grouping → no evidence computed.
+        assert body["grouping_evidence"] is None
 
     def test_tier1_only_doc_returns_both_null(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -155,3 +185,4 @@ class TestTier2GroupingThroughRoute:
         body = resp.json()
         assert body["part2_grouping"] is None
         assert body["part2_grouping_pointer"] is None
+        assert body["grouping_evidence"] is None
