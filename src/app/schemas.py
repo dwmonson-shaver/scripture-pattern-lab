@@ -241,9 +241,40 @@ class ConceptDocumentResponse(ConceptDocument):
     carry a full Tier-2 grouping); ``None`` for member/pointer or Tier-1-only
     documents. Evidence REPORTS corpus co-occurrence; it NEVER advances a
     grouping's curator state (DEC-120).
+
+    ``curator_state`` is the human-curated state derived from the append-only
+    promotion log (DEC-124) — distinct from the grouping blob's
+    ``verification_state``, which stays ``'unverified'`` forever (DEC-119).
+    ``'unverified'`` when the grouping has never been promoted.
     """
 
     grouping_evidence: GroupingEvidence | None = None
+    curator_state: str = "unverified"
+
+
+class GroupingPromoteRequest(BaseModel):
+    """POST .../grouping/promote body (Slice P, Scope B).
+
+    ``to_state`` is restricted to the two real advance targets; the lifecycle's
+    born state ('unverified') is not a promotion target. Promotion is
+    forward-only and single-step — the writer rejects illegal transitions.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    to_state: Literal["corpus_observed", "human_confirmed"]
+    rationale: str = Field(min_length=1)
+
+
+class GroupingPromoteResponse(BaseModel):
+    """Result of a successful curator promotion."""
+
+    model_config = ConfigDict(frozen=True)
+
+    anchor_name: str
+    from_state: str
+    curator_state: str
+    audit_id: int | None = None
 
 
 class ErrorResponse(BaseModel):

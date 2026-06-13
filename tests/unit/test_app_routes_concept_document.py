@@ -68,6 +68,16 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _stub_curator_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The document route derives curator_state from the audit log (Slice P);
+    # stub it so these DB-free route tests don't hit the MagicMock engine.
+    monkeypatch.setattr(
+        "src.app.routes.concepts.current_curator_state",
+        lambda name, engine: "unverified",
+    )
+
+
 class TestDocumentRoute:
     def test_returns_document_when_present(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -84,8 +94,9 @@ class TestDocumentRoute:
         assert body["part1_educational"] is None
         assert body["part2_grouping"] is None
         assert body["part2_grouping_pointer"] is None
-        # Slice P: no grouping → no evidence computed.
+        # Slice P: no grouping → no evidence computed; born-unverified state.
         assert body["grouping_evidence"] is None
+        assert body["curator_state"] == "unverified"
 
     def test_404_when_no_document(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch

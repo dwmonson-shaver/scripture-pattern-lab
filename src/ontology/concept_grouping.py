@@ -187,6 +187,9 @@ class PromotionRecord(BaseModel):
     rationale: str = Field(min_length=1)
     evidence_snapshot: dict
     created_at: datetime
+    # Audit row id — populated by the writer; None on a model constructed
+    # before persistence.
+    id: int | None = None
 
 
 # Table mirror (canonical SQL: data/schemas/05_grouping_promotions.sql).
@@ -504,7 +507,10 @@ def promote_grouping(
                 rationale=rationale,
                 evidence_snapshot=evidence_snapshot,
             )
-            .returning(grouping_promotions_table.c.created_at)
+            .returning(
+                grouping_promotions_table.c.id,
+                grouping_promotions_table.c.created_at,
+            )
         ).first()
 
     return PromotionRecord(
@@ -515,4 +521,5 @@ def promote_grouping(
         rationale=rationale,
         evidence_snapshot=evidence_snapshot,
         created_at=inserted.created_at,
+        id=inserted.id,
     )
