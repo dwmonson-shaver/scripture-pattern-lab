@@ -44,6 +44,7 @@ from src.app.auth import BearerAuthMiddleware
 from src.app.routes import capabilities as capabilities_routes
 from src.app.routes import concepts as concepts_routes
 from src.app.routes import health as health_routes
+from src.app.routes import marks as marks_routes
 from src.app.routes import nl as nl_routes
 from src.app.routes import query as query_routes
 from src.app.routes import read as read_routes
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     fastapi_app.include_router(concepts_routes.router)
     fastapi_app.include_router(validate_routes.router)
     fastapi_app.include_router(read_routes.router)
+    fastapi_app.include_router(marks_routes.router)
     return fastapi_app
 
 

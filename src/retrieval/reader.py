@@ -155,12 +155,12 @@ def read_chapter(
 
     with engine.connect() as connection:
         english_rows = connection.execute(english_stmt).all()
+        if not english_rows:
+            # Skip the Greek query entirely on the 404 path (review P2).
+            raise ChapterNotFound(
+                f"no {version_code!r} verses for {corpus_id}/{book_bb}/{chapter}"
+            )
         greek_rows = connection.execute(greek_stmt).all()
-
-    if not english_rows:
-        raise ChapterNotFound(
-            f"no {version_code!r} verses for {corpus_id}/{book_bb}/{chapter}"
-        )
 
     greek_by_verse: dict[int, list[GreekToken]] = {}
     for r in greek_rows:

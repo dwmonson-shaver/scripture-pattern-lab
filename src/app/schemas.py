@@ -387,6 +387,76 @@ class ConceptWriteResponse(BaseModel):
     authored_opposite_name: str | None = None
 
 
+# --------------------------------------------------------------------------
+# Slice 1 — span-annotation (mark) CRUD (DEC-129/143/145). Concepts referenced
+# by name at the boundary; span is char offsets into a named version + a verse
+# range that may cross verses.
+# --------------------------------------------------------------------------
+
+
+class MarkCreateRequest(BaseModel):
+    """POST /api/v1/marks body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    corpus_id: str = "nt"
+    book: str  # DSL abbreviation (e.g. "rom"); normalized server-side
+    chapter: int = Field(ge=1)
+    verse_start: int = Field(ge=1)
+    verse_end: int = Field(ge=1)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(ge=1)
+    version_code: str = "kjv"
+    concept_names: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_span(self) -> "MarkCreateRequest":
+        if self.verse_end < self.verse_start:
+            raise ValueError("verse_end must be >= verse_start")
+        if self.char_end <= self.char_start:
+            raise ValueError("char_end must be > char_start")
+        return self
+
+
+class MarkUpdateRequest(BaseModel):
+    """PATCH /api/v1/marks/{id} body. Only provided fields change; concept_names
+    (when present) replaces the mark's concept set wholesale."""
+
+    model_config = ConfigDict(frozen=True)
+
+    verse_start: int | None = None
+    verse_end: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    concept_names: list[str] | None = None
+
+
+class MarkOut(BaseModel):
+    """One span annotation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    corpus_id: str
+    book: str
+    chapter: int
+    verse_start: int
+    verse_end: int
+    char_start: int
+    char_end: int
+    version_code: str
+    actor: str
+    concept_names: list[str]
+
+
+class MarksResponse(BaseModel):
+    """GET /api/v1/marks body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    marks: list[MarkOut]
+
+
 class ErrorResponse(BaseModel):
     """Error envelope returned via `HTTPException(detail=...)`.
 
