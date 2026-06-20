@@ -1502,3 +1502,159 @@
 - Files: `tests/unit/test_concept_grouping_promotion.py`; `tests/integration/test_grouping_promotions.py`.
 - Spec refs: REQ:08.registry-epistemics, REQ:08.curator-promotion.
 - Cross-refs: DEC-081, DEC-115, DEC-118 (the guard lineage this protects).
+
+## DEC-127 — Next user-facing surface is a visual concept-identification reader (scripture-marker UI)
+- Status: Accepted (design); **implementation OWED** (Slice 1).
+- Question: What is the next slice, given the project felt too slow and abstract?
+- Decision: Build a chapter-by-chapter reading workbench where the human selects phrases and maps them to concepts (and later connections), driving the symbolic engine from real marks. Validated via a clickable prototype before code.
+- Rationale: Delivers the observable, runnable surface the feedback loop has been missing; turns rubber-stamped abstractions into a tool the user actually operates. ~70% of the hypothesis-testing backend already exists from Slice P.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-002, design-concepts-connections-evidence.md.
+
+## DEC-128 — Ingest an English translation layer; surface original language per-token via interlinear
+- Status: Accepted (design); implementation OWED (Slice 1).
+- Question: The corpus is Greek-only; the user reads/marks in English. What text do we display?
+- Decision: Ingest verse-aligned English translations — default **KJV**; open/public-domain **BSB, ASV, YLT, WEB**; licensed/later **LEB, ESV, NASB**. Reading is translation-based; Greek (NT) / Hebrew (OT) is surfaced per-token via an interlinear toggle. BSB's word-level alignment provides English↔original mapping. Toggle and prompts are context-sensitive (hidden for English-original corpora).
+- Rationale: Matches the "scripture-marker" mental model (English), while keeping original-language ground truth one tap away and feeding the existing lemma-based engine.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-127, DEC-135.
+
+## DEC-129 — Marks are span annotations (offsets), generalizing beyond single-lemma
+- Status: Accepted (design); implementation OWED (Slice 1).
+- Question: How is a marked phrase represented, given today's model is single-lemma?
+- Decision: A new annotation entity = corpus + book/chapter/verse + token offsets → 1..n concept refs, with actor and timestamp; draggable, word-snapping handles adjust the span; cross-verse selection required for patterns (DEC-143).
+- Rationale: The user marks phrases ("enduring to the end"), not lemmas; the whole concept/connection model needs phrase-level anchors.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-131, DEC-143.
+
+## DEC-130 — Concepts gain user create/edit incl. color, polarity, opposite
+- Status: Accepted (design); implementation OWED (Slice 1).
+- Question: Concepts are CLI-seeded today; the user wants to mint/edit them while reading.
+- Decision: Add a concept-write API; concepts gain a user-editable `color` (full picker), polarity (+/−/±), and `opposite`. AI-minted concepts remain `origin='ai_suggested'`, `verification_state='unverified'` and are never auto-promoted (DEC-081/102).
+- Rationale: Identification must be fluid during reading; color is the visual grammar of the marking surface.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-081, DEC-102.
+
+## DEC-131 — "Connection" is a new first-class typed edge between concepts
+- Status: Accepted (design); implementation OWED (Slice 2).
+- Question: How do we represent relationships *between* distinct concepts (opposition, prerequisite, sequence), as opposed to within-concept synonymy?
+- Decision: A **Connection** entity = a typed edge over concept refs with its own evidence dossier. Types: opposite, prerequisite, produces, sequence (n-ary), compound, association, unknown. It generalizes the existing `inverse_claims` (opposite) and `polarity_claims`. Endpoints resolve to concepts (mint inline if needed) — concept-to-concept graph.
+- Rationale: Concepts are nodes (what things are); connections are edges (how they relate); the relationship itself is a claim with substance and evidence, not mere co-occurrence.
+- Alternatives considered: Folding relationships into concept groupings — rejected (groupings are within-concept equivalence, a different layer).
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-005 (polarity/inverse), DEC-132, DEC-133.
+
+## DEC-132 — "Pattern" is the sequence connection type + its observations, not a separate entity
+- Status: Accepted (design); implementation OWED (Slice 4).
+- Question: Is a "pattern" (e.g., faith→hope→charity in order) its own entity, a subset of connection, or something else?
+- Decision: Not a third entity. A pattern is a **sequence-type connection** over concepts, and each corpus region exhibiting it is a **pattern-observation** (evidence). Keeps the ontology to nodes + edges and reuses the connection dossier machinery.
+- Rationale: Matches the user's own hunch; avoids a parallel evidence system. Templates (optional members, alternation) would justify a separate entity later — deferred until evidence demands.
+- Confidence: Medium-High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-131, DEC-136.
+
+## DEC-133 — Axis is an earned (promoted) opposite-connection, exposing signed poles
+- Status: Accepted (design); implementation OWED (Slice 2).
+- Question: The user wants a concept and its opposite to act as a single signed node for pattern-matching. How is that modeled without being a free assertion?
+- Decision: An `opposite` connection, once it reaches curator `corpus_observed`, **unlocks** a signed **axis node** (+pole/−pole). Other connections may target a pole; a connection between two axes may be **polarity-aligned** (faith→life ‖ unbelief→death). The axis is earned via evidence + human gate, not minted at declaration.
+- Rationale: Captures antithetical parallelism and lets the engine fire on either pole; ties axis promotion to the existing curator state machine (no new trust mechanism).
+- Confidence: Medium-High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-119 (curator states), DEC-131.
+
+## DEC-134 — "Compound" connection type is declarable now; AND-verification deferred
+- Status: Accepted (design); implementation OWED (Slice 2 declare; later verify).
+- Question: (faith + hope) → charity is a real structure the user wants now; the full "neither alone, only together" proof is hard.
+- Decision: Add `compound` as a connection type immediately (n sources → 1 target, referencing constituent connections) so it can be declared and accumulate evidence. Defer only the rigorous conjunction/AND-proof engine.
+- Rationale: The user already has evidence and wants to plan for it; but the logic solver is premature (vertical-slice discipline).
+- Confidence: Medium.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-131, DEC-132.
+
+## DEC-135 — Three grades of relational evidence; the order-test governs sequence only
+- Status: Accepted (design); implementation OWED (Slice 4).
+- Question: How do we avoid treating natural out-of-order discussion as a counter-pattern, or letting a sequence test erase an explicit prerequisite?
+- Decision: Distinguish three evidence grades — (1) **co-mention/proximity** → *association* (order-blind; out-of-order is confirming); (2) **order-preserved recurrence** → *sequence* (the only claim the order-test/alternative-orderings govern); (3) **explicit authorial statement** ("X leads to Y") → *prerequisite/produces* (strongest, scored independently, **never overridden** by the order-test). A real prerequisite reinforces a sequence; it is not erased by out-of-order co-mention.
+- Rationale: Corrects an over-broad "count the violations" framing; aligns evidence type to connection type so the corpus tests the right claim.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-131, DEC-136.
+
+## DEC-136 — Super-pattern honesty protocol (anti-confirmation-bias)
+- Status: Accepted (design); implementation OWED (Slice 4).
+- Question: How do we hunt an abstract, order-preserving, gap-tolerant concept-level "super-pattern" without confirmation bias?
+- Decision: A sequence/pattern claim earns the name only by surviving: **beat chance** (vs. node-frequency baseline), **beat alternatives** (vs. other orderings; else it's co-occurrence), **count violations/absences out loud**, **hold out** (confirm in unseen books), **pre-register** (binding verdict incl. failure), and **report at strict (literal) and loose (analogue-expanded) zoom** (flag patterns visible only under generous expansion). Wired onto existing precedence + `contextualization` (baselines, alternative orderings).
+- Rationale: Reframes "can I find it" (always yes) to "does it beat its null model" — the charter's "corpus tests priors" made operational; mostly wiring, not new math.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-004, DEC-007, DEC-135.
+
+## DEC-137 — Concepts and connections share a two-layer dossier + citation machinery
+- Status: Accepted (design); implementation OWED (Slice 3).
+- Question: How is evidence organized for both concepts and connections?
+- Decision: A shared two-layer dossier — per-member (why this phrase/endpoint belongs) and rollup (the "paper" for the whole), with tabs Overview / Member-by-member / Citations, a per-member fit-strength (`GroupingMember.confidence`), and the curator state machine. Connections reuse it wholesale.
+- Rationale: One evidence system, not two; the rollup is the justification artifact the user described.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-120 (grouping evidence), DEC-131.
+
+## DEC-138 — Citation-integrity pipeline (verbatim quote + resolvable link, three gates, audits)
+- Status: Accepted (design); implementation OWED (Slice 3).
+- Question: How do we guarantee AI-surfaced evidence is never a hallucinated citation?
+- Decision: Every AI evidence item must carry a **verbatim extracted quote + resolvable source link** and pass three gates before counting: (a) quote-presence in the fetched source, (b) URL resolves and is snapshotted, (c) NLI entailment that the quote supports the claim. Failures are flagged, not shown. **Periodic audits** re-run the gates per concept/connection. AI never confirms a mapping or advances state.
+- Rationale: Operationalizes the charter for the AI layer; aligns with established attribution methods (ALCE/RARR/CoVe/FActScore/NLI-attribution).
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-002, DEC-081, DEC-139.
+
+## DEC-139 — Archived sources stored as Open Knowledge Format (OKF) Markdown, extended
+- Status: Accepted (design); implementation OWED (Slice 3).
+- Question: Where do cited sources live so citations survive link-rot and stay verifiable?
+- Decision: Adopt Google Cloud **OKF v0.1** (Markdown + YAML frontmatter; spec in `GoogleCloudPlatform/knowledge-catalog`) as the citation/source wiki layer, **extended** with `author`, `source_url`, `retrieved_at`, `content_hash` (v0.1 reserves only `type` and uses `resource:` + a `# Citations` body section — no dedicated provenance fields). Each verified citation links to an OKF file holding the extracted quote + provenance + snapshot.
+- Rationale: A real, standards-aligned, Markdown-native store; snapshotting defeats source disappearance.
+- Open: confirm OKF `LICENSE` before adoption.
+- Confidence: Medium-High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-138.
+
+## DEC-140 — Two AI modes (reactive explainer + proactive discovery); both human-gated proposals
+- Status: Accepted (design); implementation OWED (Slice 3 explainer / Slice 5 discovery).
+- Question: How is AI used for analysis without polluting the objective layer?
+- Decision: (1) **Reactive explainer** — per-selection ground-truth + cited AI block; for/against appears only once a concept hypothesis is named. (2) **Proactive discovery** — agent scans chapters (English + original) and proposes candidate concepts/connections/types. All AI output is `origin='ai_suggested'`, `verification_state='unverified'` — proposals into a human queue, never facts.
+- Rationale: AI surfaces and summarizes; humans decide. Greek connectives are legitimate connection-type evidence.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-002, DEC-081, DEC-141.
+
+## DEC-141 — Research lens directs attention but must report absence, off-lens, and rival readings
+- Status: Accepted (design); implementation OWED (Slice 5).
+- Question: A saved focus-set makes the discovery agent efficient but risks finding only what you went looking for.
+- Decision: A **lens** (concept/connection focus-set + optional corpus range) directs the agent's attention, but the agent is **required** to also report (1) where focus-concepts are conspicuously absent, (2) salient off-lens findings, (3) rival readings for each claimed hit. The lens directs attention, never conclusions.
+- Rationale: Without enforced counterweights the lens becomes a confirmation-bias amplifier — the project's dominant risk.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-136, DEC-140.
+
+## DEC-142 — iPad / touch is a first-class target
+- Status: Accepted (design); implementation OWED (Slice 1).
+- Question: The user works primarily in a browser on iPad with finger/Apple Pencil.
+- Decision: Narrow screens get a slide-over concept panel (not a hidden sidebar); selection handles are large finger/Pencil targets with `touch-action:none`; selection triggers off `selectionchange` (not mouse-only); generous tap targets throughout.
+- Rationale: The primary device must not break the core workflow.
+- Confidence: High.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-127.
+
+## DEC-143 — Cross-verse / region selection is required (lifts single-verse marking for patterns)
+- Status: Accepted (design); implementation OWED (Slice 1 reader / Slice 4 patterns).
+- Question: Patterns span a chapter; the prototype restricted marking to one verse.
+- Decision: Support cross-verse / region selection so a pattern can be mapped over a passage. Single-verse marking was a prototype simplification only.
+- Rationale: Patterns and many concept marks legitimately cross verse boundaries.
+- Open: touch UX for cross-paragraph native selection needs prototyping.
+- Confidence: Medium.
+- Made-by: design conversation 2026-06-20 [human-directed].
+- Cross-refs: DEC-129, DEC-132.
