@@ -42,6 +42,10 @@ EXPECTED_REGISTRY_TABLES = {
         "description",
         "origin",
         "verification_state",
+        # Slice 1 authored display metadata (DEC-146).
+        "authored_color",
+        "authored_polarity",
+        "authored_opposite_name",
     },
     "concept_lemmas": {
         "id",

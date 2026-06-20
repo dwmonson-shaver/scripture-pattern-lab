@@ -16,13 +16,22 @@ from sqlalchemy.engine import Engine
 
 from src.app.dependencies import get_concept_registry, get_engine
 from src.app.schemas import (
+    ConceptCreateRequest,
     ConceptDocumentResponse,
     ConceptsResponse,
+    ConceptUpdateRequest,
+    ConceptWriteResponse,
     ErrorResponse,
     GroupingPromoteRequest,
     GroupingPromoteResponse,
 )
 from src.ontology.concept_document import get_document
+from src.ontology.concept_editor import (
+    ConceptExists,
+    ConceptNotFound,
+    create_concept,
+    update_concept,
+)
 from src.ontology.concept_grouping import (
     current_curator_state,
     promote_grouping,
@@ -46,6 +55,67 @@ def get_concepts(
 ) -> ConceptsResponse:
     """Return all registered concepts with their lemma lists."""
     return ConceptsResponse(concepts=registry.list_all_concepts(language=language))
+
+
+@router.post("/api/v1/concepts", response_model=ConceptWriteResponse, status_code=201)
+def create_concept_route(
+    body: ConceptCreateRequest,
+    engine: Engine = Depends(get_engine),
+) -> ConceptWriteResponse:
+    """Create a human-authored concept (Slice 1, DEC-130/146/147).
+
+    Always ``origin='curated'``, ``verification_state='unverified'`` — never
+    auto-promoted (DEC-081/102). Authored color/polarity/opposite are display
+    metadata, written only to the concepts row, never to the evidence-bearing
+    polarity_claims/inverse_claims (DEC-146). 409 if the name already exists.
+    """
+    try:
+        concept = create_concept(
+            engine,
+            name=body.name,
+            description=body.description,
+            authored_color=body.authored_color,
+            authored_polarity=body.authored_polarity,
+            authored_opposite_name=body.authored_opposite_name,
+        )
+    except ConceptExists as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=ErrorResponse(
+                error="concept_exists",
+                message=str(exc),
+                details={"name": body.name},
+            ).model_dump(),
+        ) from exc
+    return ConceptWriteResponse(**concept.model_dump())
+
+
+@router.patch("/api/v1/concepts/{name}", response_model=ConceptWriteResponse)
+def update_concept_route(
+    name: str,
+    body: ConceptUpdateRequest,
+    engine: Engine = Depends(get_engine),
+) -> ConceptWriteResponse:
+    """Edit a concept's description / authored display metadata (Slice 1).
+
+    Only fields explicitly present in the request body are changed (an absent
+    field is left unchanged; an explicit ``null`` clears it). Never changes
+    origin/verification_state and never writes the evidence layer (DEC-146).
+    404 if the concept does not exist.
+    """
+    provided = body.model_dump(include=body.model_fields_set)
+    try:
+        concept = update_concept(engine, name, **provided)
+    except ConceptNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="concept_not_found",
+                message=str(exc),
+                details={"name": name},
+            ).model_dump(),
+        ) from exc
+    return ConceptWriteResponse(**concept.model_dump())
 
 
 @router.get(

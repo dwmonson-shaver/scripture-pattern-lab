@@ -202,6 +202,10 @@ EXPECTED_REGISTRY_TABLES: dict[str, set[str]] = {
         "description",
         "origin",
         "verification_state",
+        # Slice 1 authored display metadata (DEC-146).
+        "authored_color",
+        "authored_polarity",
+        "authored_opposite_name",
     },
     "concept_lemmas": {
         "id",
@@ -338,6 +342,10 @@ def _row(name: str, description: str | None, vstate: str, lemma: str | None,
     r.verification_state = vstate
     r.lemma = lemma
     r.language = language
+    # Slice 1 authored columns (DEC-146) — None unless a test sets them.
+    r.authored_color = None
+    r.authored_polarity = None
+    r.authored_opposite_name = None
     return r
 
 

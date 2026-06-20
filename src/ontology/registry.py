@@ -52,6 +52,13 @@ _VSTATE_CHECK = (
     "verification_state IN ('unverified', 'corpus_observed', 'human_confirmed')"
 )
 _POLARITY_CHECK = "polarity IN ('+', '-', '±')"
+# Authored UI polarity (DEC-146): NULL or one of the three sign values. This is
+# DISPLAY metadata the user typed while reading — NOT a corpus-tested claim. It
+# is intentionally a separate constraint from the evidence-bearing
+# polarity_claims so the two can never be conflated.
+_AUTHORED_POLARITY_CHECK = (
+    "authored_polarity IS NULL OR authored_polarity IN ('+', '-', '±')"
+)
 _CONFIDENCE_CHECK = "confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)"
 _EVIDENCE_CHECK = "evidence_count >= 0"
 
@@ -68,8 +75,19 @@ concepts_table: Table = Table(
         nullable=False,
         server_default="unverified",
     ),
+    # --- Authored UI display metadata (Slice 1, DEC-146). ----------------
+    # These are values the human picks/types while reading (a swatch, a sign,
+    # an opposite name). They are NOT corpus-tested claims and must NEVER be
+    # read as evidence or copied into polarity_claims / inverse_claims without
+    # a corpus-evidence pass + human promotion (DEC-119/146). They carry no
+    # verification_state / evidence_count — they are deliberately off the
+    # unverified→corpus_observed→human_confirmed endorsement axis.
+    Column("authored_color", String(9), nullable=True),
+    Column("authored_polarity", String(2), nullable=True),
+    Column("authored_opposite_name", String(64), nullable=True),
     CheckConstraint(_ORIGIN_CHECK),
     CheckConstraint(_VSTATE_CHECK),
+    CheckConstraint(_AUTHORED_POLARITY_CHECK),
 )
 
 concept_lemmas_table: Table = Table(
@@ -166,8 +184,16 @@ inverse_claims_table: Table = Table(
 
 
 class Concept(BaseModel):
-    """One concept registry entry. No polarity column — claims live in
-    ``polarity_claims`` so each claim can carry its own provenance.
+    """One concept registry entry.
+
+    Carries optional AUTHORED display metadata (Slice 1, DEC-146):
+    ``authored_color`` / ``authored_polarity`` / ``authored_opposite_name`` are
+    values a human picked while reading. They are display priors, NOT
+    corpus-tested claims, and live deliberately OFF the verification_state axis.
+    The evidence-grounded polarity/inverse layer is ``polarity_claims`` /
+    ``inverse_claims`` (each row carrying its own provenance + evidence_count);
+    a future slice may relate the two, but authored metadata is never read as
+    evidence (DEC-119/146).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -177,6 +203,9 @@ class Concept(BaseModel):
     description: str | None = None
     origin: Origin = "curated"
     verification_state: VerificationState = "unverified"
+    authored_color: str | None = None
+    authored_polarity: Polarity | None = None
+    authored_opposite_name: str | None = None
 
 
 class ConceptLemma(BaseModel):
@@ -244,6 +273,12 @@ class ConceptSummary(BaseModel):
     verification_state: VerificationState = "unverified"
     lemma_count: int = 0
     lemmas: list[str] = []
+    # Authored display metadata (DEC-146) — surfaced so the concept library can
+    # render swatch/polarity/opposite without a per-concept round-trip. Never
+    # evidence.
+    authored_color: str | None = None
+    authored_polarity: Polarity | None = None
+    authored_opposite_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +400,9 @@ class ConceptRegistry:
                 concepts_table.c.name,
                 concepts_table.c.description,
                 concepts_table.c.verification_state,
+                concepts_table.c.authored_color,
+                concepts_table.c.authored_polarity,
+                concepts_table.c.authored_opposite_name,
                 concept_lemmas_table.c.lemma,
                 concept_lemmas_table.c.language,
             )
@@ -389,6 +427,9 @@ class ConceptRegistry:
                     "name": name,
                     "description": row.description,
                     "verification_state": row.verification_state,
+                    "authored_color": row.authored_color,
+                    "authored_polarity": row.authored_polarity,
+                    "authored_opposite_name": row.authored_opposite_name,
                     "lemmas": [],
                 },
             )
@@ -402,6 +443,9 @@ class ConceptRegistry:
                 verification_state=entry["verification_state"],  # type: ignore[arg-type]
                 lemma_count=len(entry["lemmas"]),  # type: ignore[arg-type]
                 lemmas=entry["lemmas"],  # type: ignore[arg-type]
+                authored_color=entry["authored_color"],  # type: ignore[arg-type]
+                authored_polarity=entry["authored_polarity"],  # type: ignore[arg-type]
+                authored_opposite_name=entry["authored_opposite_name"],  # type: ignore[arg-type]
             )
             for entry in accumulator.values()
         ]

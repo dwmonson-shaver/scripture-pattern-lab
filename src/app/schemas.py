@@ -338,6 +338,55 @@ class VersionsResponse(BaseModel):
     versions: list[VersionInfoOut]
 
 
+# --------------------------------------------------------------------------
+# Slice 1 — concept create/edit (DEC-130/146/147). Authored display metadata
+# (color/polarity/opposite) is deliberately distinct from the evidence-bearing
+# polarity_claims/inverse_claims layer; it never advances verification_state.
+# --------------------------------------------------------------------------
+
+
+class ConceptCreateRequest(BaseModel):
+    """POST /api/v1/concepts body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = None
+    authored_color: str | None = Field(default=None, max_length=9)
+    authored_polarity: Literal["+", "-", "±"] | None = None
+    authored_opposite_name: str | None = Field(default=None, max_length=64)
+
+
+class ConceptUpdateRequest(BaseModel):
+    """PATCH /api/v1/concepts/{name} body.
+
+    All fields optional; only those provided are changed. ``None`` clears a
+    field (sets it NULL). Cannot change origin/verification_state — a human edit
+    is not a curator promotion (DEC-146).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    description: str | None = None
+    authored_color: str | None = Field(default=None, max_length=9)
+    authored_polarity: Literal["+", "-", "±"] | None = None
+    authored_opposite_name: str | None = Field(default=None, max_length=64)
+
+
+class ConceptWriteResponse(BaseModel):
+    """Result of a concept create/edit."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    description: str | None = None
+    origin: str
+    verification_state: str
+    authored_color: str | None = None
+    authored_polarity: str | None = None
+    authored_opposite_name: str | None = None
+
+
 class ErrorResponse(BaseModel):
     """Error envelope returned via `HTTPException(detail=...)`.
 
