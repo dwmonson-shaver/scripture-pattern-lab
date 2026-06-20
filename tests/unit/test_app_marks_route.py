@@ -76,6 +76,30 @@ class TestCreate:
         )
         assert resp.status_code == 422  # verse_end < verse_start
 
+    def test_single_verse_char_end_not_after_start_422(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/v1/marks",
+            json={"book": "rom", "chapter": 1, "verse_start": 1, "verse_end": 1,
+                  "char_start": 10, "char_end": 10},
+        )
+        assert resp.status_code == 422  # single-verse requires char_end > char_start
+
+    def test_cross_verse_lower_char_end_allowed(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # DEC-143: offsets are per-verse, so a cross-verse mark may end earlier
+        # on its own line than it began on the first verse. Must NOT be rejected.
+        monkeypatch.setattr(
+            "src.app.routes.marks.create_mark",
+            lambda *_a, **_k: _mark(verse_start=5, verse_end=7, char_start=50, char_end=10),
+        )
+        resp = client.post(
+            "/api/v1/marks",
+            json={"book": "rom", "chapter": 8, "verse_start": 5, "verse_end": 7,
+                  "char_start": 50, "char_end": 10, "version_code": "kjv"},
+        )
+        assert resp.status_code == 201, resp.text
+
     def test_unknown_concept_422(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         def _raise(*_a: object, **_k: object) -> Mark:
             raise UnknownConcept("unknown concept name(s): ['Nope']")

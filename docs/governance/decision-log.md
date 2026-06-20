@@ -1658,3 +1658,71 @@
 - Confidence: Medium.
 - Made-by: design conversation 2026-06-20 [human-directed].
 - Cross-refs: DEC-129, DEC-132.
+
+## DEC-144 — English translation is its own verse-aligned two-table layer
+- Status: Accepted + implemented (Slice 1, Phase 1).
+- Question: The corpus is Greek-only; the reader marks on English. How is the English text stored and aligned?
+- Decision: A `translations` registry (code, name, license, is_public_domain) + `translation_verses` (translation_id, corpus_id, book BB, chapter, verse, text), aligned to the Greek corpus by (corpus_id, book, chapter, verse). KJV is the mandatory public-domain default; other PD versions ingest under their own code. Ingest mirrors the corpus discipline (frozen Pydantic row, batched `engine.begin()` + ON CONFLICT, two-factor `--truncate`). Schema `06_translations.sql`.
+- Rationale: Keeps English separable from the Greek ground truth (English is a reading surface, not the symbolic substrate); supports the version switcher and later OT/Hebrew without reshaping.
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-128, DEC-026 (BB codes), DEC-029 (engine factory reuse).
+
+## DEC-145 — Marks anchor as char offsets into a named version + a verse range
+- Status: Accepted + implemented (Slice 1, Phase 4).
+- Question: How is a marked span represented, given cross-verse selection (DEC-143) and a translation-based reading surface?
+- Decision: A `marks` table (corpus_id, book BB, chapter, verse_start, verse_end, char_start, char_end, version_code, actor, timestamps) + a `mark_concepts` join for 0..n concept refs. char offsets are into the English text of the NAMED version (the surface the human selects on); the verse range carries the cross-verse extent. Greek alignment is derived at read time, not stored on the mark. A mark with no concepts is a plain highlight. Update replaces the concept set wholesale. Schema `07_marks.sql`; logic `src/ontology/marks.py`.
+- Rationale: The human marks rendered English; storing offsets-into-version is the honest anchor. Token offsets would force a Greek anchor the English reader never sees. Full BSB per-word alignment is a later slice.
+- Alternatives considered: token offsets into `tokens` (rejected — wrong surface); storing derived Greek on the mark (rejected — recompute on read).
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-129, DEC-143.
+
+## DEC-146 — Authored concept color/polarity/opposite are plain `concepts` columns, OFF the evidence axis
+- Status: Accepted + implemented (Slice 1, Phase 3). **HIGH-STAKES — touches DEC-024/081 charter; Codex-fallback advisory pass ran (Codex blocked).**
+- Question: A human picks a color swatch, a polarity, and types an opposite while reading. Where does that live, given the evidence-bearing `polarity_claims`/`inverse_claims` tables already exist on the unverified→corpus_observed→human_confirmed endorsement axis?
+- Decision: Store the authored values as plain NULLable, `authored_`-prefixed columns on `concepts` (`authored_color`, `authored_polarity` CHECK IN ('+','-','±'), `authored_opposite_name` soft-ref no FK), DELIBERATELY NOT as rows in the claim tables. The authored fields carry no `verification_state`/`evidence_count` — they are off the endorsement axis. `polarity_claims`/`inverse_claims` remain the future evidence-grounded layer (Slice 2 connections will relate the two); authored metadata is never read as evidence.
+- Rationale: A swatch pick or typed opposite is authored DISPLAY data, not a corpus-tested claim. Putting it in the claim tables would advance a prior's standing without corpus evidence + a human gate — the exact confirmation-bias trap the Slice P design review caught (DEC-119). Keeping it off-axis honors DEC-024/081.
+- Guardrails (from the advisory, all implemented): (a) the `authored_` prefix (a bare `polarity` is what a future dev mis-reads as the claim); (b) fixed the stale `src/ontology/registry.py` "No polarity column" comment + an evidence-firewall note on the DDL ("NEVER read as evidence; NEVER copy into polarity_claims/inverse_claims without a corpus-evidence pass + human promotion (DEC-119/146)"); (c) a guard test asserting `create_concept(authored_polarity='+')` issues ZERO writes to the claim tables.
+- Alternatives considered: an `origin='authored'` flag on claim rows (rejected — smuggles authored data onto the endorsement axis, the precise anti-pattern); a separate `concept_authoring` table (rejected — premature; revisit only if authored metadata grows history/fields).
+- Confidence: High (advisory verdict SOUND).
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot + Codex-fallback advisory; high-stakes].
+- Sources: `docs/reviews/review-claude-fallback-slice-1-close-2026-06-20.md` (advisory folded into the close review).
+- Cross-refs: DEC-024, DEC-081, DEC-102, DEC-119, DEC-130.
+
+## DEC-147 — Concept-write code lives in `src/ontology/concept_editor.py`, not the read-only registry
+- Status: Accepted + implemented (Slice 1, Phase 3).
+- Question: Concepts are CLI-seeded / lexicon-auto-created today; the human now mints/edits them while reading. Where does the write code live?
+- Decision: A new `src/ontology/concept_editor.py` with `create_concept` / `update_concept` (take `Engine`, `engine.begin()` + `pg_insert`/`update` + `.returning`, raise `ConceptExists`/`ConceptNotFound`). The read-only `ConceptRegistry` stays read-only. Human concepts are `origin='curated'`, `verification_state='unverified'`, never auto-promoted (DEC-081/102). Never writes the claim tables (DEC-146).
+- Rationale: Mirrors `concept_writer.py`/`concept_grouping.py`; keeps the reader/writer separation clean.
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-130, DEC-146, DEC-081.
+
+## DEC-148 — Chapter-read orchestration lives in `src/retrieval/reader.py`
+- Status: Accepted + implemented (Slice 1, Phase 2).
+- Question: Where does the chapter-read path (join English verses + Greek tokens) live?
+- Decision: `src/retrieval/reader.py` — `read_chapter` joins `translation_verses` to `tokens` by (corpus_id, book BB, chapter, verse) and groups Greek tokens under their verse; `list_versions` for the switcher. The app route calls it with the injected `Engine`. Lives in retrieval (corpus reads are retrieval's job); imports engine/ingestion table mirrors, never the app.
+- Rationale: Keeps `src/app` routes-only and `src/ontology` claim-free; retrieval is the existing home for corpus reads.
+- Alternatives considered: a new `src/reading/` package (rejected — retrieval already owns corpus reads).
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-128, architecture boundaries (CLAUDE.md).
+
+## DEC-149 — Frontend committed code-complete with interim hand-written types; web DoD deferred
+- Status: Accepted + implemented (Slice 1, Phase 5).
+- Question: The reader UI needs response types, but `gen:types` requires a deployed backend exposing the new routes' OpenAPI.
+- Decision: Hand-write the Slice 1 types in `web/types/api.ts` (mirroring `src/app/schemas.py`), commit the frontend code-complete, and defer the web Definition-of-Done (lint/typecheck/vitest/check:no-llm-sdk/gen:types) to the user's last-mile. Commit message flags the frontend UNVERIFIED. Replace interim types with `components['schemas']` aliases on the next `gen:types` after redeploy.
+- Rationale: DEC-125 precedent. The orchestrator cannot run the web toolchain or deploy the backend this session; blocking the slice on that would stall a shippable surface.
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-125, DEC-081 (no LLM SDK in bundle).
+
+## DEC-150 — The prototype's interaction grammar is adopted; its palette is not (project theme wins)
+- Status: Accepted + implemented (Slice 1, Phase 5).
+- Question: The clickable prototype uses a warm-parchment palette; the project's design system is a dark Vuetify theme. Which wins?
+- Decision: Adopt the prototype's INTERACTION grammar exactly (select→popup→panel, interlinear toggle with tap-chip→highlight, draggable word-snapping handles, iPad slide-over, large tap targets) but map it onto the project's dark Vuetify theme using semantic tokens. The ONE place a raw color renders is the concept highlight tint / swatch — that is the concept's user-chosen `authored_color`, i.e. content, not chrome — applied via inline `:style` with a semantic-token fallback. All chrome uses semantic tokens (no hex / no `text-white`).
+- Rationale: Charter says the project design system wins where it conflicts with a mock; concept color is user data, not theme.
+- Confidence: High.
+- Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
+- Cross-refs: DEC-142, web/THEME.md, DEC-081.

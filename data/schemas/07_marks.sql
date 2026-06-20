@@ -21,7 +21,12 @@ CREATE TABLE IF NOT EXISTS marks (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (verse_end >= verse_start),
-    CHECK (char_end > char_start)
+    -- char_start/char_end are PER-VERSE offsets (start into the first verse,
+    -- end into the last). For a single-verse mark, char_end must exceed
+    -- char_start; for a cross-verse mark the end may sit earlier on its own
+    -- line than the start did on the first verse (DEC-143). So the strict
+    -- ordering only applies within one verse.
+    CHECK (char_end > char_start OR verse_end > verse_start)
 );
 
 CREATE INDEX IF NOT EXISTS marks_chapter_idx

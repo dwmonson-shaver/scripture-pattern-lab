@@ -70,7 +70,27 @@ The backend is decomposed into logical components with clear boundaries, but the
 - `POST /api/v1/concepts/{name}/grouping/promote` — **Slice P.** Advance a Tier-2 grouping's curator state (the first Tier-2 write route; bearer-authed). Body `GroupingPromoteRequest{to_state ∈ {corpus_observed, human_confirmed}, rationale}`; returns `GroupingPromoteResponse{anchor_name, from_state, curator_state, audit_id}`. 404 if no grouping is anchored on the concept; 409 on an illegal (skip / non-forward) transition; 422 on a bad target or empty rationale. See `REQ:08.curator-promotion`.
 - `GET /api/v1/health` — Health check (Slice G; liveness only per DEC-066).
 
+**Slice 1 routes** (concept-identification reader — see `REQ:09.reader-api`,
+`REQ:09.concept-write-api`, `REQ:09.marks-api`):
+- `GET /api/v1/read/versions` — List ingested translations for the version switcher. `VersionsResponse{versions: [{code, name, is_public_domain}]}`.
+- `GET /api/v1/read/{corpus}/{book}/{chapter}?version=kjv` — A chapter's English verses + the aligned Greek tokens beneath each (the interlinear). `book` is a DSL abbreviation normalized to a BB code. `ChapterReadResponse{corpus_id, book, book_display, chapter, version_code, verses:[{verse, reference, english_text, greek_tokens}]}`. 404 `book_not_found` (unknown abbrev) / `chapter_empty` (no verses for the version).
+- `POST /api/v1/concepts` — Create a human-authored concept (curated/unverified, never auto-promoted; authored color/polarity/opposite are display metadata written only to `concepts`, never the claim tables — DEC-146). 201; 409 `concept_exists`.
+- `PATCH /api/v1/concepts/{name}` — Edit a concept's description / authored display metadata (only provided fields change; never touches origin/verification_state). 404 `concept_not_found`.
+- `POST /api/v1/marks` — Create a span annotation over a (possibly cross-verse) selection tied to 0..n concepts (by name). 201; 404 `book_not_found`; 422 `unknown_concept`. char offsets are per-verse, so `char_end > char_start` is required only for a single-verse mark (DEC-143/145).
+- `GET /api/v1/marks?corpus=&book=&chapter=&version=` — List a chapter's marks for one version. `MarksResponse{marks:[MarkOut]}`.
+- `PATCH /api/v1/marks/{id}` — Adjust a mark's span and/or replace its concept set wholesale. 404 `mark_not_found`; 422 `unknown_concept`.
+- `DELETE /api/v1/marks/{id}` — Delete a mark. 204; 404 `mark_not_found`.
+
 **Input/output format**: JSON. Requests and responses use typed schemas.
+
+<!-- REQ:09.reader-api -->
+**Chapter-read API (Slice 1).** `GET /api/v1/read/{corpus}/{book}/{chapter}` and `GET /api/v1/read/versions` back the reader. The read orchestration is `src/retrieval/reader.py::read_chapter` (joins `translation_verses` to `tokens` by (corpus_id, book BB, chapter, verse); groups Greek tokens under their verse) + `list_versions`. The route (`src/app/routes/read.py`) normalizes the book abbreviation via `book_codes` and maps `KeyError`→404 `book_not_found`, `ChapterNotFound`→404 `chapter_empty`. Reads live in retrieval, never the app or ontology (architecture boundary). See `REQ:08.english-translation`. [DEC-128, DEC-148]
+
+<!-- REQ:09.concept-write-api -->
+**Concept-write API (Slice 1).** `POST /api/v1/concepts` + `PATCH /api/v1/concepts/{name}` (`src/app/routes/concepts.py`) create/edit human-authored concepts via `src/ontology/concept_editor.py` (`create_concept`/`update_concept`). Always `origin='curated'`, `verification_state='unverified'`, never auto-promoted (DEC-081/102). Authored color/polarity/opposite are display metadata written ONLY to `concepts`, never the evidence-bearing `polarity_claims`/`inverse_claims` (DEC-146). 409 `concept_exists`; 404 `concept_not_found`. See `REQ:08.concept-authoring`. [DEC-130, DEC-146, DEC-147]
+
+<!-- REQ:09.marks-api -->
+**Mark CRUD API (Slice 1).** `POST/GET/PATCH/DELETE /api/v1/marks` (`src/app/routes/marks.py`) over `src/ontology/marks.py`. A mark is a span (per-verse char offsets + a verse range that may cross verses — DEC-143) tied to 0..n concepts by name. The single-verse-only `char_end > char_start` rule is enforced in the Pydantic validator AND the `07_marks.sql` CHECK (`char_end > char_start OR verse_end > verse_start`). 404 `book_not_found`/`mark_not_found`; 422 `unknown_concept`. See `REQ:08.span-annotations`. [DEC-129, DEC-143, DEC-145]
 
 **Response envelope (POST /api/v1/query/dsl)**: composes existing
 project models verbatim — no wrapping, no re-derivation. All four

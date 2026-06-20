@@ -413,8 +413,14 @@ class MarkCreateRequest(BaseModel):
     def _check_span(self) -> "MarkCreateRequest":
         if self.verse_end < self.verse_start:
             raise ValueError("verse_end must be >= verse_start")
-        if self.char_end <= self.char_start:
-            raise ValueError("char_end must be > char_start")
+        # char offsets are PER-VERSE (start into the first verse, end into the
+        # last). char_end > char_start only required WITHIN a single verse; a
+        # cross-verse selection may end earlier on its line than it began
+        # (DEC-143). Matches the SQL CHECK and the frontend proxy zod.
+        if self.verse_end == self.verse_start and self.char_end <= self.char_start:
+            raise ValueError(
+                "char_end must be > char_start for a single-verse mark"
+            )
         return self
 
 

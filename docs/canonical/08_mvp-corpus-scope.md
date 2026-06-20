@@ -187,6 +187,37 @@ Slice P adds the two halves that make a Tier-2 grouping *testable and curatable*
 
 **Curator promotion (human-gated).** A grouping's **`curator_state`** advances `unverified → corpus_observed → human_confirmed`, forward-only and single-step, via `src/ontology/concept_grouping.py::promote_grouping` (exposed at `POST /api/v1/concepts/{name}/grouping/promote`). Each advance is a HUMAN action recorded append-only in the `grouping_promotions` audit log with an actor, a rationale, and a frozen snapshot of the evidence reviewed (DEC-124, the authoritative source of `curator_state`). `corpus_observed` = a human reviewed the corpus evidence and judged it relevant; `human_confirmed` = a human endorsed the grouping as conceptually sound. **The corpus never advances state on its own (DEC-120)** — the deterministic evidence informs the human; it does not confirm the hypothesis. Critically, `curator_state` is a SEPARATE fact from the grouping blob's `verification_state`, which stays `Literal['unverified']` forever (DEC-119) — the auto-create/auto-group DEC-081 guard is untouched, and a new anti-regression test enforces that the promotion path cannot weaken it (DEC-126). This is the human-gated write path the Slice-O runtime guard existed to prevent being added *by accident*; Slice P adds it *deliberately and safely*.
 
+<!-- REQ:08.english-translation -->
+## English Translation Layer (Slice 1)
+
+The corpus (`tokens`) is Greek-only; the human reads and marks in English. Slice 1 adds a verse-aligned English translation layer SEPARATE from the corpus ground truth (English is a reading surface, not the symbolic-retrieval substrate; DEC-128/144).
+
+- `translations` — registry of ingested versions: `code` (UNIQUE), `name`, `license`, `is_public_domain`.
+- `translation_verses` — `(translation_id, corpus_id, book BB, chapter, verse, text)` with a UNIQUE natural key, aligned to `tokens` by `(corpus_id, book, chapter, verse)`.
+
+KJV is the mandatory public-domain default; other public-domain versions (WEB/ASV/YLT) may ingest under their own `code`. Schema `data/schemas/06_translations.sql`; parse/load in `src/ingestion/translations/` (KJV-shape per-book JSON → BB codes; batched `engine.begin()` + ON CONFLICT DO NOTHING; idempotent re-run); CLI `scripts/db/ingest_translation.py` (two-factor `--truncate` + `SPL_TRANSLATION_CONFIRM_TRUNCATE=1`, exit 0/1/2/3); fetch helper `scripts/ingest/fetch_kjv.sh` (aruljohn/Bible-kjv, vendored under gitignored `data/raw/translations/`).
+
+The chapter-read path (`src/retrieval/reader.py::read_chapter`, DEC-148) joins `translation_verses` to `tokens` and surfaces, per verse, the English text plus the ordered Greek tokens beneath it (the interlinear). `list_versions` backs the version switcher. Greek↔English per-word alignment (BSB) is a later slice; Slice 1 surfaces the verse's Greek tokens as a whole.
+
+<!-- REQ:08.span-annotations -->
+## Span Annotations (Marks) (Slice 1)
+
+A **mark** is a span annotation tying a selected phrase to 0..n concepts (DEC-129/143/145). It is distinct from the per-token corpus annotation of `REQ:08.annotation-layers` above — a mark is a HUMAN-authored selection over the *rendered English text*, not a corpus token property.
+
+- `marks` — `(corpus_id, book BB, chapter, verse_start, verse_end, char_start, char_end, version_code, actor, created_at, updated_at)` with `CHECK(verse_end >= verse_start)` and `CHECK(char_end > char_start)`. `char_start`/`char_end` are offsets into the English text of the NAMED version (the surface the human selects on); the verse range carries the cross-verse extent (DEC-143 — single-verse marking was a prototype simplification only).
+- `mark_concepts` — `(mark_id, concept_id)` join, `ON DELETE CASCADE`. A mark with no rows here is a "plain highlight."
+
+Greek alignment is derived at read time, never stored on the mark (DEC-145). Logic in `src/ontology/marks.py` (concepts referenced by NAME at the API boundary, resolved to id; `UnknownConcept` is all-or-nothing in one transaction; update replaces the concept set wholesale). Schema `data/schemas/07_marks.sql`.
+
+<!-- REQ:08.concept-authoring -->
+## Concept Authoring — color / polarity / opposite (Slice 1)
+
+Human-authored concepts gain user-editable DISPLAY metadata while reading (DEC-130): `authored_color`, `authored_polarity` (`+`/`-`/`±`), `authored_opposite_name` — plain NULLable columns on `concepts`.
+
+**These authored fields are deliberately OFF the endorsement axis (DEC-146).** They carry no `verification_state`/`evidence_count`. They are display priors a human typed, NOT corpus-tested claims, and must NEVER be read as evidence or copied into the evidence-bearing `polarity_claims`/`inverse_claims` without a corpus-evidence pass + a human promotion (DEC-119/146). The `authored_` prefix, the DDL firewall comment, and a guard test (authored polarity writes ZERO claim rows) enforce the separation. The evidence-grounded polarity/inverse layer remains `polarity_claims`/`inverse_claims`; Slice 2 connections will relate the two.
+
+Human concepts are `origin='curated'`, `verification_state='unverified'`, never auto-promoted (DEC-081/102). Write code: `src/ontology/concept_editor.py` (`create_concept`/`update_concept`, DEC-147) — separate from the read-only `ConceptRegistry`.
+
 <!-- REQ:08.ingestion-pipeline -->
 ## Ingestion Pipeline — MVP
 

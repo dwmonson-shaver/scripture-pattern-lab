@@ -14,7 +14,7 @@ import { proxyToBackend, type BackendError } from '~~/server/utils/backend'
 export const requestSchema = z.object({
   name: z.string().min(1).max(64),
   description: z.string().max(2000).nullish(),
-  authored_color: z.string().max(32).nullish(),
+  authored_color: z.string().max(9).nullish(),
   authored_polarity: z.enum(['+', '-', '±']).nullish(),
   authored_opposite_name: z.string().max(64).nullish(),
 })
