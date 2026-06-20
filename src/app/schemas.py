@@ -277,6 +277,67 @@ class GroupingPromoteResponse(BaseModel):
     audit_id: int | None = None
 
 
+# --------------------------------------------------------------------------
+# Slice 1 — chapter-read API (DEC-128/148). These response bodies mirror the
+# reader orchestration models in src/retrieval/reader.py.
+# --------------------------------------------------------------------------
+
+
+class GreekTokenOut(BaseModel):
+    """One Greek corpus token under a verse (for the interlinear)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    position: int
+    surface_form: str
+    normalized_form: str
+    lemma: str
+    morph_code: str
+    pos: str
+
+
+class VerseRead(BaseModel):
+    """One verse of a chapter read."""
+
+    model_config = ConfigDict(frozen=True)
+
+    verse: int
+    reference: str
+    english_text: str
+    greek_tokens: list[GreekTokenOut]
+
+
+class ChapterReadResponse(BaseModel):
+    """GET /api/v1/read/{corpus}/{book}/{chapter} body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    corpus_id: str
+    book: str
+    book_display: str
+    chapter: int
+    version_code: str
+    verses: list[VerseRead]
+
+
+class VersionInfoOut(BaseModel):
+    """One ingested translation, for the version switcher."""
+
+    model_config = ConfigDict(frozen=True)
+
+    code: str
+    name: str
+    is_public_domain: bool
+
+
+class VersionsResponse(BaseModel):
+    """GET /api/v1/read/versions body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    versions: list[VersionInfoOut]
+
+
 class ErrorResponse(BaseModel):
     """Error envelope returned via `HTTPException(detail=...)`.
 
