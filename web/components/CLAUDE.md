@@ -34,6 +34,42 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
 - `Tier2GroupingPlaceholder.vue` — Part 2 stub; renders a "not yet built"
   card until the Tier-2 curator slice lands.
 
+### Slice 1 — concept-identification reader (DEC-149)
+
+- `ReaderBar.vue` — sticky `v-toolbar` (NOT a `v-app-bar` — that's layout
+  chrome): canon / book / chapter selectors, version switcher, and the
+  interlinear toggle. The toggle hides when the corpus has no original
+  language (per-corpus `CORPUS_META`; NT = Greek). `v-model:*` per control,
+  `@prev` / `@next` for chapter arrows.
+- `ChapterView.vue` — the reading pane. Serif verse text, rubric verse
+  numbers (`text-primary`), concept-highlighted `<mark>` spans, per-verse
+  interlinear chips when `greekOn`. Emits `select` (verse range + char offsets
+  into the rendered English; cross-verse allowed, DEC-143), `mark-click`,
+  `chip-tap`. The concept's `authored_color` is the ONE sanctioned raw-color
+  render (USER DATA, inline `:style` only) — tint + underline; unconcepted
+  marks use a theme-neutral tint. Ports the prototype's flashGloss.
+- `SelectionPopup.vue` — minimal floating popup: "Mark as concept" (primary)
+  + "Just highlight". The prototype's "Tell me about this" is OUT of scope.
+- `ConceptPanel.vue` — workbench panel host: `v-navigation-drawer` slide-over
+  on narrow / persistent aside on wide (via `useDisplay()`). `v-model:drawer`.
+- `ConceptPanelBody.vue` — the four-way view router (library / search / edit /
+  mark) shared by both panel hosts; pure event-forwarding glue.
+- `ConceptLibrary.vue` — search-as-you-type + concept list (authored-color
+  swatch, name, polarity chip, state) + "New concept". Doubles as the
+  associate-concept search when `contextLabel` is set: emits `pick` instead of
+  `open`. Swatch is the only raw-color render.
+- `ConceptEditForm.vue` — create / edit form: title, color (palette swatches +
+  custom picker — sanctioned raw color), polarity `v-btn-toggle`, opposite.
+  Never sets verification_state / origin (backend-owned, DEC-102).
+- `MarkDetail.vue` — the marked phrase + Change / Add / Remove actions and a
+  note that the handles adjust the span. Handles the "Just highlight"
+  (no-concept) mark case.
+- `SpanHandles.vue` — two draggable, word-snapping handles (large touch
+  targets, pointer capture) over the active single-verse mark; emits
+  `span-change` with new char offsets. Ports the prototype's pointer logic.
+- `InterlinearChip.vue` — one Greek token chip (lemma via `<GreekText>` + a
+  contextual sub-label); emits `tap`.
+
 ## Dependencies
 
 - Vuetify (auto-registered globally)

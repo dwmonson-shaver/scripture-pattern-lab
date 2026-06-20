@@ -141,6 +141,95 @@ export async function proxyToBackend<TReq, TRes>(
 }
 
 /**
+ * HTTP methods that carry a JSON body. `sendToBackend` accepts these so a
+ * single helper covers POST / PATCH / DELETE without duplicating the error
+ * contract per verb.
+ */
+export type WriteMethod = 'POST' | 'PATCH' | 'DELETE'
+
+export interface SendProxyOpts<TReq> {
+  config: BackendConfig
+  path: string
+  method: WriteMethod
+  // DELETE often has no body; make it optional.
+  body?: TReq
+  // Optional fetch override for testing.
+  fetchImpl?: typeof globalThis.fetch
+}
+
+/**
+ * Method-aware sibling of `proxyToBackend` (which is POST-only). Same error
+ * contract — throws a `BackendError` on non-2xx so the caller mirrors the
+ * upstream status + body via `createError`. Slice 1 (DEC-149): the marks /
+ * concepts write paths need PATCH + DELETE, which `proxyToBackend` cannot
+ * express. `proxyToBackend` / `getFromBackend` stay intact; this is additive.
+ *
+ * A 204 (or any empty body) is tolerated — `null` is returned rather than
+ * failing the JSON parse, because DELETE responses may carry no content.
+ */
+export async function sendToBackend<TReq, TRes>(
+  opts: SendProxyOpts<TReq>,
+): Promise<TRes> {
+  assertConfigured(opts.config)
+
+  const fetchFn = opts.fetchImpl ?? globalThis.fetch
+  const url = `${opts.config.url.replace(/\/+$/, '')}${opts.path}`
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${opts.config.token}`,
+    Accept: 'application/json',
+  }
+  const init: RequestInit = { method: opts.method, headers }
+  if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    init.body = JSON.stringify(opts.body)
+  }
+
+  let response: Response
+  try {
+    response = await fetchFn(url, init)
+  } catch {
+    throw {
+      status: 502,
+      body: {
+        detail: {
+          error: 'backend_unreachable',
+          message: 'could not reach the backend',
+          details: null,
+        },
+      },
+    } satisfies BackendError
+  }
+
+  // Read the body as text first so an empty (204) response doesn't blow up the
+  // JSON parser; only parse when there's content.
+  const text = await response.text()
+  let body: unknown = null
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw {
+        status: 502,
+        body: {
+          detail: {
+            error: 'backend_response_not_json',
+            message: 'backend returned a non-JSON response',
+            details: null,
+          },
+        },
+      } satisfies BackendError
+    }
+  }
+
+  if (!response.ok) {
+    throw { status: response.status, body } satisfies BackendError
+  }
+
+  return body as TRes
+}
+
+/**
  * Forward a GET to the backend with bearer auth. Same error contract as
  * `proxyToBackend` so the browser sees an identical envelope shape
  * regardless of HTTP verb.

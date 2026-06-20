@@ -60,3 +60,130 @@ export interface BackendErrorDetail {
 export interface BackendErrorBody {
   detail: BackendErrorDetail
 }
+
+/**
+ * Slice 1 — interim hand-written types for the concept-identification reader
+ * (DEC-149 / DEC-125 precedent). The reader/marks/concept-write endpoints are
+ * NOT yet in the deployed backend's OpenAPI surface, so `gen:types` cannot
+ * regenerate them. These mirror src/app/schemas.py exactly; replace with
+ * `components['schemas'][...]` aliases once the backend is redeployed and
+ * `npm run gen:types` runs.
+ */
+
+// --- Chapter read (GET /api/v1/read/{corpus}/{book}/{chapter}) -------------
+export interface GreekTokenOut {
+  position: number
+  surface_form: string
+  normalized_form: string
+  lemma: string
+  morph_code: string
+  pos: string
+}
+
+export interface VerseRead {
+  verse: number
+  reference: string
+  english_text: string
+  greek_tokens: GreekTokenOut[]
+}
+
+export interface ChapterReadResponse {
+  corpus_id: string
+  book: string
+  book_display: string
+  chapter: number
+  version_code: string
+  verses: VerseRead[]
+}
+
+export interface VersionInfoOut {
+  code: string
+  name: string
+  is_public_domain: boolean
+}
+
+export interface VersionsResponse {
+  versions: VersionInfoOut[]
+}
+
+// --- Concepts (GET/POST/PATCH /api/v1/concepts) ----------------------------
+export type AuthoredPolarity = '+' | '-' | '±'
+
+export interface ConceptSummary {
+  name: string
+  description: string | null
+  verification_state: string
+  lemma_count: number
+  lemmas: string[]
+  authored_color: string | null
+  authored_polarity: AuthoredPolarity | null
+  authored_opposite_name: string | null
+}
+
+export interface ConceptsResponse {
+  concepts: ConceptSummary[]
+}
+
+export interface ConceptCreateRequest {
+  name: string
+  description?: string | null
+  authored_color?: string | null
+  authored_polarity?: AuthoredPolarity | null
+  authored_opposite_name?: string | null
+}
+
+export interface ConceptUpdateRequest {
+  description?: string | null
+  authored_color?: string | null
+  authored_polarity?: AuthoredPolarity | null
+  authored_opposite_name?: string | null
+}
+
+export interface ConceptWriteResponse {
+  name: string
+  description: string | null
+  origin: string
+  verification_state: string
+  authored_color: string | null
+  authored_polarity: string | null
+  authored_opposite_name: string | null
+}
+
+// --- Marks (CRUD /api/v1/marks) --------------------------------------------
+export interface MarkOut {
+  id: number
+  corpus_id: string
+  book: string
+  chapter: number
+  verse_start: number
+  verse_end: number
+  char_start: number
+  char_end: number
+  version_code: string
+  actor: string
+  concept_names: string[]
+}
+
+export interface MarksResponse {
+  marks: MarkOut[]
+}
+
+export interface MarkCreateRequest {
+  corpus_id?: string
+  book: string
+  chapter: number
+  verse_start: number
+  verse_end: number
+  char_start: number
+  char_end: number
+  version_code?: string
+  concept_names?: string[]
+}
+
+export interface MarkUpdateRequest {
+  verse_start?: number | null
+  verse_end?: number | null
+  char_start?: number | null
+  char_end?: number | null
+  concept_names?: string[] | null
+}

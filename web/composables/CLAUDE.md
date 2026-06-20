@@ -20,6 +20,17 @@ Auto-imported composables. Named `use*.ts`.
   wrapper around `/api/sp/concepts/:name/document`. Returns
   `{ document, pending, error, refresh }` with `error` normalized to the
   same `ProxyErrorShape` `useQuery` produces.
+- `useReader.ts` — Slice 1 (DEC-149): reader navigation + chapter fetch.
+  Refs `corpus / book / chapter / version / greekOn`, plus `chapterData`,
+  `versions`, `pending`, `error` (`ProxyErrorShape`). `loadChapter()`,
+  `loadVersions()`, `nextChapter()` / `prevChapter()` (clamps at 1). Default
+  anchor nt / rom / 8 / kjv. `$fetch` (component-local; no Pinia).
+- `useConcepts.ts` — Slice 1: concept library. `concepts` ref, `load()`,
+  `create(req)`, `update(name, req)` (both reload after write), `search(filter)`
+  case-insensitive name helper. Errors normalized to `ProxyErrorShape`.
+- `useMarks.ts` — Slice 1: marks for the current chapter. `marks` ref,
+  `loadForChapter(scope)` (records the scope), `create` / `update` / `remove`
+  (each reloads). Errors normalized to `ProxyErrorShape`.
 
 ## Dependencies
 

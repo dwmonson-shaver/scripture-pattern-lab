@@ -15,8 +15,28 @@ Nitro server runtime. Routes in `api/`, utilities in `utils/`.
 - `api/sp/query/nl.post.ts` — proxies the NL query route to the backend
 - `api/sp/concepts/[name]/document.get.ts` — proxies the persisted
   Conceptual Document (Slice N, DEC-106)
-- `utils/backend.ts` — typed fetch wrappers (`proxyToBackend` for POST,
-  `getFromBackend` for GET) that inject the bearer token
+- `utils/backend.ts` — typed fetch wrappers that inject the bearer token:
+  `proxyToBackend` (POST), `getFromBackend` (GET), and `sendToBackend`
+  (method-aware POST / PATCH / DELETE; added in Slice 1, tolerates a 204
+  empty body). All three share one error contract (`BackendError`).
+
+### Slice 1 — concept-identification reader proxies (DEC-149)
+
+All mirror the `nl.post.ts` pattern (zod where there's a body, the shared
+proxy/get/send helpers, `createError` mirroring the upstream status + body):
+
+- `api/sp/read/versions.get.ts` — GET backend `/api/v1/read/versions`
+- `api/sp/read/[corpus]/[book]/[chapter].get.ts` — GET the chapter; path
+  segments decoded + re-encoded once, `?version=` passed through
+- `api/sp/concepts/index.get.ts` — GET concepts (`?language=` passthrough)
+- `api/sp/concepts/index.post.ts` — POST create (zod: name 1..64 + optional
+  authored fields; polarity enum `+`/`-`/`±`)
+- `api/sp/concepts/[name].patch.ts` — PATCH a concept (all fields optional)
+- `api/sp/marks/index.get.ts` — GET marks (corpus/book/chapter/version query)
+- `api/sp/marks/index.post.ts` — POST a mark (zod mirrors `MarkCreateRequest`;
+  cross-verse allowed; empty/absent `concept_names` = "Just highlight")
+- `api/sp/marks/[id].patch.ts` — PATCH a mark's span / concepts
+- `api/sp/marks/[id].delete.ts` — DELETE a mark (no body)
 
 ## Dependencies
 
