@@ -41,13 +41,20 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
   interlinear toggle. The toggle hides when the corpus has no original
   language (per-corpus `CORPUS_META`; NT = Greek). `v-model:*` per control,
   `@prev` / `@next` for chapter arrows.
-- `ChapterView.vue` — the reading pane. Serif verse text, rubric verse
-  numbers (`text-primary`), concept-highlighted `<mark>` spans, per-verse
-  interlinear chips when `greekOn`. Emits `select` (verse range + char offsets
-  into the rendered English; cross-verse allowed, DEC-143), `mark-click`,
-  `chip-tap`. The concept's `authored_color` is the ONE sanctioned raw-color
-  render (USER DATA, inline `:style` only) — tint + underline; unconcepted
-  marks use a theme-neutral tint. Ports the prototype's flashGloss.
+- `ChapterView.vue` — the reading pane. Study-edition (DEC-152): illuminated
+  chapter opening (rubric book label, display chapter numeral, gilt rule),
+  gilt versal drop-cap on the opening verse's first letter (via
+  `.verse--opening .verse-text::first-letter` so mark segmentation is
+  untouched), serif scripture body (`--font-read`), rubric verse numbers.
+  Concept-highlighted `<mark>` spans use the spec `.cm` multiply-blend
+  marker-stroke keyed off a `--c` custom property; per-verse interlinear chips
+  when `greekOn`. Emits `select` (verse range + char offsets into the rendered
+  English; cross-verse allowed, DEC-143), `mark-click`, `chip-tap`. The
+  concept's `authored_color` is the ONE sanctioned raw-color render (USER DATA,
+  inline `:style="{ '--c': color }"` only); unconcepted marks fall back to the
+  gilt secondary token. Ports the prototype's flashGloss (approximate Slice-1
+  alignment — see P3 alignment-honesty note). Opening animations guarded by
+  `prefers-reduced-motion`.
 - `SelectionPopup.vue` — minimal floating popup: "Mark as concept" (primary)
   + "Just highlight". The prototype's "Tell me about this" is OUT of scope.
 - `ConceptPanel.vue` — workbench panel host: `v-navigation-drawer` slide-over

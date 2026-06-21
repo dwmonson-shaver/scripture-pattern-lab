@@ -81,9 +81,11 @@ describe('ChapterView', () => {
     })
     const m = wrapper.get('[data-testid="concept-mark"]')
     expect(m.text()).toContain('saved by hope')
-    // Authored color (user data) renders inline — the sanctioned exception.
+    // Authored color (user data) renders inline as the `--c` custom property —
+    // the sanctioned raw-color exception. The CSS does the multiply-blend tint
+    // + underline off `--c` (study-edition .cm, DEC-152).
     const style = m.attributes('style') ?? ''
-    expect(style).toContain('224, 161, 46') // #E0A12E as rgb tint
+    expect(style).toContain('--c: #E0A12E')
   })
 
   it('emits mark-click with the mark id', async () => {
