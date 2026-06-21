@@ -62,12 +62,7 @@ const style = computed(() => {
     >
       Mark as concept
     </v-btn>
-    <v-btn
-      variant="text"
-      size="large"
-      data-testid="popup-highlight"
-      @click="emit('highlight')"
-    >
+    <v-btn variant="text" size="large" data-testid="popup-highlight" @click="emit('highlight')">
       <span class="highlight-dot mr-2" aria-hidden="true" />
       Just highlight
     </v-btn>

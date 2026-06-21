@@ -20,15 +20,11 @@ beforeEach(() => {
   lastHandler = null
   lastCreateErrorCall = null
 
-  globalScope.defineEventHandler = <T,>(handler: (event: MockEvent) => Promise<T>) => {
+  globalScope.defineEventHandler = <T>(handler: (event: MockEvent) => Promise<T>) => {
     lastHandler = handler as (event: MockEvent) => Promise<unknown>
     return handler
   }
-  globalScope.getRouterParam = (
-    event: MockEvent,
-    key: string,
-    opts?: { decode?: boolean },
-  ) => {
+  globalScope.getRouterParam = (event: MockEvent, key: string, opts?: { decode?: boolean }) => {
     const raw = event.routerParams[key]
     return raw === undefined ? undefined : opts?.decode ? decodeURIComponent(raw) : raw
   }
@@ -118,9 +114,7 @@ describe('GET /api/sp/read/:corpus/:book/:chapter', () => {
     globalScope.fetch = fetchSpy as unknown as typeof globalThis.fetch
 
     const handler = await loadHandler()
-    await expect(
-      handler(makeEvent({ corpus: 'nt', book: 'zzz', chapter: '99' })),
-    ).rejects.toThrow()
+    await expect(handler(makeEvent({ corpus: 'nt', book: 'zzz', chapter: '99' }))).rejects.toThrow()
     expect(lastCreateErrorCall?.statusCode).toBe(404)
     expect(lastCreateErrorCall?.data).toEqual(body)
   })

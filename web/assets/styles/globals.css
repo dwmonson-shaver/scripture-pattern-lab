@@ -31,6 +31,11 @@
   --font-display: 'Hoefler Text', 'Big Caslon', 'Iowan Old Style', Palatino, Georgia, serif;
   --font-grc: 'SBL Greek', 'Palatino Linotype', Palatino, 'Times New Roman', serif;
   --reader-measure: 34rem;
+  /* Gilt ramp (design-system stops around the secondary/gilt token). Used by
+   * the illuminated versal + chapter-opening rule. Lives here so the ramp is
+   * defined once rather than inline in components (THEME discipline). */
+  --gilt-hi: #c9a23a;
+  --gilt-lo: #836619;
 }
 
 /* Parchment grain ground. Applied only under the parchment theme so the dark

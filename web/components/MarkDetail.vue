@@ -25,6 +25,8 @@ const emit = defineEmits<{
   change: []
   add: []
   remove: []
+  /** Edit the concept attached to this mark (opens the concept edit form). */
+  edit: [name: string]
 }>()
 
 const conceptByName = computed<Record<string, ConceptSummary>>(() => {
@@ -57,12 +59,7 @@ const hasConcept = computed(() => props.mark.concept_names.length > 0)
       <p class="text-body-1 font-italic mb-3" data-testid="mark-phrase">“{{ phrase }}”</p>
 
       <div v-if="hasConcept" class="d-flex flex-wrap ga-2 mb-3" data-testid="mark-concepts">
-        <v-chip
-          v-for="c in attached"
-          :key="c.name"
-          size="small"
-          variant="outlined"
-        >
+        <v-chip v-for="c in attached" :key="c.name" size="small" variant="outlined">
           <span
             class="mark-swatch mr-2"
             :style="{ backgroundColor: c.authored_color || 'rgb(var(--v-theme-secondary))' }"
@@ -76,6 +73,15 @@ const hasConcept = computed(() => props.mark.concept_names.length > 0)
       </p>
 
       <div class="d-flex flex-wrap ga-2">
+        <v-btn
+          v-if="hasConcept"
+          size="small"
+          variant="outlined"
+          prepend-icon="mdi-pencil"
+          data-testid="mark-edit"
+          @click="emit('edit', mark.concept_names[0])"
+          >Edit concept</v-btn
+        >
         <v-btn
           v-if="hasConcept"
           size="small"

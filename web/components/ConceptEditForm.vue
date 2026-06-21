@@ -85,11 +85,7 @@ function onSave(): void {
       <span class="text-overline text-medium-emphasis">{{
         isNew ? 'New concept' : 'Edit concept'
       }}</span>
-      <v-btn
-        size="small"
-        variant="text"
-        data-testid="concept-edit-cancel"
-        @click="emit('cancel')"
+      <v-btn size="small" variant="text" data-testid="concept-edit-cancel" @click="emit('cancel')"
         >Cancel</v-btn
       >
     </div>

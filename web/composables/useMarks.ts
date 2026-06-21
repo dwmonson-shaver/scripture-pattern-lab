@@ -1,9 +1,4 @@
-import type {
-  MarkCreateRequest,
-  MarkOut,
-  MarksResponse,
-  MarkUpdateRequest,
-} from '~~/types/api'
+import type { MarkCreateRequest, MarkOut, MarksResponse, MarkUpdateRequest } from '~~/types/api'
 import { unwrapErrorBody, type ProxyErrorShape } from '~~/composables/useQuery'
 
 /**
@@ -81,10 +76,7 @@ export const useMarks = () => {
     }
   }
 
-  const update = async (
-    id: number,
-    req: MarkUpdateRequest,
-  ): Promise<MarkOut | null> => {
+  const update = async (id: number, req: MarkUpdateRequest): Promise<MarkOut | null> => {
     error.value = null
     try {
       const updated = await $fetch<MarkOut>(`/api/sp/marks/${id}`, {

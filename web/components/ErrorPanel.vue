@@ -34,13 +34,7 @@ const hasDetails = computed(() => {
 </script>
 
 <template>
-  <v-alert
-    :type="severity"
-    :title="codeLabel"
-    class="mb-6"
-    data-testid="error-panel"
-    closable
-  >
+  <v-alert :type="severity" :title="codeLabel" class="mb-6" data-testid="error-panel" closable>
     <p class="mb-2">{{ detail?.message ?? 'no message' }}</p>
     <p v-if="error.status !== 0" class="text-caption text-medium-emphasis">
       HTTP {{ error.status }} · code <code>{{ detail?.error ?? 'unknown' }}</code>
@@ -49,9 +43,14 @@ const hasDetails = computed(() => {
       <div v-if="showDetails && hasDetails" class="mt-3">
         <pre
           class="text-caption pa-3 rounded"
-          style="background: rgba(var(--v-theme-on-surface), 0.05); white-space: pre-wrap; word-break: break-word"
+          style="
+            background: rgba(var(--v-theme-on-surface), 0.05);
+            white-space: pre-wrap;
+            word-break: break-word;
+          "
           data-testid="error-details"
-        >{{ JSON.stringify(detail?.details, null, 2) }}</pre>
+          >{{ JSON.stringify(detail?.details, null, 2) }}</pre
+        >
       </div>
     </v-expand-transition>
     <template v-if="hasDetails" #append>

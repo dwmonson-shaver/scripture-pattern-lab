@@ -21,10 +21,7 @@ import GreekText from '../components/GreekText.vue'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMountOpts = Record<string, any>
 
-export function mountWithVuetify<T extends Component>(
-  component: T,
-  options: AnyMountOpts = {},
-) {
+export function mountWithVuetify<T extends Component>(component: T, options: AnyMountOpts = {}) {
   const vuetify = createVuetify({ components, directives })
   const existingPlugins = (options.global?.plugins ?? []) as unknown[]
   const existingComponents = (options.global?.components ?? {}) as Record<string, Component>

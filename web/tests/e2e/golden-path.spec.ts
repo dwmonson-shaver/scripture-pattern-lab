@@ -21,9 +21,7 @@ test.describe('Slice J1 golden path', () => {
     await page.goto('/')
 
     // The page renders.
-    await expect(page.getByRole('heading', { level: 6 })).toContainText(
-      /symbolic pattern queries/i,
-    )
+    await expect(page.getByRole('heading', { level: 6 })).toContainText(/symbolic pattern queries/i)
 
     // The user types the flagship question and submits.
     const textarea = page.getByTestId('query-input').locator('textarea')

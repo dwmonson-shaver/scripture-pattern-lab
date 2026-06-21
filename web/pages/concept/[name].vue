@@ -17,9 +17,7 @@ const conceptName = computed(() => {
 const { document, pending, error } = useConceptDocument(conceptName)
 
 useHead(() => ({
-  title: conceptName.value
-    ? `${conceptName.value} — Conceptual Document`
-    : 'Conceptual Document',
+  title: conceptName.value ? `${conceptName.value} — Conceptual Document` : 'Conceptual Document',
 }))
 </script>
 

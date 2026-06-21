@@ -33,14 +33,12 @@ const groundingLabel = computed(() => {
     .join('-')
 })
 
-const confidencePct = computed(() =>
-  Math.round((props.response.translation.confidence ?? 0) * 100),
-)
+const confidencePct = computed(() => Math.round((props.response.translation.confidence ?? 0) * 100))
 
 const contextualization = computed(() => props.response.result.contextualization)
 
-const observedAlt = computed(() =>
-  contextualization.value?.alternative_orderings.find((a) => a.is_observed) ?? null,
+const observedAlt = computed(
+  () => contextualization.value?.alternative_orderings.find((a) => a.is_observed) ?? null,
 )
 </script>
 
@@ -71,7 +69,9 @@ const observedAlt = computed(() =>
         {{ response.translation.explanation }}
       </p>
       <div v-if="response.translation.alternatives.length > 0" class="mt-3">
-        <p class="text-caption text-medium-emphasis mb-1">Alternatives the translator considered:</p>
+        <p class="text-caption text-medium-emphasis mb-1">
+          Alternatives the translator considered:
+        </p>
         <code
           v-for="(alt, i) in response.translation.alternatives"
           :key="i"
@@ -152,7 +152,10 @@ const observedAlt = computed(() =>
           <span class="text-caption text-medium-emphasis">({{ b.node_value }})</span>
         </li>
       </ul>
-      <p v-if="contextualization.alternative_orderings_capped" class="text-caption text-medium-emphasis mb-2">
+      <p
+        v-if="contextualization.alternative_orderings_capped"
+        class="text-caption text-medium-emphasis mb-2"
+      >
         Alternative orderings list is capped (only the first
         {{ contextualization.alternative_orderings.length }} shown of all possible permutations).
       </p>
@@ -174,9 +177,7 @@ const observedAlt = computed(() =>
       <p v-if="observedAlt" class="text-caption text-medium-emphasis mt-3 mb-0">
         The observed ordering accounts for
         {{ observedAlt.count }} of
-        {{
-          contextualization.alternative_orderings.reduce((sum: number, a) => sum + a.count, 0)
-        }}
+        {{ contextualization.alternative_orderings.reduce((sum: number, a) => sum + a.count, 0) }}
         total occurrences across all orderings.
       </p>
     </v-card>
@@ -184,11 +185,9 @@ const observedAlt = computed(() =>
     <!-- Explanation summary -->
     <v-card class="pa-6" data-testid="explanation-card">
       <v-card-title class="text-h6 px-0 pt-0">Explanation</v-card-title>
-      <p
-        class="text-body-1 mb-0"
-        style="white-space: pre-wrap"
-        data-testid="explanation-summary"
-      >{{ response.explanation.summary }}</p>
+      <p class="text-body-1 mb-0" style="white-space: pre-wrap" data-testid="explanation-summary">
+        {{ response.explanation.summary }}
+      </p>
     </v-card>
   </div>
 </template>

@@ -14,11 +14,7 @@ defineProps<{ section: ComparativeLexiconSection }>()
 </script>
 
 <template>
-  <v-card
-    variant="outlined"
-    class="pa-6 mb-4"
-    data-testid="comparative-lexicon-section"
-  >
+  <v-card variant="outlined" class="pa-6 mb-4" data-testid="comparative-lexicon-section">
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
       <v-chip
         size="small"
@@ -32,12 +28,10 @@ defineProps<{ section: ComparativeLexiconSection }>()
       <v-chip size="small" variant="outlined">deterministic</v-chip>
     </div>
 
-    <p class="text-h6 mb-1">
-      Comparative lexicon analysis — {{ section.english_term }}
-    </p>
+    <p class="text-h6 mb-1">Comparative lexicon analysis — {{ section.english_term }}</p>
     <p class="text-caption text-medium-emphasis mb-4">
-      Lemmas and verse references pulled directly from open-licensed lexicon
-      data. No LLM, no opinion.
+      Lemmas and verse references pulled directly from open-licensed lexicon data. No LLM, no
+      opinion.
     </p>
 
     <v-table density="comfortable" data-testid="comparative-lexicon-table">
@@ -51,7 +45,9 @@ defineProps<{ section: ComparativeLexiconSection }>()
       </thead>
       <tbody>
         <tr v-for="row in section.rows" :key="row.lemma" data-testid="comparative-lexicon-row">
-          <td><GreekText>{{ row.lemma }}</GreekText></td>
+          <td>
+            <GreekText>{{ row.lemma }}</GreekText>
+          </td>
           <td>{{ row.strongs.length > 0 ? row.strongs.join(', ') : '—' }}</td>
           <td>
             <span v-if="row.usual_renderings.length === 0">—</span>

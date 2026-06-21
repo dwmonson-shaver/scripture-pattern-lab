@@ -39,9 +39,7 @@ describe('nl.post requestSchema (Slice M prior_turns passthrough)', () => {
       role: 'user' as const,
       content: 'x',
     }))
-    expect(() =>
-      requestSchema.parse({ nl_query: 'q', prior_turns: tooMany }),
-    ).toThrow()
+    expect(() => requestSchema.parse({ nl_query: 'q', prior_turns: tooMany })).toThrow()
   })
 
   it('rejects an invalid role', async () => {

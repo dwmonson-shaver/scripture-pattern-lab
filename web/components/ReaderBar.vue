@@ -68,21 +68,13 @@ const NT_BOOKS: { value: string; title: string }[] = [
 
 const bookItems = computed(() => NT_BOOKS)
 
-const chapterItems = computed(() =>
-  Array.from({ length: 40 }, (_, i) => i + 1),
-)
+const chapterItems = computed(() => Array.from({ length: 40 }, (_, i) => i + 1))
 
 const origLang = computed(() => CORPUS_META[corpus.value]?.origLang ?? null)
 </script>
 
 <template>
-  <v-toolbar
-    flat
-    density="comfortable"
-    color="surface"
-    class="reader-bar"
-    data-testid="reader-bar"
-  >
+  <v-toolbar flat density="comfortable" color="surface" class="reader-bar" data-testid="reader-bar">
     <v-container class="d-flex align-center ga-2 flex-wrap py-0">
       <v-select
         v-model="corpus"

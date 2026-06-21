@@ -20,17 +20,10 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const OUTPUT_DIR = '.output'
-const FORBIDDEN_PATTERNS = [
-  '@ai-sdk/anthropic',
-  '@anthropic-ai/sdk',
-  'google-generative-ai',
-]
+const FORBIDDEN_PATTERNS = ['@ai-sdk/anthropic', '@anthropic-ai/sdk', 'google-generative-ai']
 // 'openai' would false-positive on the word "openai" in any other context.
 // Match it only as an import / require.
-const FORBIDDEN_REGEXPS = [
-  /from\s+['"]openai['"]/i,
-  /require\(\s*['"]openai['"]\s*\)/i,
-]
+const FORBIDDEN_REGEXPS = [/from\s+['"]openai['"]/i, /require\(\s*['"]openai['"]\s*\)/i]
 
 async function* walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

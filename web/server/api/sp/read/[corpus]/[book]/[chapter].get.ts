@@ -15,12 +15,7 @@ export default defineEventHandler(async (event) => {
   const book = getRouterParam(event, 'book', { decode: true })
   const chapter = getRouterParam(event, 'chapter', { decode: true })
 
-  if (
-    !corpus?.trim() ||
-    !book?.trim() ||
-    !chapter?.trim() ||
-    !/^\d+$/.test(chapter.trim())
-  ) {
+  if (!corpus?.trim() || !book?.trim() || !chapter?.trim() || !/^\d+$/.test(chapter.trim())) {
     throw createError({
       statusCode: 400,
       data: {

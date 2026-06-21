@@ -31,11 +31,7 @@ defineProps<{ section: EducationalArticleSection }>()
       >
         LLM-generated commentary
       </v-chip>
-      <v-chip
-        size="small"
-        variant="outlined"
-        prepend-icon="mdi-school-outline"
-      >
+      <v-chip size="small" variant="outlined" prepend-icon="mdi-school-outline">
         educational purposes
       </v-chip>
     </div>
@@ -47,16 +43,18 @@ defineProps<{ section: EducationalArticleSection }>()
       class="mb-4"
       data-testid="educational-article-disclaimer"
     >
-      The prose below is LLM-generated educational commentary on the
-      lexicon data above. Treat it as a starting prior, not a confirmed
-      claim — the deterministic table in section 1 is the ground truth.
+      The prose below is LLM-generated educational commentary on the lexicon data above. Treat it as
+      a starting prior, not a confirmed claim — the deterministic table in section 1 is the ground
+      truth.
     </v-alert>
 
     <p
       class="text-body-1 mb-3"
       style="white-space: pre-wrap"
       data-testid="educational-article-prose"
-    >{{ section.prose }}</p>
+    >
+      {{ section.prose }}
+    </p>
 
     <p
       v-if="section.model_label"

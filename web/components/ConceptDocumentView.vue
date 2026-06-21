@@ -26,11 +26,7 @@ defineProps<{ document: ConceptDocument }>()
     <!-- Header -->
     <v-card class="pa-6 mb-4" data-testid="concept-document-header">
       <div class="d-flex align-center ga-2 mb-2 flex-wrap">
-        <v-chip
-          size="small"
-          color="info"
-          prepend-icon="mdi-file-document-outline"
-        >
+        <v-chip size="small" color="info" prepend-icon="mdi-file-document-outline">
           Conceptual Document
         </v-chip>
         <v-chip size="small" variant="outlined" prepend-icon="mdi-flask-outline">
@@ -61,9 +57,8 @@ defineProps<{ document: ConceptDocument }>()
       class="mb-4"
       data-testid="educational-article-absent"
     >
-      No LLM-generated educational commentary is attached to this document.
-      (The article generator is opt-in per DEC-107 and the document is
-      stored once on first creation.)
+      No LLM-generated educational commentary is attached to this document. (The article generator
+      is opt-in per DEC-107 and the document is stored once on first creation.)
     </v-alert>
 
     <!-- Part 2 — Tier-2 grouping section (anchor / member / placeholder) -->

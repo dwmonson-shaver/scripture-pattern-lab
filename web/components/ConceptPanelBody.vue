@@ -39,6 +39,7 @@ const emit = defineEmits<{
   'mark-change': []
   'mark-add': []
   'mark-remove': []
+  'mark-edit': [name: string]
 }>()
 </script>
 
@@ -61,6 +62,7 @@ const emit = defineEmits<{
       @change="emit('mark-change')"
       @add="emit('mark-add')"
       @remove="emit('mark-remove')"
+      @edit="emit('mark-edit', $event)"
     />
 
     <ConceptLibrary

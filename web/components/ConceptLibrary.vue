@@ -59,7 +59,11 @@ function onRow(name: string): void {
 
 <template>
   <div data-testid="concept-library">
-    <p v-if="contextLabel" class="text-body-2 text-medium-emphasis mb-3" data-testid="associate-context">
+    <p
+      v-if="contextLabel"
+      class="text-body-2 text-medium-emphasis mb-3"
+      data-testid="associate-context"
+    >
       {{ contextLabel }}
     </p>
 
@@ -103,7 +107,9 @@ function onRow(name: string): void {
           >
             {{ POLARITY_LABEL[c.authored_polarity] ?? c.authored_polarity }}
           </v-chip>
-          <span class="text-caption text-medium-emphasis">{{ stateLabel(c.verification_state) }}</span>
+          <span class="text-caption text-medium-emphasis">{{
+            stateLabel(c.verification_state)
+          }}</span>
         </v-list-item-subtitle>
       </v-list-item>
 

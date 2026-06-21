@@ -75,12 +75,29 @@ describe('MarkDetail', () => {
     expect(wrapper.emitted('add')).toBeTruthy()
   })
 
-  it('notes that handles adjust the span', () => {
+  it('notes that handles adjust the span (single-verse)', () => {
     const wrapper = mountWithVuetify(MarkDetail, {
       props: { mark: mark(['Hope']), phrase: 'x', concepts },
     })
     expect(wrapper.get('[data-testid="mark-handles-note"]').text().toLowerCase()).toContain(
       'handles',
     )
+  })
+
+  it('emits edit with the concept name (the in-reader concept-update entry)', async () => {
+    const wrapper = mountWithVuetify(MarkDetail, {
+      props: { mark: mark(['Hope']), phrase: 'x', concepts },
+    })
+    await wrapper.get('[data-testid="mark-edit"]').trigger('click')
+    expect(wrapper.emitted('edit')?.[0]).toEqual(['Hope'])
+  })
+
+  it('flags cross-verse marks instead of showing the single-verse resize note', () => {
+    const crossVerse = { ...mark(['Hope']), verse_start: 24, verse_end: 26 }
+    const wrapper = mountWithVuetify(MarkDetail, {
+      props: { mark: crossVerse, phrase: 'x', concepts },
+    })
+    expect(wrapper.find('[data-testid="mark-handles-note"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="mark-crossverse-note"]').text()).toContain('24')
   })
 })

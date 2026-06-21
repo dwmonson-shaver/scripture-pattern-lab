@@ -16,20 +16,22 @@ const baseConfig = {
 }
 
 function mockFetchOk(body: unknown): typeof globalThis.fetch {
-  return vi.fn(async () =>
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
   ) as unknown as typeof globalThis.fetch
 }
 
 function mockFetchStatus(status: number, body: unknown): typeof globalThis.fetch {
-  return vi.fn(async () =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      }),
   ) as unknown as typeof globalThis.fetch
 }
 

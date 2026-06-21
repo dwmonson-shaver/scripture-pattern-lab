@@ -21,9 +21,7 @@ import { unwrapErrorBody, type ProxyErrorShape } from '~~/composables/useQuery'
  */
 export function useConceptDocument(name: Ref<string> | string) {
   const nameRef = isRef(name) ? name : ref(name)
-  const url = computed(
-    () => `/api/sp/concepts/${encodeURIComponent(nameRef.value)}/document`,
-  )
+  const url = computed(() => `/api/sp/concepts/${encodeURIComponent(nameRef.value)}/document`)
 
   // Bucket-NP1-2 fix (DEC-117): lazy: true so a 404 / 500 during SSR direct
   // URL load surfaces as an inline `<ErrorPanel>` via the normalized error

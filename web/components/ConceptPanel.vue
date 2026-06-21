@@ -58,6 +58,7 @@ const emit = defineEmits<{
   'mark-change': []
   'mark-add': []
   'mark-remove': []
+  'mark-edit': [name: string]
 }>()
 
 const { mobile } = useDisplay()
@@ -135,6 +136,7 @@ const title = computed(() => {
         @mark-change="emit('mark-change')"
         @mark-add="emit('mark-add')"
         @mark-remove="emit('mark-remove')"
+        @mark-edit="emit('mark-edit', $event)"
       />
     </div>
   </v-navigation-drawer>
@@ -172,6 +174,7 @@ const title = computed(() => {
       @mark-change="emit('mark-change')"
       @mark-add="emit('mark-add')"
       @mark-remove="emit('mark-remove')"
+      @mark-edit="emit('mark-edit', $event)"
     />
   </aside>
 </template>

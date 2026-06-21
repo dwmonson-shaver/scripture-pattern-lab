@@ -11,9 +11,7 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const language = typeof query.language === 'string' ? query.language : undefined
 
-  const path =
-    '/api/v1/concepts' +
-    (language ? `?language=${encodeURIComponent(language)}` : '')
+  const path = '/api/v1/concepts' + (language ? `?language=${encodeURIComponent(language)}` : '')
 
   try {
     return await getFromBackend<unknown>({

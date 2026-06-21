@@ -55,9 +55,18 @@ const chapterScope = computed(() => ({
   version: version.value,
 }))
 
+// Track the last actually-loaded scope so the spy-suppression check can tell a
+// pure chapter scroll-spy from a real book/version/corpus nav (F5).
+const lastLoaded = reactive({ corpus: corpus.value, book: book.value, version: version.value })
+
 async function reloadAll(): Promise<void> {
   await loadChapter()
   await markStore.loadForChapter(chapterScope.value)
+  // Record the scope that is now loaded so the scroll-spy suppression check can
+  // distinguish a pure chapter spy-update from a real book/version/corpus nav.
+  lastLoaded.corpus = corpus.value
+  lastLoaded.book = book.value
+  lastLoaded.version = version.value
 }
 
 // Initial load — useAsyncData so it runs once under SSR and on the client.
@@ -67,16 +76,27 @@ await useAsyncData('reader-init', async () => {
   return true
 })
 
-// When true, the next chapter change came from scroll-spy (the chapter is
-// already loaded) — reflect it in the dropdown without reloading.
-const spyDriven = ref(false)
+// Sentinel: the chapter value that a scroll-spy event set (already loaded) —
+// suppress its reload, but ONLY when the change is purely that chapter (a real
+// book/version/corpus nav in the same tick must still reload). A boolean flag
+// could be consumed by a coalesced real nav; the sentinel is specific (F5).
+const spyTarget = ref<number | null>(null)
 
 // Reload chapter + marks when the navigation target changes.
 watch(
   () => [corpus.value, book.value, chapter.value, version.value],
   () => {
-    if (spyDriven.value) {
-      spyDriven.value = false
+    const target = spyTarget.value
+    spyTarget.value = null
+    // Suppress only when the change is exactly the spy-driven chapter and
+    // nothing else (book/version/corpus) moved with it.
+    if (
+      target !== null &&
+      chapter.value === target &&
+      book.value === lastLoaded.book &&
+      version.value === lastLoaded.version &&
+      corpus.value === lastLoaded.corpus
+    ) {
       return
     }
     resetPanel()
@@ -87,7 +107,7 @@ watch(
 /** Scroll-spy: a chapter opening scrolled into view → reflect in the dropdown. */
 function onChapterInView(ch: number): void {
   if (ch === chapter.value) return
-  spyDriven.value = true
+  spyTarget.value = ch
   chapter.value = ch
 }
 
@@ -358,10 +378,7 @@ async function applyAssociation(name: string): Promise<void> {
       associate.value = null
       return
     }
-    const names =
-      ctx.mode === 'add'
-        ? Array.from(new Set([...mark.concept_names, name]))
-        : [name]
+    const names = ctx.mode === 'add' ? Array.from(new Set([...mark.concept_names, name])) : [name]
     await markStore.update(ctx.id, { concept_names: names })
     associate.value = null
     activeMarkId.value = ctx.id
@@ -387,6 +404,12 @@ async function onMarkRemove(): Promise<void> {
   if (!activeMark.value) return
   await markStore.remove(activeMark.value.id)
   resetPanel()
+}
+/** Edit the concept attached to the active mark → open the concept edit form.
+ * This is the in-reader entry to the concept-update path (F9). */
+function onMarkEdit(name: string): void {
+  editingConceptName.value = name
+  panelView.value = 'edit'
 }
 
 // --- span handles -----------------------------------------------------------
@@ -501,6 +524,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
         @mark-change="onMarkChange"
         @mark-add="onMarkAdd"
         @mark-remove="onMarkRemove"
+        @mark-edit="onMarkEdit"
       />
     </div>
 

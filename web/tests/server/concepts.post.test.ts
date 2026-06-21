@@ -41,9 +41,7 @@ describe('concepts POST requestSchema', () => {
 
   it('rejects an invalid polarity', async () => {
     const { requestSchema } = await import('~~/server/api/sp/concepts/index.post')
-    expect(() =>
-      requestSchema.parse({ name: 'Hope', authored_polarity: 'positive' }),
-    ).toThrow()
+    expect(() => requestSchema.parse({ name: 'Hope', authored_polarity: 'positive' })).toThrow()
   })
 
   it('accepts each valid polarity symbol', async () => {

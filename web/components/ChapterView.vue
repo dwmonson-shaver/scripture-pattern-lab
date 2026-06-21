@@ -198,9 +198,7 @@ function onChipTap(verse: number, token: GreekTokenOut): void {
  */
 function flashGloss(verse: number, token: GreekTokenOut): void {
   if (!import.meta.client || !rootEl.value) return
-  const vtext = rootEl.value.querySelector(
-    `.verse[data-verse="${verse}"] .verse-text`,
-  )
+  const vtext = rootEl.value.querySelector(`.verse[data-verse="${verse}"] .verse-text`)
   if (!vtext) return
   // Use the normalized form's leading latin-ish stem if present, else skip —
   // Greek surface forms won't substring-match English. The English alignment
@@ -247,9 +245,7 @@ function onMarkClick(id: number): void {
 }
 
 /** The first verse of the chapter gets the illuminated gilt versal. */
-const firstVerseNum = computed<number | null>(
-  () => props.chapter?.verses[0]?.verse ?? null,
-)
+const firstVerseNum = computed<number | null>(() => props.chapter?.verses[0]?.verse ?? null)
 
 // --- scroll-spy --------------------------------------------------------------
 // Watch each chapter-opening anchor; emit `chapter-in-view` as openings cross
@@ -305,11 +301,7 @@ onBeforeUnmount(() => observer?.disconnect())
     @mouseup="onMouseUp"
   >
     <template v-if="chapter">
-      <header
-        class="opening"
-        :data-chapter-anchor="chapter.chapter"
-        data-testid="chapter-opening"
-      >
+      <header class="opening" :data-chapter-anchor="chapter.chapter" data-testid="chapter-opening">
         <div class="opening-book" data-testid="chapter-book">{{ chapter.book_display }}</div>
         <div class="opening-chap">
           <span class="opening-num">{{ chapter.chapter }}</span>
@@ -343,11 +335,9 @@ onBeforeUnmount(() => observer?.disconnect())
                 @click.stop="onMarkClick(seg.mark.id)"
                 @keydown.enter.stop="onMarkClick(seg.mark.id)"
                 >{{ seg.text
-                }}<sup
-                  v-if="seg.mark.concept_names.length > 1"
-                  class="mark-multi text-primary"
-                  >{{ seg.mark.concept_names.length }}</sup
-                ></mark
+                }}<sup v-if="seg.mark.concept_names.length > 1" class="mark-multi text-primary">{{
+                  seg.mark.concept_names.length
+                }}</sup></mark
               >
               <template v-else>{{ seg.text }}</template>
             </template>
@@ -430,7 +420,7 @@ onBeforeUnmount(() => observer?.disconnect())
   background: linear-gradient(
     90deg,
     rgb(var(--v-theme-secondary)) 0%,
-    #c9a23a 38%,
+    var(--gilt-hi) 38%,
     rgb(var(--v-border-color)) 100%
   );
 }
@@ -475,7 +465,12 @@ onBeforeUnmount(() => observer?.disconnect())
   padding: 0.1em 0.14em;
   margin: 0.05em 0.5rem 0.05rem 0;
   color: rgb(var(--v-theme-surface));
-  background: linear-gradient(150deg, #c9a23a 0%, rgb(var(--v-theme-secondary)) 52%, #836619 100%);
+  background: linear-gradient(
+    150deg,
+    var(--gilt-hi) 0%,
+    rgb(var(--v-theme-secondary)) 52%,
+    var(--gilt-lo) 100%
+  );
   border-radius: 6px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),

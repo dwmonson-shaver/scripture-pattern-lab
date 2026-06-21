@@ -21,18 +21,14 @@ beforeEach(() => {
   lastHandler = null
   lastCreateErrorCall = null
 
-  globalScope.defineEventHandler = <T,>(handler: (event: MockEvent) => Promise<T>) => {
+  globalScope.defineEventHandler = <T>(handler: (event: MockEvent) => Promise<T>) => {
     lastHandler = handler as (event: MockEvent) => Promise<unknown>
     return handler
   }
   // h3 v1.x default: returns the RAW (URL-encoded) value; only decodes
   // when called with `{ decode: true }`. Mirror that contract so the
   // unit test catches double-encode regressions (Codex Slice-NP1 P2).
-  globalScope.getRouterParam = (
-    event: MockEvent,
-    key: string,
-    opts?: { decode?: boolean },
-  ) => {
+  globalScope.getRouterParam = (event: MockEvent, key: string, opts?: { decode?: boolean }) => {
     const raw = event.routerParams[key]
     return opts?.decode ? decodeURIComponent(raw) : raw
   }
@@ -93,18 +89,19 @@ describe('GET /api/sp/concepts/:name/document', () => {
     const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://backend.test/api/v1/concepts/humility/document')
     expect(init.method).toBe('GET')
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      'Bearer test-token',
-    )
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-token')
   })
 
   it('URL-encodes concept names with spaces (no double-encode)', async () => {
     const fetchSpy = vi.fn(
       async () =>
-        new Response('{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}', {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          '{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}',
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
     )
     globalScope.fetch = fetchSpy as unknown as typeof globalThis.fetch
 
@@ -113,9 +110,7 @@ describe('GET /api/sp/concepts/:name/document', () => {
     // exactly once. Double-encoding would produce `fear%2520of%2520...`.
     await handler(makeEvent('fear%20of%20the%20lord'))
     const [url] = fetchSpy.mock.calls[0] as unknown as [string]
-    expect(url).toBe(
-      'https://backend.test/api/v1/concepts/fear%20of%20the%20lord/document',
-    )
+    expect(url).toBe('https://backend.test/api/v1/concepts/fear%20of%20the%20lord/document')
     expect(url).not.toContain('%2520')
   })
 
@@ -128,10 +123,13 @@ describe('GET /api/sp/concepts/:name/document', () => {
     const encoded = encodeURIComponent(greek)
     const fetchSpy = vi.fn(
       async () =>
-        new Response('{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}', {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          '{"concept_name":"foo","short_summary":"","part1_comparative":{"english_term":"foo","rows":[],"generated_from":[]}}',
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
     )
     globalScope.fetch = fetchSpy as unknown as typeof globalThis.fetch
 
@@ -146,16 +144,16 @@ describe('GET /api/sp/concepts/:name/document', () => {
     const handler = await loadHandler()
     await expect(handler(makeEvent(''))).rejects.toThrow()
     expect(lastCreateErrorCall?.statusCode).toBe(400)
-    expect(
-      (lastCreateErrorCall?.data as { detail: { error: string } }).detail.error,
-    ).toBe('invalid_request')
+    expect((lastCreateErrorCall?.data as { detail: { error: string } }).detail.error).toBe(
+      'invalid_request',
+    )
   })
 
   it('mirrors upstream 404 (document not found) to the browser', async () => {
     const upstreamErrorBody = {
       detail: {
         error: 'document_not_found',
-        message: 'no Conceptual Document exists for concept \'humility\'',
+        message: "no Conceptual Document exists for concept 'humility'",
         details: { concept_name: 'humility' },
       },
     }

@@ -50,9 +50,7 @@ export const useConcepts = () => {
     }
   }
 
-  const create = async (
-    req: ConceptCreateRequest,
-  ): Promise<ConceptWriteResponse | null> => {
+  const create = async (req: ConceptCreateRequest): Promise<ConceptWriteResponse | null> => {
     error.value = null
     try {
       const created = await $fetch<ConceptWriteResponse>('/api/sp/concepts', {

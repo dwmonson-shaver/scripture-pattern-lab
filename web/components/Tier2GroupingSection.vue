@@ -30,19 +30,9 @@ function confidencePct(c: number): string {
 
 <template>
   <!-- Anchor view: full Tier-2 grouping -->
-  <v-card
-    v-if="grouping"
-    variant="outlined"
-    class="pa-6 mb-4"
-    data-testid="tier2-grouping-section"
-  >
+  <v-card v-if="grouping" variant="outlined" class="pa-6 mb-4" data-testid="tier2-grouping-section">
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
-      <v-chip
-        size="small"
-        color="info"
-        variant="tonal"
-        prepend-icon="mdi-graph-outline"
-      >
+      <v-chip size="small" color="info" variant="tonal" prepend-icon="mdi-graph-outline">
         Tier-2 grouping
       </v-chip>
       <v-chip
@@ -56,9 +46,7 @@ function confidencePct(c: number): string {
     </div>
 
     <p class="text-h6 mb-1">Conceptual grouping</p>
-    <p class="text-caption text-medium-emphasis mb-3">
-      Anchor: {{ grouping.anchor_name }}
-    </p>
+    <p class="text-caption text-medium-emphasis mb-3">Anchor: {{ grouping.anchor_name }}</p>
 
     <v-list density="compact" class="mb-3" data-testid="tier2-member-list">
       <v-list-item
@@ -76,9 +64,7 @@ function confidencePct(c: number): string {
           >
             {{ confidencePct(m.confidence) }}
           </v-chip>
-          <span v-if="m.note" class="text-caption text-medium-emphasis">
-            — {{ m.note }}
-          </span>
+          <span v-if="m.note" class="text-caption text-medium-emphasis"> — {{ m.note }} </span>
         </v-list-item-title>
       </v-list-item>
     </v-list>
@@ -96,18 +82,10 @@ function confidencePct(c: number): string {
     data-testid="tier2-grouping-pointer"
   >
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
-      <v-chip
-        size="small"
-        variant="outlined"
-        prepend-icon="mdi-link-variant"
-      >
+      <v-chip size="small" variant="outlined" prepend-icon="mdi-link-variant">
         Tier-2 member
       </v-chip>
-      <v-chip
-        size="small"
-        variant="outlined"
-        prepend-icon="mdi-flask-outline"
-      >
+      <v-chip size="small" variant="outlined" prepend-icon="mdi-flask-outline">
         unverified — human review required
       </v-chip>
     </div>
@@ -130,36 +108,21 @@ function confidencePct(c: number): string {
   </v-card>
 
   <!-- Neither: placeholder for concepts not yet in any grouping -->
-  <v-card
-    v-else
-    variant="outlined"
-    class="pa-6 mb-4"
-    data-testid="tier2-grouping-placeholder"
-  >
+  <v-card v-else variant="outlined" class="pa-6 mb-4" data-testid="tier2-grouping-placeholder">
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
-      <v-chip
-        size="small"
-        variant="outlined"
-        prepend-icon="mdi-graph-outline"
-      >
+      <v-chip size="small" variant="outlined" prepend-icon="mdi-graph-outline">
         Tier-2 grouping
       </v-chip>
-      <v-chip
-        size="small"
-        color="warning"
-        variant="tonal"
-        prepend-icon="mdi-clock-outline"
-      >
+      <v-chip size="small" color="warning" variant="tonal" prepend-icon="mdi-clock-outline">
         not yet a member
       </v-chip>
     </div>
 
     <p class="text-h6 mb-1">Conceptual groupings</p>
     <p class="text-body-2 text-medium-emphasis mb-0">
-      This concept is not yet part of a Tier-2 grouping. The Tier-2 layer
-      surfaces claims that different expressions "hang together" beyond
-      their lexicon mapping; groupings are written by the curator workflow
-      and the system's worked-example seed (DEC-116).
+      This concept is not yet part of a Tier-2 grouping. The Tier-2 layer surfaces claims that
+      different expressions "hang together" beyond their lexicon mapping; groupings are written by
+      the curator workflow and the system's worked-example seed (DEC-116).
     </p>
   </v-card>
 </template>

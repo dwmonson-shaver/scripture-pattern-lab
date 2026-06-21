@@ -29,7 +29,7 @@ if (!globalScope.$fetch) {
 
 // useState — Nuxt's SSR-safe shared state. For unit tests, plain ref().
 if (!globalScope.useState) {
-  globalScope.useState = <T,>(_key: string, init?: () => T) => ref(init ? init() : (null as T))
+  globalScope.useState = <T>(_key: string, init?: () => T) => ref(init ? init() : (null as T))
 }
 
 // useRuntimeConfig — read-only stub returning a public.appName.

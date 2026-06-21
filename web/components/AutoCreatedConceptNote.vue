@@ -20,18 +20,11 @@ import type { AutoCreatedConceptNote } from '~~/types/api'
  */
 const props = defineProps<{ note: AutoCreatedConceptNote }>()
 
-const documentHref = computed(
-  () => `/concept/${encodeURIComponent(props.note.concept_name)}`,
-)
+const documentHref = computed(() => `/concept/${encodeURIComponent(props.note.concept_name)}`)
 </script>
 
 <template>
-  <v-card
-    class="pa-6 mb-4"
-    color="info"
-    variant="tonal"
-    data-testid="auto-created-concept-note"
-  >
+  <v-card class="pa-6 mb-4" color="info" variant="tonal" data-testid="auto-created-concept-note">
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
       <v-chip
         size="small"
@@ -55,9 +48,7 @@ const documentHref = computed(
     </p>
 
     <div v-if="note.lemmas.length > 0" class="mb-3">
-      <p class="text-caption text-medium-emphasis mb-1">
-        Lemmas pulled in from the lexicon:
-      </p>
+      <p class="text-caption text-medium-emphasis mb-1">Lemmas pulled in from the lexicon:</p>
       <div class="d-flex flex-wrap ga-2">
         <v-chip
           v-for="lemma in note.lemmas"

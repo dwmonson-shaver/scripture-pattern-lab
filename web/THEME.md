@@ -18,17 +18,17 @@ version lives in `CLAUDE.md`. This doc has the worked examples.
 The approved visual spec is `docs/design/reader-reference.html` (v8). The reader's identity
 is the **parchment** theme. Its semantic tokens map to the manuscript palette:
 
-| Token | Parchment value | Meaning |
-|---|---|---|
-| `background` | `#EBE1CE` | rag-paper ground |
-| `surface` | `#FBF6EA` | card / illuminated leaf |
-| `surface-variant` | `#F3ECDB` | apparatus panel |
-| `surface-light` | `#F3ECDB` | secondary panel |
-| `on-surface` / `on-background` | `#2B2722` | oak-gall ink (body text) |
-| `on-surface-variant` | `#6B6152` | soft ink (secondary text) |
-| `primary` | `#9C2A23` | manuscript **rubric** red — verse numbers, book label, primary actions, danger |
-| `secondary` / `accent` | `#A07E2A` | **gilt** — the gilt rule, resize handles, accents |
-| `border-color` (variable) | `#C9BC9F` | hairline rules / dividers |
+| Token                          | Parchment value | Meaning                                                                        |
+| ------------------------------ | --------------- | ------------------------------------------------------------------------------ |
+| `background`                   | `#EBE1CE`       | rag-paper ground                                                               |
+| `surface`                      | `#FBF6EA`       | card / illuminated leaf                                                        |
+| `surface-variant`              | `#F3ECDB`       | apparatus panel                                                                |
+| `surface-light`                | `#F3ECDB`       | secondary panel                                                                |
+| `on-surface` / `on-background` | `#2B2722`       | oak-gall ink (body text)                                                       |
+| `on-surface-variant`           | `#6B6152`       | soft ink (secondary text)                                                      |
+| `primary`                      | `#9C2A23`       | manuscript **rubric** red — verse numbers, book label, primary actions, danger |
+| `secondary` / `accent`         | `#A07E2A`       | **gilt** — the gilt rule, resize handles, accents                              |
+| `border-color` (variable)      | `#C9BC9F`       | hairline rules / dividers                                                      |
 
 **Rule of thumb:** in the reader, `primary` = rubric red and `secondary` = gilt. Use the
 semantic token, never the hex.
@@ -41,9 +41,9 @@ stays in the Vuetify **sans**. Three CSS custom properties are declared in
 change with the accessibility toggle):
 
 ```css
-font-family: var(--font-read);     /* scripture body — Iowan Old Style / Palatino / Georgia */
-font-family: var(--font-display);  /* chapter numeral, versal — Hoefler Text / Big Caslon */
-font-family: var(--font-grc);      /* Greek beside the SBL face — Palatino */
+font-family: var(--font-read); /* scripture body — Iowan Old Style / Palatino / Georgia */
+font-family: var(--font-display); /* chapter numeral, versal — Hoefler Text / Big Caslon */
+font-family: var(--font-grc); /* Greek beside the SBL face — Palatino */
 ```
 
 Polytonic Greek still uses `.text-grc` / `<GreekText>` (SBL Greek woff2). Use the
@@ -93,11 +93,11 @@ applies `on-primary` as the default content color, so you can usually skip the c
 
 Pair `bg-X` with `text-on-X`:
 
-| Use case | Background class | Text class |
-|---|---|---|
-| Default content panel | `bg-surface` | `text-on-surface` |
+| Use case                   | Background class     | Text class                |
+| -------------------------- | -------------------- | ------------------------- |
+| Default content panel      | `bg-surface`         | `text-on-surface`         |
 | Elevated / secondary panel | `bg-surface-variant` | `text-on-surface-variant` |
-| Rubric / call-to-action | `bg-primary` | `text-on-primary` |
+| Rubric / call-to-action    | `bg-primary`         | `text-on-primary`         |
 
 ### Rule 4: Custom CSS (scoped styles)
 
@@ -109,8 +109,12 @@ Use Vuetify's CSS variables — they update reactively with the theme:
   color: rgb(var(--v-theme-on-surface));
   border: 1px solid rgb(var(--v-border-color));
 }
-.gilt-rule { background: rgb(var(--v-theme-secondary)); }   /* gilt */
-.rubric    { color: rgb(var(--v-theme-primary)); }          /* rubric red */
+.gilt-rule {
+  background: rgb(var(--v-theme-secondary));
+} /* gilt */
+.rubric {
+  color: rgb(var(--v-theme-primary));
+} /* rubric red */
 ```
 
 For alpha, use the comma form: `rgba(var(--v-theme-primary), 0.1)`.

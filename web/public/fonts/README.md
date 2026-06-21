@@ -6,7 +6,7 @@ are bundled with the repo; only the Greek file is wired up in CSS at MVP.
 
 ## Bundled fonts
 
-### `SBLGreek.woff2`  (wired up)
+### `SBLGreek.woff2` (wired up)
 
 Polytonic Greek font from the Society of Biblical Literature. Loaded by
 the `@font-face { font-family: 'SBL Greek'; ... }` rule and used by the
@@ -25,7 +25,7 @@ the `@font-face { font-family: 'SBL Greek'; ... }` rule and used by the
 
 - Served by the deployed Worker at `/fonts/SBLGreek.woff2`.
 
-### `SBLHebrew.woff2`  (bundled, unused at MVP)
+### `SBLHebrew.woff2` (bundled, unused at MVP)
 
 The corpus is currently New-Testament-only (Koine Greek). The
 `.text-heb` class in `globals.css` already exists as a hook for future
@@ -36,7 +36,7 @@ display.
 - Source TTF: `SBL_Hbrw.ttf` from the same SBL fonts page.
 - Conversion: same `pyftsubset --flavor=woff2 --unicodes='*'` pipeline.
 
-### `SBLBibLit.woff2`  (bundled, unused at MVP)
+### `SBLBibLit.woff2` (bundled, unused at MVP)
 
 SBL BibLit is a unified font containing both polytonic Greek and pointed
 Hebrew glyphs in one file. Useful as a single-source-language fallback

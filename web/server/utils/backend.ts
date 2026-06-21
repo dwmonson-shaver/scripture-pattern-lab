@@ -81,9 +81,7 @@ function assertConfigured(config: BackendConfig): void {
  * translate this into an H3 createError so Nitro mirrors the upstream
  * status + body to the browser.
  */
-export async function proxyToBackend<TReq, TRes>(
-  opts: ProxyOpts<TReq>,
-): Promise<TRes> {
+export async function proxyToBackend<TReq, TRes>(opts: ProxyOpts<TReq>): Promise<TRes> {
   assertConfigured(opts.config)
 
   const fetchFn = opts.fetchImpl ?? globalThis.fetch
@@ -167,9 +165,7 @@ export interface SendProxyOpts<TReq> {
  * A 204 (or any empty body) is tolerated — `null` is returned rather than
  * failing the JSON parse, because DELETE responses may carry no content.
  */
-export async function sendToBackend<TReq, TRes>(
-  opts: SendProxyOpts<TReq>,
-): Promise<TRes> {
+export async function sendToBackend<TReq, TRes>(opts: SendProxyOpts<TReq>): Promise<TRes> {
   assertConfigured(opts.config)
 
   const fetchFn = opts.fetchImpl ?? globalThis.fetch
@@ -238,9 +234,7 @@ export async function sendToBackend<TReq, TRes>(
  * the persisted two-part Conceptual Document. The caller is responsible
  * for URL-encoding the path segments inside `path`.
  */
-export async function getFromBackend<TRes>(
-  opts: GetProxyOpts,
-): Promise<TRes> {
+export async function getFromBackend<TRes>(opts: GetProxyOpts): Promise<TRes> {
   assertConfigured(opts.config)
 
   const fetchFn = opts.fetchImpl ?? globalThis.fetch

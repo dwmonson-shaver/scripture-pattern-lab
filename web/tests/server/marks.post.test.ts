@@ -44,16 +44,12 @@ describe('marks POST requestSchema', () => {
 
   it('rejects verse_end < verse_start', async () => {
     const { requestSchema } = await import('~~/server/api/sp/marks/index.post')
-    expect(() =>
-      requestSchema.parse({ ...base, verse_start: 25, verse_end: 24 }),
-    ).toThrow()
+    expect(() => requestSchema.parse({ ...base, verse_start: 25, verse_end: 24 })).toThrow()
   })
 
   it('rejects a zero-width single-verse span', async () => {
     const { requestSchema } = await import('~~/server/api/sp/marks/index.post')
-    expect(() =>
-      requestSchema.parse({ ...base, char_start: 5, char_end: 5 }),
-    ).toThrow()
+    expect(() => requestSchema.parse({ ...base, char_start: 5, char_end: 5 })).toThrow()
   })
 
   it('rejects a missing book', async () => {

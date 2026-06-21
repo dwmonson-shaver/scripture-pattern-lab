@@ -55,9 +55,7 @@ describe('useMarks', () => {
   it('create posts the request then reloads the chapter marks', async () => {
     const created = { ...MARK, id: 2, concept_names: ['Hope'] }
     // 1) create POST  2) reload GET
-    fetchStub
-      .mockResolvedValueOnce(created)
-      .mockResolvedValueOnce({ marks: [MARK, created] })
+    fetchStub.mockResolvedValueOnce(created).mockResolvedValueOnce({ marks: [MARK, created] })
     const m = useMarks()
     m.scope.value = SCOPE
     const result = await m.create({ ...CREATE_REQ, concept_names: ['Hope'] })

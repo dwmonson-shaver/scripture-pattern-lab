@@ -10,8 +10,7 @@ const HUMILITY_GROUPING: Tier2Grouping = {
     { concept_name: 'meekness', confidence: 0.85, note: 'πραΰς family' },
     { concept_name: 'lowliness', confidence: 0.75, note: null },
   ],
-  rationale:
-    'Humility-cluster: lexically close Greek roots (ταπεινός / πραΰς).',
+  rationale: 'Humility-cluster: lexically close Greek roots (ταπεινός / πραΰς).',
   origin: 'curated',
   verification_state: 'unverified',
   created_at: '2026-05-31T00:00:00Z',
@@ -116,8 +115,6 @@ describe('Tier2GroupingSection — placeholder view', () => {
     const wrapper = mountWithVuetify(Tier2GroupingSection, {
       props: { grouping: null, pointer: null },
     })
-    expect(wrapper.find('[data-testid="tier2-grouping-placeholder"]').text()).toContain(
-      'Tier-2',
-    )
+    expect(wrapper.find('[data-testid="tier2-grouping-placeholder"]').text()).toContain('Tier-2')
   })
 })

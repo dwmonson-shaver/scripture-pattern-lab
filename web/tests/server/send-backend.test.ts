@@ -25,8 +25,8 @@ describe('sendToBackend', () => {
       fetchImpl: fetchSpy,
     })
     expect(res).toEqual({ id: 7 })
-    const [url, init] = (fetchSpy as unknown as { mock: { calls: [string, RequestInit][] } })
-      .mock.calls[0]
+    const [url, init] = (fetchSpy as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0]
     expect(url).toBe('https://backend.test/api/v1/marks/7')
     expect(init.method).toBe('PATCH')
     const headers = init.headers as Record<string, string>
@@ -44,8 +44,8 @@ describe('sendToBackend', () => {
       fetchImpl: fetchSpy,
     })
     expect(res).toBeNull()
-    const [, init] = (fetchSpy as unknown as { mock: { calls: [string, RequestInit][] } })
-      .mock.calls[0]
+    const [, init] = (fetchSpy as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0]
     expect(init.method).toBe('DELETE')
     expect(init.body).toBeUndefined()
     expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined()
