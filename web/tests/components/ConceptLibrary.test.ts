@@ -24,19 +24,27 @@ describe('ConceptLibrary', () => {
     expect(wrapper.findAll('[data-testid="concept-row"]')).toHaveLength(3)
   })
 
-  it('emits open with the concept name in library mode', async () => {
+  it('emits toggle with the concept name in library mode', async () => {
     const wrapper = mountWithVuetify(ConceptLibrary, { props: { concepts } })
     await wrapper.get('[data-concept="Hope"]').trigger('click')
-    expect(wrapper.emitted('open')?.[0]).toEqual(['Hope'])
+    expect(wrapper.emitted('toggle')?.[0]).toEqual(['Hope'])
   })
 
-  it('emits pick (not open) in associate mode', async () => {
+  it('marks selected rows in library mode', () => {
+    const wrapper = mountWithVuetify(ConceptLibrary, {
+      props: { concepts, selected: ['Patience'] },
+    })
+    expect(wrapper.get('[data-concept="Patience"]').attributes('data-selected')).toBe('true')
+    expect(wrapper.get('[data-concept="Hope"]').attributes('data-selected')).toBe('false')
+  })
+
+  it('emits pick (not toggle) in associate mode', async () => {
     const wrapper = mountWithVuetify(ConceptLibrary, {
       props: { concepts, contextLabel: 'Mark “the love of Christ” as:' },
     })
     await wrapper.get('[data-concept="Love"]').trigger('click')
     expect(wrapper.emitted('pick')?.[0]).toEqual(['Love'])
-    expect(wrapper.emitted('open')).toBeFalsy()
+    expect(wrapper.emitted('toggle')).toBeFalsy()
   })
 
   it('shows the associate context label', () => {

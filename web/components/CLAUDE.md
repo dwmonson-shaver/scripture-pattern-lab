@@ -67,18 +67,25 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
 - `ConceptPanelBody.vue` — the four-way view router (library / search / edit /
   mark) shared by both panel hosts; pure event-forwarding glue.
 - `ConceptLibrary.vue` — search-as-you-type + concept list (authored-color
-  swatch, name, polarity chip, state) + "New concept". Doubles as the
-  associate-concept search when `contextLabel` is set: emits `pick` instead of
-  `open`. Swatch is the only raw-color render.
+  swatch, name, polarity chip, state) + "New concept". Library mode: a row
+  click emits `toggle` (multi-select highlight, spec dim-others); selected rows
+  carry `data-selected="true"` + the active style. Doubles as the
+  associate-concept search when `contextLabel` is set: emits `pick` instead.
+  Swatch is the only raw-color render.
 - `ConceptEditForm.vue` — create / edit form: title, color (palette swatches +
   custom picker — sanctioned raw color), polarity `v-btn-toggle`, opposite.
   Never sets verification_state / origin (backend-owned, DEC-102).
 - `MarkDetail.vue` — the marked phrase + Change / Add / Remove actions and a
   note that the handles adjust the span. Handles the "Just highlight"
   (no-concept) mark case.
-- `SpanHandles.vue` — two draggable, word-snapping handles (large touch
-  targets, pointer capture) over the active single-verse mark; emits
-  `span-change` with new char offsets. Ports the prototype's pointer logic.
+- `SpanHandles.vue` — two draggable, word-snapping gilt handles (34px touch
+  targets, `touch-action:none`, pointer capture) over the active single-verse
+  mark; emits `span-change` with new char offsets. Ports the prototype's
+  pointer logic. Lifecycle/reactivity hooks are explicitly imported from `vue`
+  so the component mounts under the Vitest unit env. Cross-verse resize is the
+  known open hard case (DEC-143): the page only activates handles for
+  single-verse marks; `MarkDetail` shows a cross-verse note instead of faking
+  it.
 - `InterlinearChip.vue` — one Greek token chip (lemma via `<GreekText>` + a
   contextual sub-label); emits `tap`.
 

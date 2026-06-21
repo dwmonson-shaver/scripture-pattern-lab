@@ -34,12 +34,16 @@ const props = defineProps<{
   createPrefill: string
   /** Context line for the associate-concept search. */
   associateLabel: string | null
+  /** Names of concepts currently highlighted (multi-select; library mode). */
+  selectedConcepts: string[]
 }>()
 
 const emit = defineEmits<{
   // library
-  'open-concept': [name: string]
+  'toggle-concept': [name: string]
   'new-concept': [prefillName: string]
+  // clear the multi-select highlight
+  'clear-highlight': []
   // search / associate
   'pick-concept': [name: string]
   // edit form
@@ -57,6 +61,13 @@ const emit = defineEmits<{
 }>()
 
 const { mobile } = useDisplay()
+
+const hasSelection = computed(() => props.selectedConcepts.length > 0)
+/** The Clear affordance shows in the library/search header when concepts are
+ * highlighted (spec .clearbtn). */
+const showClear = computed(
+  () => hasSelection.value && (props.view === 'library' || props.view === 'search'),
+)
 
 const title = computed(() => {
   switch (props.view) {
@@ -85,14 +96,26 @@ const title = computed(() => {
     <div class="pa-4">
       <div class="d-flex align-center justify-space-between mb-4">
         <span class="text-overline text-medium-emphasis">{{ title }}</span>
-        <v-btn
-          icon="mdi-close"
-          variant="text"
-          size="small"
-          aria-label="Close panel"
-          data-testid="concept-panel-close"
-          @click="drawer = false"
-        />
+        <div class="d-flex align-center ga-1">
+          <v-btn
+            v-if="showClear"
+            variant="outlined"
+            size="x-small"
+            rounded="pill"
+            data-testid="concept-clear"
+            @click="emit('clear-highlight')"
+          >
+            Clear
+          </v-btn>
+          <v-btn
+            icon="mdi-close"
+            variant="text"
+            size="small"
+            aria-label="Close panel"
+            data-testid="concept-panel-close"
+            @click="drawer = false"
+          />
+        </div>
       </div>
       <ConceptPanelBody
         :view="view"
@@ -102,7 +125,8 @@ const title = computed(() => {
         :editing-concept="editingConcept"
         :create-prefill="createPrefill"
         :associate-label="associateLabel"
-        @open-concept="emit('open-concept', $event)"
+        :selected-concepts="selectedConcepts"
+        @toggle-concept="emit('toggle-concept', $event)"
         @new-concept="emit('new-concept', $event)"
         @pick-concept="emit('pick-concept', $event)"
         @save-concept="emit('save-concept', $event)"
@@ -117,7 +141,19 @@ const title = computed(() => {
 
   <!-- Wide: persistent aside -->
   <aside v-else class="concept-aside pa-4" data-testid="concept-panel-aside">
-    <div class="text-overline text-medium-emphasis mb-4">{{ title }}</div>
+    <div class="d-flex align-center justify-space-between mb-4">
+      <span class="text-overline text-medium-emphasis">{{ title }}</span>
+      <v-btn
+        v-if="showClear"
+        variant="outlined"
+        size="x-small"
+        rounded="pill"
+        data-testid="concept-clear"
+        @click="emit('clear-highlight')"
+      >
+        Clear
+      </v-btn>
+    </div>
     <ConceptPanelBody
       :view="view"
       :concepts="concepts"
@@ -126,7 +162,8 @@ const title = computed(() => {
       :editing-concept="editingConcept"
       :create-prefill="createPrefill"
       :associate-label="associateLabel"
-      @open-concept="emit('open-concept', $event)"
+      :selected-concepts="selectedConcepts"
+      @toggle-concept="emit('toggle-concept', $event)"
       @new-concept="emit('new-concept', $event)"
       @pick-concept="emit('pick-concept', $event)"
       @save-concept="emit('save-concept', $event)"

@@ -34,6 +34,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     editingConcept: null,
     createPrefill: '',
     associateLabel: null,
+    selectedConcepts: [],
     ...overrides,
   }
 }

@@ -17,11 +17,13 @@ const props = defineProps<{
   concepts: ConceptSummary[]
   /** When set, render in "associate" mode with this context line shown. */
   contextLabel?: string | null
+  /** Names of concepts currently highlighted (multi-select; library mode). */
+  selected?: string[]
 }>()
 
 const emit = defineEmits<{
-  /** Open a concept's detail (library mode). */
-  open: [name: string]
+  /** Toggle a concept in/out of the highlight set (library mode). */
+  toggle: [name: string]
   /** Pick a concept to associate (associate mode). */
   pick: [name: string]
   /** Start creating a new concept; carries the current search text. */
@@ -37,6 +39,7 @@ const filtered = computed<ConceptSummary[]>(() => {
 })
 
 const isAssociate = computed(() => props.contextLabel != null)
+const selectedSet = computed(() => new Set(props.selected ?? []))
 
 const POLARITY_LABEL: Record<string, string> = {
   '+': 'Positive',
@@ -50,7 +53,7 @@ function stateLabel(state: string): string {
 
 function onRow(name: string): void {
   if (isAssociate.value) emit('pick', name)
-  else emit('open', name)
+  else emit('toggle', name)
 }
 </script>
 
@@ -76,7 +79,10 @@ function onRow(name: string): void {
         v-for="c in filtered"
         :key="c.name"
         class="px-2 mb-1 rounded"
+        :class="{ 'concept-row--sel': !isAssociate && selectedSet.has(c.name) }"
+        :active="!isAssociate && selectedSet.has(c.name)"
         :data-concept="c.name"
+        :data-selected="!isAssociate && selectedSet.has(c.name) ? 'true' : 'false'"
         data-testid="concept-row"
         @click="onRow(c.name)"
       >

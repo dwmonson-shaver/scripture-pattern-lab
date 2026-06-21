@@ -44,6 +44,10 @@ const markStore = useMarks()
 // Layout mode (spec): Versed (default) ↔ Continuous. Page-local; no reload.
 const mode = ref<'versed' | 'continuous'>('versed')
 
+// Multi-select concept highlight (spec: dim-others-keep-underline).
+const conceptHighlight = useConceptSelection()
+const selectedConcepts = computed(() => Array.from(conceptHighlight.selected.value))
+
 const chapterScope = computed(() => ({
   corpus: corpus.value,
   book: book.value,
@@ -137,6 +141,7 @@ function resetPanel(): void {
   editingConceptName.value = null
   createPrefill.value = ''
   associate.value = null
+  conceptHighlight.clear()
 }
 
 // --- selection popup --------------------------------------------------------
@@ -204,7 +209,13 @@ function dismissLiveSelection(): void {
 /** State ③ + active mark off: clear the highlighted concept(s) + active mark. */
 function clearHighlight(): void {
   activeMarkId.value = null
+  conceptHighlight.clear()
   if (panelView.value === 'mark') panelView.value = 'library'
+}
+
+/** Library row → toggle the concept in/out of the multi-select highlight. */
+function onToggleConcept(name: string): void {
+  conceptHighlight.toggle(name)
 }
 
 function onReaderKeydown(e: KeyboardEvent): void {
@@ -274,14 +285,10 @@ function onMarkClick(id: number): void {
   editingConceptName.value = null
   associate.value = null
   panelView.value = 'mark'
+  // Activating a mark highlights its concept(s) (spec state ②→③ link).
+  const m = markStore.marks.value.find((mk) => mk.id === id)
+  for (const name of m?.concept_names ?? []) conceptHighlight.add(name)
   if (mobile.value) drawer.value = true
-}
-
-function onOpenConcept(name: string): void {
-  // Slice 1: no full concept-detail view in scope; opening jumps to edit so
-  // the reader can adjust the authored fields. (Detail/pattern view is later.)
-  editingConceptName.value = name
-  panelView.value = 'edit'
 }
 
 function onNewConcept(prefill: string): void {
@@ -449,6 +456,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
           :greek-on="greekOn"
           :active-mark-id="activeMarkId"
           :mode="mode"
+          :selected-concepts="selectedConcepts"
           @select="onSelect"
           @mark-click="onMarkClick"
           @chip-tap="onChipTap"
@@ -464,7 +472,9 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
         :editing-concept="editingConcept"
         :create-prefill="createPrefill"
         :associate-label="associateLabel"
-        @open-concept="onOpenConcept"
+        :selected-concepts="selectedConcepts"
+        @toggle-concept="onToggleConcept"
+        @clear-highlight="clearHighlight"
         @new-concept="onNewConcept"
         @pick-concept="onPickConcept"
         @save-concept="onSaveConcept"

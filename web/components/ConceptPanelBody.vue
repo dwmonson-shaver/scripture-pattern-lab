@@ -21,10 +21,12 @@ defineProps<{
   editingConcept: ConceptSummary | null
   createPrefill: string
   associateLabel: string | null
+  /** Names of concepts currently highlighted (multi-select; library mode). */
+  selectedConcepts: string[]
 }>()
 
 const emit = defineEmits<{
-  'open-concept': [name: string]
+  'toggle-concept': [name: string]
   'new-concept': [prefillName: string]
   'pick-concept': [name: string]
   'save-concept': [
@@ -65,7 +67,8 @@ const emit = defineEmits<{
       v-else
       :concepts="concepts"
       :context-label="view === 'search' ? associateLabel : null"
-      @open="emit('open-concept', $event)"
+      :selected="selectedConcepts"
+      @toggle="emit('toggle-concept', $event)"
       @pick="emit('pick-concept', $event)"
       @create="emit('new-concept', $event)"
     />

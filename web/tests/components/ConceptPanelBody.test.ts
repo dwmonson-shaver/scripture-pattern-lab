@@ -46,6 +46,7 @@ function props(view: string, extra: Record<string, unknown> = {}) {
     editingConcept: null,
     createPrefill: '',
     associateLabel: null,
+    selectedConcepts: [],
     ...extra,
   }
 }

@@ -17,6 +17,9 @@ const props = defineProps<{
   concepts: ConceptSummary[]
 }>()
 
+/** Cross-verse marks: handle-dragging is single-verse only (DEC-143 open). */
+const isCrossVerse = computed(() => props.mark.verse_start !== props.mark.verse_end)
+
 const emit = defineEmits<{
   back: []
   change: []
@@ -100,8 +103,19 @@ const hasConcept = computed(() => props.mark.concept_names.length > 0)
         >
       </div>
 
-      <p class="text-caption text-medium-emphasis mt-3" data-testid="mark-handles-note">
-        Drag the handles in the text to adjust the span.
+      <p
+        v-if="!isCrossVerse"
+        class="text-caption text-medium-emphasis mt-3"
+        data-testid="mark-handles-note"
+      >
+        Drag the gold handles in the text to adjust the span (snaps to whole words).
+      </p>
+      <!-- Cross-verse resize is a known open hard case (DEC-143). We flag it
+           rather than fake it: within-verse handle dragging works; cross-verse
+           handles are not exposed. The mark itself persists across verses. -->
+      <p v-else class="text-caption text-medium-emphasis mt-3" data-testid="mark-crossverse-note">
+        This mark spans verses {{ mark.verse_start }}–{{ mark.verse_end }}. Drag-to-resize is
+        single-verse for now; cross-verse resize is coming.
       </p>
     </v-card>
   </div>

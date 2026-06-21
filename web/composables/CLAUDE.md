@@ -31,6 +31,11 @@ Auto-imported composables. Named `use*.ts`.
 - `useMarks.ts` — Slice 1: marks for the current chapter. `marks` ref,
   `loadForChapter(scope)` (records the scope), `create` / `update` / `remove`
   (each reloads). Errors normalized to `ProxyErrorShape`.
+- `useConceptSelection.ts` — Slice 1 reader-alignment: pure UI state for the
+  multi-select concept highlight (spec dim-others-keep-underline). `selected`
+  (Set ref), `lastActive`, `hasSelection`, `isSelected`, `toggle`, `add`,
+  `clear`. No fetch / no persistence — the reader page owns one instance and
+  feeds the name set to ChapterView + ConceptLibrary.
 
 ## Dependencies
 

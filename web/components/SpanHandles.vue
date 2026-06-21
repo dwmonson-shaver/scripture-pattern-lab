@@ -1,4 +1,9 @@
 <script setup lang="ts">
+// Lifecycle + reactivity primitives are auto-imported in the Nuxt app, but the
+// Vitest unit environment does not resolve the lifecycle hooks the same way, so
+// import them explicitly to keep the component mountable under test.
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
 /**
  * Two draggable handles that adjust the active mark's span, word-snapping as
  * they move. Ports the prototype's pointer logic to Vue: large touch targets
@@ -186,8 +191,8 @@ function onPointerDown(which: 'start' | 'end', e: PointerEvent): void {
   background: linear-gradient(
     to right,
     transparent calc(50% - 1.25px),
-    rgb(var(--v-theme-primary)) calc(50% - 1.25px),
-    rgb(var(--v-theme-primary)) calc(50% + 1.25px),
+    rgb(var(--v-theme-secondary)) calc(50% - 1.25px),
+    rgb(var(--v-theme-secondary)) calc(50% + 1.25px),
     transparent calc(50% + 1.25px)
   );
 }
@@ -198,7 +203,7 @@ function onPointerDown(which: 'start' | 'end', e: PointerEvent): void {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: rgb(var(--v-theme-primary));
+  background: rgb(var(--v-theme-secondary)); /* gilt — spec gold knob */
   transform: translateX(-50%);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
   border: 2px solid rgb(var(--v-theme-surface));

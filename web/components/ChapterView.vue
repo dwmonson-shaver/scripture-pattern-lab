@@ -31,6 +31,8 @@ const props = defineProps<{
   activeMarkId: number | null
   /** Layout mode (spec): 'versed' blocks + interlinear rows; 'continuous' prose. */
   mode?: 'versed' | 'continuous'
+  /** Names of concepts currently highlighted (multi-select). Others dim. */
+  selectedConcepts?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -52,6 +54,15 @@ const conceptByName = computed<Record<string, ConceptSummary>>(() => {
   for (const c of props.concepts) map[c.name] = c
   return map
 })
+
+const selectedSet = computed(() => new Set(props.selectedConcepts ?? []))
+const hasSelection = computed(() => selectedSet.value.size > 0)
+
+/** A mark is "on" when any of its concepts is in the highlighted set. */
+function isMarkOn(mark: MarkOut): boolean {
+  if (!hasSelection.value) return false
+  return mark.concept_names.some((n) => selectedSet.value.has(n))
+}
 
 /** Neutral hue for marks with no concept (theme-aware, not a raw color). */
 const NEUTRAL_HUE = 'rgb(var(--v-theme-secondary))'
@@ -240,7 +251,7 @@ const firstVerseNum = computed<number | null>(
   <div
     ref="rootEl"
     class="reader-page"
-    :class="`reader-page--${mode ?? 'versed'}`"
+    :class="[`reader-page--${mode ?? 'versed'}`, { 'reader-page--has-sel': hasSelection }]"
     :data-mode="mode ?? 'versed'"
     data-testid="chapter-view"
     @mouseup="onMouseUp"
@@ -269,7 +280,10 @@ const firstVerseNum = computed<number | null>(
               <mark
                 v-if="seg.mark"
                 class="concept-mark"
-                :class="{ 'concept-mark--active': seg.mark.id === activeMarkId }"
+                :class="{
+                  'concept-mark--active': seg.mark.id === activeMarkId,
+                  'concept-mark--on': isMarkOn(seg.mark),
+                }"
                 :style="markStyle(seg.mark)"
                 :data-mark="seg.mark.id"
                 data-testid="concept-mark"
@@ -443,6 +457,14 @@ const firstVerseNum = computed<number | null>(
 .concept-mark--active {
   outline: 2px dashed rgb(var(--v-theme-secondary)); /* gilt */
   outline-offset: 2px;
+}
+/* Multi-select: when any concept is highlighted, the non-selected marks dim
+ * their FILL but KEEP their underline (spec body.has-sel .cm:not(.on)). */
+.reader-page--has-sel .concept-mark:not(.concept-mark--on) {
+  background: color-mix(in srgb, var(--c) 11%, #fff);
+}
+.concept-mark--on {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 60%, transparent);
 }
 .mark-multi {
   font-family: ui-sans-serif, system-ui, sans-serif;
