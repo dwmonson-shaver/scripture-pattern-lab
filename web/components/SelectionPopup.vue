@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * Minimal floating popup shown when the reader selects a phrase. Two choices
- * only (Slice 1 scope): "Mark as concept" (primary path → opens the concept
- * search) and "Just highlight" (a mark with no concept — still in scope).
+ * Floating popup shown while a phrase is selected (dismissal state ①). The
+ * spec's action set: "Mark as concept" (primary → opens the concept search),
+ * "Just highlight" (a mark with no concept — still in scope) with a swatch
+ * dot, and "✕" Cancel (dismiss the live selection).
  *
  * The prototype's "Tell me about this" (the AI explainer) is deliberately
  * OMITTED — out of scope for concept identification.
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   concept: []
   highlight: []
+  cancel: []
 }>()
 
 // Clamp the popup into the viewport horizontally; prefer below the selection,
@@ -62,13 +64,21 @@ const style = computed(() => {
     </v-btn>
     <v-btn
       variant="text"
-      prepend-icon="mdi-marker"
       size="large"
       data-testid="popup-highlight"
       @click="emit('highlight')"
     >
+      <span class="highlight-dot mr-2" aria-hidden="true" />
       Just highlight
     </v-btn>
+    <v-btn
+      variant="text"
+      icon="mdi-close"
+      size="large"
+      aria-label="Cancel selection"
+      data-testid="popup-cancel"
+      @click="emit('cancel')"
+    />
   </v-card>
 </template>
 
@@ -78,7 +88,16 @@ const style = computed(() => {
   z-index: 60;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.25rem;
   max-width: min(22rem, 92vw);
+}
+.highlight-dot {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: rgb(var(--v-theme-secondary)); /* gilt — neutral highlight swatch */
+  box-shadow: inset 0 0 0 1px rgba(var(--v-theme-on-surface), 0.15);
 }
 </style>

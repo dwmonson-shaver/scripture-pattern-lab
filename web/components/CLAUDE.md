@@ -56,8 +56,12 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
   gilt secondary token. Ports the prototype's flashGloss (approximate Slice-1
   alignment — see P3 alignment-honesty note). Opening animations guarded by
   `prefers-reduced-motion`.
-- `SelectionPopup.vue` — minimal floating popup: "Mark as concept" (primary)
-  + "Just highlight". The prototype's "Tell me about this" is OUT of scope.
+- `SelectionPopup.vue` — floating popup shown while a phrase is selected
+  (dismissal state ①): "Mark as concept" (primary), "Just highlight" (with a
+  gilt swatch dot), and "✕" Cancel (`@cancel`). The prototype's "Tell me about
+  this" is OUT of scope. The page owns the three-state dismissal grammar (Esc /
+  click-off / ✕ for the live selection; mark click for the committed mark;
+  empty-space / Esc / Clear for the concept highlight).
 - `ConceptPanel.vue` — workbench panel host: `v-navigation-drawer` slide-over
   on narrow / persistent aside on wide (via `useDisplay()`). `v-model:drawer`.
 - `ConceptPanelBody.vue` — the four-way view router (library / search / edit /

@@ -187,6 +187,66 @@ function closePopup(): void {
   popupAnchor.value = null
 }
 
+/**
+ * Three-state dismissal (spec):
+ *  ① live selection — popup shows while a selection is active; Esc / click-off
+ *    / ✕ dismiss it (clear pending + native selection).
+ *  ② committed mark — persists; clicking it activates it (onMarkClick).
+ *  ③ concept highlight — clicking empty space / Esc / Clear turns it off.
+ */
+function dismissLiveSelection(): void {
+  pendingSelection.value = null
+  pendingPhrase.value = ''
+  closePopup()
+  if (import.meta.client) window.getSelection()?.removeAllRanges()
+}
+
+/** State ③ + active mark off: clear the highlighted concept(s) + active mark. */
+function clearHighlight(): void {
+  activeMarkId.value = null
+  if (panelView.value === 'mark') panelView.value = 'library'
+}
+
+function onReaderKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  if (popupOpen.value || pendingSelection.value) {
+    dismissLiveSelection()
+  } else if (activeMarkId.value !== null) {
+    clearHighlight()
+  }
+}
+
+/** A click outside the popup / panel / toolbar / handles / a mark dismisses. */
+function onReaderClickAway(e: MouseEvent): void {
+  if (!import.meta.client) return
+  const t = e.target as HTMLElement | null
+  if (
+    t?.closest?.(
+      '[data-testid="selection-popup"], .concept-aside, .v-navigation-drawer, .reader-bar, .span-handle, .concept-mark',
+    )
+  ) {
+    return
+  }
+  // Clicking empty space (including inside the reader gutter) dismisses the
+  // live selection first, else clears the concept highlight / active mark.
+  if (popupOpen.value || pendingSelection.value) {
+    // Only dismiss if the click is NOT (re)starting a selection in the text.
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) dismissLiveSelection()
+  } else if (activeMarkId.value !== null) {
+    clearHighlight()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onReaderKeydown)
+  document.addEventListener('click', onReaderClickAway)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onReaderKeydown)
+  document.removeEventListener('click', onReaderClickAway)
+})
+
 // "Mark as concept" → open associate-search for the pending selection.
 function onPopupConcept(): void {
   if (!pendingSelection.value) return
@@ -421,6 +481,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
       :anchor="popupAnchor"
       @concept="onPopupConcept"
       @highlight="onPopupHighlight"
+      @cancel="dismissLiveSelection"
     />
 
     <SpanHandles

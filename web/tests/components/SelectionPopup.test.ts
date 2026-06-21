@@ -5,12 +5,21 @@ import SelectionPopup from '~~/components/SelectionPopup.vue'
 const anchor = { left: 100, top: 200, bottom: 220 }
 
 describe('SelectionPopup', () => {
-  it('renders both choices when open', () => {
+  it('renders the three actions when open', () => {
     const wrapper = mountWithVuetify(SelectionPopup, {
       props: { modelValue: true, anchor },
     })
     expect(wrapper.find('[data-testid="popup-concept"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="popup-highlight"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="popup-cancel"]').exists()).toBe(true)
+  })
+
+  it('emits cancel when the ✕ is clicked', async () => {
+    const wrapper = mountWithVuetify(SelectionPopup, {
+      props: { modelValue: true, anchor },
+    })
+    await wrapper.get('[data-testid="popup-cancel"]').trigger('click')
+    expect(wrapper.emitted('cancel')).toBeTruthy()
   })
 
   it('does NOT render the AI explainer (out of scope)', () => {
