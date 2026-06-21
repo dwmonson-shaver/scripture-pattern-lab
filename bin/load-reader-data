@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# bin/load-reader-data — One-time data load for the reader.
+#
+#   schemas (06/07 + 02 ALTER) -> MorphGNT corpus -> KJV translation
+#
+# Idempotent: the fetch scripts fast-forward, and the ingest scripts refuse
+# to double-load (a non-zero "already loaded" is treated as fine here, so the
+# script is safe to re-run). Pass --truncate to an individual ingest script
+# directly if you ever need a true reload.
+#
+# Run this ONCE before bin/run-reader. Needs DATABASE_URL (in .env or exported).
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ] && [ -z "${DATABASE_URL:-}" ]; then
+  set -a; . ./.env; set +a
+fi
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is required (set it in .env or export it)." >&2
+  exit 1
+fi
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uvcache}"
+
+echo "[1/5] Applying schemas..."
+bash scripts/db/apply_schemas.sh
+
+echo "[2/5] Fetching MorphGNT corpus..."
+bash scripts/ingest/fetch_morphgnt.sh
+
+echo "[3/5] Ingesting corpus..."
+uv run scripts/db/ingest_corpus.py || echo "  -> corpus: already loaded or see error above; continuing"
+
+echo "[4/5] Fetching KJV..."
+bash scripts/ingest/fetch_kjv.sh
+
+echo "[5/5] Ingesting KJV translation..."
+uv run scripts/db/ingest_translation.py || echo "  -> KJV: already loaded or see error above; continuing"
+
+echo
+echo "Data load complete.  Next:  bin/run-reader"

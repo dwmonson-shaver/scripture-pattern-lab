@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# bin/run-reader — Start the reader for use on this Mac AND on your iPad.
+#
+#   - backend  : FastAPI on http://localhost:8000 (localhost only)
+#   - frontend : Nuxt on :3000 bound to all interfaces (--host) so the iPad
+#                on the same Wi-Fi can reach it
+#   - prints the Mac + iPad URLs; Ctrl-C stops both
+#
+# The iPad only talks to the frontend (:3000); the Nuxt server proxies to the
+# backend on the Mac, so the backend stays on localhost.
+#
+# Run bin/load-reader-data ONCE first. Needs DATABASE_URL + SPL_BEARER_TOKEN.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+: "${DATABASE_URL:?DATABASE_URL is required (set it in .env)}"
+: "${SPL_BEARER_TOKEN:?SPL_BEARER_TOKEN is required (set it in .env; it gates mark/concept writes)}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uvcache}"
+
+echo "Starting backend on http://localhost:8000 ..."
+uv run uvicorn src.app.main:app --host 127.0.0.1 --port 8000 &
+BACK=$!
+trap 'echo; echo "Stopping servers..."; kill "$BACK" 2>/dev/null || true' EXIT INT TERM
+
+# Wait for the backend to answer /health (up to ~30s on a cold start).
+for _ in $(seq 1 30); do
+  if curl -sf http://localhost:8000/health >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+
+cd web
+if [ ! -d node_modules ]; then echo "Installing web deps (first run only)..."; npm install; fi
+
+# Point the Nuxt proxy at the local backend (server-side; never shipped to the browser).
+cat > .env.local <<EOF
+NUXT_BACKEND_URL=http://localhost:8000
+NUXT_BACKEND_TOKEN=${SPL_BEARER_TOKEN}
+EOF
+
+IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo localhost)"
+echo
+echo "=========================================================="
+echo "  Reader:"
+echo "    On this Mac : http://localhost:3000/reader"
+echo "    On your iPad: http://${IP}:3000/reader   (same Wi-Fi)"
+echo "  Ctrl-C stops both servers."
+echo "=========================================================="
+echo
+
+npm run dev -- --host
