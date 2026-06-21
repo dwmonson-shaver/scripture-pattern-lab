@@ -22,11 +22,11 @@
 | Word-level Greek alignment + transliteration always shown | ref | VR | each Greek word ↔ its English word |
 | Tap a Greek word → flash the English it translates (bidirectional) | ref | VR | |
 | Select a phrase of text | proto | IP | |
-| **Selection handles — expand/shrink across lines, finger/Pencil-friendly** | proto ⚠️ | IP | **dropped from VR — recover.** Word-snapping; cross-verse is the hard case |
-| **Selection popup — action set on a selection** | proto ⚠️ | IP | **dropped from VR — recover** |
+| Selection handles — expand/shrink across lines, finger/Pencil-friendly | proto + ref | IP, VR | **recovered into VR (v7).** Offset-model resize, word-snapping, within-verse (across visual lines); cross-verse still the open hard case |
+| Selection popup — action set on a selection | proto + ref | IP, VR | **recovered into VR (v7).** Mark as concept / Just highlight / Cancel + 3-state dismissal |
 | Marks = span annotations (cross-verse) | built | code | marks CRUD API |
-| Concept create (name, color, polarity, opposite) | built + proto | code, IP | |
-| **Concept edit (name, color)** | proto ⚠️ | IP | **dropped from VR — recovering now** |
+| Concept create (name, color, polarity, opposite) | built + proto + ref | code, IP, VR | |
+| Concept edit (name, color) + paired opposite (name, color) | ref | VR | **recovered + extended into VR** (the axis-pairing edit screen) |
 | **Edit a concept's polar opposite (name + color) on the same screen; see both poles** | designed | — | new design — the axis pairing; specified below |
 | Concept library list + live search | ref + proto | VR, IP | |
 | Reassign a mark's concept / add a 2nd concept | proto | IP | |
@@ -72,4 +72,4 @@
 ---
 
 ## Process rule (so this doesn't happen again)
-Before publishing a new mockup iteration, diff it against this inventory: any Slice-1 feature marked `proto`/`ref` that the new version drops gets a ⚠️ here and is recovered or explicitly re-scoped — never silently lost. The two mockups are being **unified** into one reference that carries both the visual identity (VR) and the interactions (IP).
+Before publishing a new mockup iteration, diff it against this inventory: any Slice-1 feature marked `proto`/`ref` that the new version drops gets a ⚠️ here and is recovered or explicitly re-scoped — never silently lost. **As of v7 the two mockups are unified** — the visual reference (VR) now carries both the visual identity *and* the interactions (selection popup, resize handles, concept+opposite editing). The interactive prototype (IP) remains as the historical reference. No ⚠️ open.
