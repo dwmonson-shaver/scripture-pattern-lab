@@ -37,10 +37,11 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
 ### Slice 1 — concept-identification reader (DEC-149)
 
 - `ReaderBar.vue` — sticky `v-toolbar` (NOT a `v-app-bar` — that's layout
-  chrome): canon / book / chapter selectors, version switcher, and the
-  interlinear toggle. The toggle hides when the corpus has no original
-  language (per-corpus `CORPUS_META`; NT = Greek). `v-model:*` per control,
-  `@prev` / `@next` for chapter arrows.
+  chrome): canon / book / chapter selectors, version switcher, the Versed /
+  Continuous **mode** toggle (`v-btn-toggle`, `v-model:mode`), and the
+  interlinear toggle. The interlinear toggle hides when the corpus has no
+  original language (per-corpus `CORPUS_META`; NT = Greek). `v-model:*` per
+  control, `@prev` / `@next` for chapter arrows.
 - `ChapterView.vue` — the reading pane. Study-edition (DEC-152): illuminated
   chapter opening (rubric book label, display chapter numeral, gilt rule),
   gilt versal drop-cap on the opening verse's first letter (via

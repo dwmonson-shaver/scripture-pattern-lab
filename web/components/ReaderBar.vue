@@ -18,6 +18,10 @@ const book = defineModel<string>('book', { required: true })
 const chapter = defineModel<number>('chapter', { required: true })
 const version = defineModel<string>('version', { required: true })
 const greekOn = defineModel<boolean>('greekOn', { required: true })
+// Layout mode (spec): Versed (default) lays verses out as blocks with
+// interlinear rows under each; Continuous flows the verses as prose with ruby
+// Greek above the aligned word.
+const mode = defineModel<'versed' | 'continuous'>('mode', { required: true })
 
 defineProps<{
   versions: VersionInfoOut[]
@@ -133,6 +137,21 @@ const origLang = computed(() => CORPUS_META[corpus.value]?.origLang ?? null)
 
       <v-spacer />
 
+      <v-btn-toggle
+        v-model="mode"
+        mandatory
+        density="compact"
+        variant="outlined"
+        divided
+        class="mode-toggle"
+        data-testid="reader-mode"
+      >
+        <v-btn value="versed" size="small" data-testid="reader-mode-versed">Versed</v-btn>
+        <v-btn value="continuous" size="small" data-testid="reader-mode-continuous">
+          Continuous
+        </v-btn>
+      </v-btn-toggle>
+
       <v-select
         v-model="version"
         :items="versions"
@@ -166,5 +185,8 @@ const origLang = computed(() => CORPUS_META[corpus.value]?.origLang ?? null)
   top: 0;
   z-index: 5;
   border-bottom: 1px solid rgb(var(--v-border-color));
+}
+.mode-toggle {
+  margin-right: 0.5rem;
 }
 </style>

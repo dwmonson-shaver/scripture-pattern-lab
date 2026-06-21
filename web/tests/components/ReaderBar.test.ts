@@ -15,6 +15,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     chapter: 8,
     version: 'kjv',
     greekOn: false,
+    mode: 'versed',
     versions,
     ...overrides,
   }
@@ -39,5 +40,12 @@ describe('ReaderBar', () => {
     await wrapper.get('[data-testid="reader-next"]').trigger('click')
     expect(wrapper.emitted('prev')).toBeTruthy()
     expect(wrapper.emitted('next')).toBeTruthy()
+  })
+
+  it('renders the Versed / Continuous mode toggle and updates the model on select', async () => {
+    const wrapper = mountWithVuetify(ReaderBar, { props: baseProps() })
+    expect(wrapper.find('[data-testid="reader-mode"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="reader-mode-continuous"]').trigger('click')
+    expect(wrapper.emitted('update:mode')?.at(-1)).toEqual(['continuous'])
   })
 })

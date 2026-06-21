@@ -41,6 +41,9 @@ const {
 const conceptStore = useConcepts()
 const markStore = useMarks()
 
+// Layout mode (spec): Versed (default) ↔ Continuous. Page-local; no reload.
+const mode = ref<'versed' | 'continuous'>('versed')
+
 const chapterScope = computed(() => ({
   corpus: corpus.value,
   book: book.value,
@@ -356,6 +359,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
       v-model:chapter="chapter"
       v-model:version="version"
       v-model:greek-on="greekOn"
+      v-model:mode="mode"
       :versions="versions"
       :pending="readerPending"
       @prev="prevChapter()"
@@ -384,6 +388,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
           :concepts="conceptStore.concepts.value"
           :greek-on="greekOn"
           :active-mark-id="activeMarkId"
+          :mode="mode"
           @select="onSelect"
           @mark-click="onMarkClick"
           @chip-tap="onChipTap"

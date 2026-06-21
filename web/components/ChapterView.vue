@@ -29,6 +29,8 @@ const props = defineProps<{
   concepts: ConceptSummary[]
   greekOn: boolean
   activeMarkId: number | null
+  /** Layout mode (spec): 'versed' blocks + interlinear rows; 'continuous' prose. */
+  mode?: 'versed' | 'continuous'
 }>()
 
 const emit = defineEmits<{
@@ -235,7 +237,14 @@ const firstVerseNum = computed<number | null>(
 </script>
 
 <template>
-  <div ref="rootEl" class="reader-page" data-testid="chapter-view" @mouseup="onMouseUp">
+  <div
+    ref="rootEl"
+    class="reader-page"
+    :class="`reader-page--${mode ?? 'versed'}`"
+    :data-mode="mode ?? 'versed'"
+    data-testid="chapter-view"
+    @mouseup="onMouseUp"
+  >
     <template v-if="chapter">
       <header class="opening" data-testid="chapter-opening">
         <div class="opening-book" data-testid="chapter-book">{{ chapter.book_display }}</div>
@@ -279,9 +288,26 @@ const firstVerseNum = computed<number | null>(
           </span>
         </p>
 
-        <div
+        <!--
+          Interlinear placement. Versed → a flex row of chips under the verse.
+          Continuous → an inline annotation group flowing after the verse.
+
+          ALIGNMENT HONESTY (DEC charter / spec): the read endpoint returns
+          VERSE-LEVEL greek_tokens only — there is NO word-level Greek↔English
+          alignment yet (src/retrieval/reader.py docstring). The spec's "ruby
+          above the exact aligned English word" therefore cannot be faithfully
+          positioned; we render the verse's tokens as chips and the tap-flash
+          (flashGloss) is an approximate stem-match. True per-word ruby + the
+          flash of the exact English word await the BSB alignment slice.
+          TODO(DEC-align): replace flashGloss + chip flow with real per-word
+          ruby once the read endpoint surfaces token→English-span alignment.
+          Transliteration is always shown beside the Greek where the corpus
+          provides it (InterlinearChip sub-label); the corpus has no separate
+          transliteration field at S1, so the contextual surface form stands in.
+        -->
+        <span
           v-if="greekOn && verse.greek_tokens.length"
-          class="interlinear d-flex flex-wrap mb-4"
+          class="interlinear"
           data-testid="interlinear-row"
         >
           <InterlinearChip
@@ -290,7 +316,7 @@ const firstVerseNum = computed<number | null>(
             :token="token"
             @tap="onChipTap(verse.verse, $event)"
           />
-        </div>
+        </span>
       </template>
     </template>
 
@@ -350,6 +376,18 @@ const firstVerseNum = computed<number | null>(
   line-height: 1.95;
   text-align: justify;
   hyphens: auto;
+}
+/* Versed (default): each verse is its own block. */
+.reader-page--versed .verse {
+  display: block;
+}
+/* Continuous: verses flow as prose. The opening verse stays a block so the
+ * gilt versal floats correctly at the top of the passage. */
+.reader-page--continuous .verse {
+  display: inline;
+}
+.reader-page--continuous .verse--opening {
+  display: block;
 }
 .verse-num {
   font-family: ui-sans-serif, system-ui, sans-serif;
@@ -412,6 +450,23 @@ const firstVerseNum = computed<number | null>(
   font-weight: 700;
   vertical-align: 0.5em;
   margin-left: 0.12em;
+}
+
+/* --- Interlinear --- */
+.interlinear {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+.reader-page--versed .interlinear {
+  margin: 0.2rem 0 1rem;
+}
+/* Continuous: flow the chips inline after the verse so prose isn't broken. */
+.reader-page--continuous .interlinear {
+  display: inline-flex;
+  vertical-align: baseline;
+  margin: 0 0.3rem;
+  opacity: 0.92;
 }
 :deep(.gloss-flash) {
   background: rgba(var(--v-theme-secondary), 0.4);
