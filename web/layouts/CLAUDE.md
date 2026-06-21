@@ -11,6 +11,11 @@ Nuxt layouts. `default.vue` wraps every page unless a page sets `definePageMeta(
 ## Key Files
 
 - `default.vue` — app bar with title (from runtime config) + theme toggle button
+- `reader.vue` — Slice 1 reader-alignment full-height shell: `<v-app>` + a
+  padding-stripped `<v-main>` (height 100vh) so the reader page owns the
+  app-shell (spec #screen — only the text column + panel scroll). A small
+  fixed theme toggle sits in the masthead corner. Pages opt in via
+  `definePageMeta({ layout: 'reader' })`.
 
 ## Dependencies
 

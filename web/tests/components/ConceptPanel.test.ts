@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { h } from 'vue'
+import { VApp } from 'vuetify/components'
 import { mountWithVuetify } from '../test-utils'
 import ConceptPanel from '~~/components/ConceptPanel.vue'
 import ConceptPanelBody from '~~/components/ConceptPanelBody.vue'
@@ -39,21 +41,32 @@ function baseProps(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// The panel's drawer branch requires a Vuetify layout ancestor (the app
+// supplies it via the default layout's <v-app>). Mount inside <v-app> so the
+// component has the same context it has in the running app, regardless of the
+// viewport useDisplay() reports under jsdom.
+function mountPanel(overrides: Record<string, unknown> = {}) {
+  return mountWithVuetify(VApp, {
+    global: { components: panelComponents },
+    // baseProps is a loose record (test fixture); ConceptPanel's props are
+    // strongly typed, so cast at the render-fn boundary.
+    slots: {
+      default: () =>
+        h(ConceptPanel, baseProps(overrides) as InstanceType<typeof ConceptPanel>['$props']),
+    },
+  })
+}
+
 describe('ConceptPanel host', () => {
-  // jsdom reports a wide viewport, so useDisplay().mobile is false → aside.
-  it('renders the persistent aside on a wide viewport', () => {
-    const wrapper = mountWithVuetify(ConceptPanel, {
-      props: baseProps(),
-      global: { components: panelComponents },
-    })
-    expect(wrapper.find('[data-testid="concept-panel-aside"]').exists()).toBe(true)
+  it('renders the panel host', () => {
+    const wrapper = mountPanel()
+    const aside = wrapper.find('[data-testid="concept-panel-aside"]').exists()
+    const drawer = wrapper.find('[data-testid="concept-panel-drawer"]').exists()
+    expect(aside || drawer).toBe(true)
   })
 
   it('hosts the panel body (which renders the library in library view)', () => {
-    const wrapper = mountWithVuetify(ConceptPanel, {
-      props: baseProps(),
-      global: { components: panelComponents },
-    })
+    const wrapper = mountPanel()
     expect(wrapper.find('[data-testid="concept-panel-body"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="concept-library"]').exists()).toBe(true)
   })

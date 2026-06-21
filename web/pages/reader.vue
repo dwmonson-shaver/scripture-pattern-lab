@@ -18,7 +18,7 @@ import type {
  * Scope is concept identification only — no connections, axes, patterns, AI
  * explainer. A "Just highlight" (mark with no concept) is in scope.
  */
-definePageMeta({ title: 'Reader' })
+definePageMeta({ title: 'Reader', layout: 'reader' })
 
 const { mobile } = useDisplay()
 
@@ -67,14 +67,29 @@ await useAsyncData('reader-init', async () => {
   return true
 })
 
+// When true, the next chapter change came from scroll-spy (the chapter is
+// already loaded) — reflect it in the dropdown without reloading.
+const spyDriven = ref(false)
+
 // Reload chapter + marks when the navigation target changes.
 watch(
   () => [corpus.value, book.value, chapter.value, version.value],
   () => {
+    if (spyDriven.value) {
+      spyDriven.value = false
+      return
+    }
     resetPanel()
     void reloadAll()
   },
 )
+
+/** Scroll-spy: a chapter opening scrolled into view → reflect in the dropdown. */
+function onChapterInView(ch: number): void {
+  if (ch === chapter.value) return
+  spyDriven.value = true
+  chapter.value = ch
+}
 
 // --- panel state ------------------------------------------------------------
 type PanelView = 'library' | 'search' | 'edit' | 'mark'
@@ -419,7 +434,9 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
 </script>
 
 <template>
-  <div>
+  <!-- App-shell (spec): the screen fills the viewport and does not scroll; only
+       the reader text column (and the panel) scroll independently. -->
+  <div class="reader-screen">
     <ReaderBar
       v-model:corpus="corpus"
       v-model:book="book"
@@ -433,10 +450,10 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
       @next="nextChapter()"
     />
 
-    <ErrorPanel v-if="readerError" :error="readerError" class="ma-4" />
+    <ErrorPanel v-if="readerError" :error="readerError" class="ma-4 flex-none" />
 
     <div class="reader-stage">
-      <main>
+      <main class="reader-main" data-testid="reader-main">
         <v-btn
           v-if="mobile"
           variant="outlined"
@@ -460,6 +477,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
           @select="onSelect"
           @mark-click="onMarkClick"
           @chip-tap="onChipTap"
+          @chapter-in-view="onChapterInView"
         />
       </main>
 
@@ -507,10 +525,29 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
 </template>
 
 <style scoped>
+/* App-shell: the screen fills the page-content area and does not itself
+ * scroll; the reader column + panel scroll independently (spec #screen). The
+ * reader uses the `reader` layout, which strips the default v-container padding
+ * so this shell can own the full height. */
+.reader-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.flex-none {
+  flex: none;
+}
 .reader-stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 25rem;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  flex: 1;
+  min-height: 0;
+}
+.reader-main {
+  overflow-y: auto;
+  min-height: 0;
 }
 @media (max-width: 1280px) {
   .reader-stage {

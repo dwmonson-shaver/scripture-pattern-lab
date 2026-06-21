@@ -15,10 +15,15 @@ File-based routes. `pages/foo.vue` → `/foo`, `pages/users/[id].vue` → `/user
 - `reader.vue` — Slice 1 (DEC-149) concept-identification reader workbench.
   Wires `ReaderBar` + `ChapterView` + `ConceptPanel` + `SelectionPopup` +
   `SpanHandles`. Owns the cross-component state (reader nav, concepts, marks,
-  the panel's sub-view + the associate/pending context); the composables own
-  fetch/CRUD. Default anchor nt / rom / 8 / kjv. Scope is concept
-  identification only — no connections / axes / patterns / AI explainer; a
-  "Just highlight" (no-concept mark) IS in scope.
+  the panel's sub-view + the associate/pending context + the multi-select
+  concept-highlight set + the layout mode); the composables own fetch/CRUD.
+  Default anchor nt / rom / 8 / kjv. Uses the `reader` layout for the app-shell
+  (spec #screen — only the text column + panel scroll). Owns the three-state
+  dismissal grammar (Esc / click-off / ✕ / Clear) and the scroll-spy chapter
+  handler (`@chapter-in-view`, single-chapter no-op today; multi-chapter book
+  scroll is a follow-up). Scope is concept identification only — no connections
+  / axes / patterns / AI explainer; a "Just highlight" (no-concept mark) IS in
+  scope.
 - `concept/[name].vue` — Slice N (DEC-106) Conceptual Document view. Dynamic
   segment `:name` is the concept name (auto-decoded by Nuxt, re-encoded by
   the `useConceptDocument` composable when building the proxy URL). Renders

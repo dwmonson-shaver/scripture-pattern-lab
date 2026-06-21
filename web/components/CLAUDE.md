@@ -64,6 +64,10 @@ Auto-imported Vue components. Use these from any page, layout, or other componen
   empty-space / Esc / Clear for the concept highlight).
 - `ConceptPanel.vue` — workbench panel host: `v-navigation-drawer` slide-over
   on narrow / persistent aside on wide (via `useDisplay()`). `v-model:drawer`.
+  Header shows the Clear affordance (spec .clearbtn) when concepts are
+  highlighted; `@clear-highlight` + `@toggle-concept` forwarded. The drawer
+  requires a Vuetify layout ancestor — the `reader` layout's `<v-app>` supplies
+  it in-app; ConceptPanel.test mounts inside `<v-app>` for the same context.
 - `ConceptPanelBody.vue` — the four-way view router (library / search / edit /
   mark) shared by both panel hosts; pure event-forwarding glue.
 - `ConceptLibrary.vue` — search-as-you-type + concept list (authored-color

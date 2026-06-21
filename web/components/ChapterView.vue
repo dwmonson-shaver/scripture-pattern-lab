@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// Lifecycle/reactivity hooks are auto-imported in the Nuxt app; import them
+// explicitly so the component also mounts under the Vitest unit env.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   ChapterReadResponse,
   ConceptSummary,
@@ -47,6 +50,8 @@ const emit = defineEmits<{
   ]
   'mark-click': [id: number]
   'chip-tap': [payload: { verse: number; token: GreekTokenOut }]
+  /** Scroll-spy: the chapter whose opening is currently in view. */
+  'chapter-in-view': [chapter: number]
 }>()
 
 const conceptByName = computed<Record<string, ConceptSummary>>(() => {
@@ -245,6 +250,49 @@ function onMarkClick(id: number): void {
 const firstVerseNum = computed<number | null>(
   () => props.chapter?.verses[0]?.verse ?? null,
 )
+
+// --- scroll-spy --------------------------------------------------------------
+// Watch each chapter-opening anchor; emit `chapter-in-view` as openings cross
+// into view so a parent chapter dropdown can scroll-spy (spec). Slice 1 loads
+// ONE chapter at a time, so there is a single anchor and the spy is effectively
+// a no-op today; the wiring is in place. Multi-chapter continuous-scroll load
+// (loading the whole book so several openings exist) is a follow-up — the read
+// API is per-chapter. TODO(reader-book-scroll): load adjacent chapters so the
+// spy and continuous book scroll become observable.
+let observer: IntersectionObserver | null = null
+
+function setupSpy(): void {
+  if (!import.meta.client || !rootEl.value) return
+  if (typeof IntersectionObserver === 'undefined') return // jsdom / unsupported env
+  observer?.disconnect()
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue
+        const n = Number((e.target as HTMLElement).dataset.chapterAnchor)
+        if (!Number.isNaN(n)) emit('chapter-in-view', n)
+      }
+    },
+    { root: rootEl.value, rootMargin: '0px 0px -80% 0px', threshold: 0 },
+  )
+  for (const el of rootEl.value.querySelectorAll<HTMLElement>('[data-chapter-anchor]')) {
+    observer.observe(el)
+  }
+}
+
+watch(
+  () => props.chapter?.chapter,
+  () => nextTickSpy(),
+)
+
+function nextTickSpy(): void {
+  if (!import.meta.client) return
+  // Defer to let the new chapter's DOM render before (re)observing.
+  requestAnimationFrame(setupSpy)
+}
+
+onMounted(setupSpy)
+onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
@@ -257,7 +305,11 @@ const firstVerseNum = computed<number | null>(
     @mouseup="onMouseUp"
   >
     <template v-if="chapter">
-      <header class="opening" data-testid="chapter-opening">
+      <header
+        class="opening"
+        :data-chapter-anchor="chapter.chapter"
+        data-testid="chapter-opening"
+      >
         <div class="opening-book" data-testid="chapter-book">{{ chapter.book_display }}</div>
         <div class="opening-chap">
           <span class="opening-num">{{ chapter.chapter }}</span>
