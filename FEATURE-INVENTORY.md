@@ -43,7 +43,8 @@
 | Connection entity — typed edges (opposite/prerequisite/produces/sequence/compound/association/unknown) | designed | DEC-131 |
 | **"Make connection" interaction** — select concept → *Make connection* → tap the other concept | proposed | interface specified below |
 | **Visual representation of a connection** (arc/line between marks; Connections library tab) | proposed | specified below |
-| Axis — promoted opposite-connection with signed poles; polarity-aligned | designed | DEC-133; the edit-opposite screen is its Slice-1 seed |
+| Axis — promoted opposite-connection with signed poles; polarity-aligned | designed | DEC-133; the Slice-1 "add opposite" edit screen is its seed |
+| **Opposite = a connection, not a concept property** (concept is standalone; opposite added optionally) | designed | DEC-151; Slice-1 edit-screen seed must stay consistent with this |
 | Pattern = sequence connection + observations | designed | DEC-132 |
 | Compound connection (declarable now) | designed | DEC-134 |
 

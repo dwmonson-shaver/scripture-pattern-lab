@@ -1,0 +1,515 @@
+<style>
+  :root{
+    --ground:#EBE1CE; --ground-2:#E2D6BD; --panel:#F3ECDB; --card:#FBF6EA;
+    --text:#2B2722; --text-soft:#6B6152; --faint:#8C8170; --hair:#C9BC9F; --hair-soft:#DBD0B6;
+    --rubric:#9C2A23; --gilt:#A07E2A; --gilt-lo:#836619; --gilt-hi:#C9A23A; --neutral:#B6A578;
+    --c-spirit:#2E8C99; --c-flesh:#7B5EA7; --c-life:#5E9A45; --c-death:#56688C; --c-peace:#3F8FB5; --c-condemn:#A85677;
+    --read:"Iowan Old Style","Palatino Linotype",Palatino,"Hoefler Text",Georgia,serif;
+    --display:"Hoefler Text","Big Caslon","Iowan Old Style",Palatino,Georgia,serif;
+    --chrome:ui-sans-serif,system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --grc:"Palatino Linotype",Palatino,"Times New Roman",serif;
+    --measure:34rem;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ background:var(--ground); color:var(--text); font-family:var(--read); -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(130% 90% at 50% -15%, rgba(255,251,240,.7), transparent 55%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); }
+  button{ font-family:inherit; cursor:pointer; }
+
+  #frame,#device{ display:contents; }
+  #screen{ display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+
+  .masthead{ display:flex; flex:none; align-items:center; gap:1rem; flex-wrap:wrap; padding:.8rem 1.5rem; border-bottom:1px solid var(--hair); background:color-mix(in srgb, var(--ground) 86%, #fff); }
+  .wordmark{ display:flex; align-items:baseline; gap:.5rem; } .wordmark b{ font-family:var(--display); font-weight:600; font-size:1rem; } .wordmark span{ font-family:var(--chrome); font-size:.56rem; letter-spacing:.22em; text-transform:uppercase; color:var(--faint); }
+  .ref{ font-family:var(--display); font-size:1rem; display:flex; align-items:center; gap:.5rem; } .ref .dot{ color:var(--gilt); }
+  .grow{ flex:1; }
+  .mtool{ font-family:var(--chrome); font-size:.76rem; color:var(--text-soft); display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
+  .vsel{ font-family:var(--chrome); font-size:.76rem; color:var(--text); padding:.36rem 1.5rem .36rem .6rem; border:1px solid var(--hair); border-radius:8px; background:var(--card); appearance:none; }
+  .vselw{ position:relative; } .vselw::after{ content:"▾"; position:absolute; right:.55rem; top:50%; transform:translateY(-50%); color:var(--faint); font-size:.6rem; pointer-events:none; }
+  .chapsel{ font-family:var(--display); font-size:1rem; color:var(--text); padding:.16rem 1.3rem .16rem .45rem; border:1px solid transparent; border-radius:6px; background:none; appearance:none; } .chapsel:hover{ border-color:var(--hair); background:var(--card); }
+  .seg{ display:inline-flex; border:1px solid var(--hair); border-radius:8px; overflow:hidden; background:var(--card); } .seg button{ border:none; background:none; padding:.4rem .65rem; font-size:.76rem; color:var(--text-soft); } .seg button.on{ background:var(--text); color:var(--card); }
+  .grk{ display:inline-flex; align-items:center; gap:.45rem; border:1px solid var(--hair); background:var(--card); border-radius:8px; padding:.36rem .6rem; color:var(--text-soft); }
+  .grk .sw{ width:30px; height:17px; border-radius:99px; background:var(--ground-2); border:1px solid var(--hair); position:relative; transition:background .18s; } .grk .sw::after{ content:""; position:absolute; top:1px; left:1px; width:13px; height:13px; border-radius:50%; background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.2); transition:transform .18s; }
+  .grk.on{ color:var(--text); } .grk.on .sw{ background:var(--gilt); } .grk.on .sw::after{ transform:translateX(13px); }
+  .ipad{ border:1px solid var(--hair); background:var(--card); color:var(--text); border-radius:8px; padding:.4rem .7rem; font-size:.76rem; } .ipad:hover{ border-color:var(--gilt); }
+
+  .stage{ display:grid; grid-template-columns: minmax(0,1fr) 21rem; flex:1; min-height:0; }
+  @media (max-width:900px){ .stage{ grid-template-columns:1fr; } .apparatus{ border-left:none; border-top:1px solid var(--hair); } }
+  .reader{ padding:3.2rem 2.2rem 6rem; overflow-y:auto; min-height:0; }
+  .page{ max-width:var(--measure); margin:0 auto; padding-left:2.8rem; }
+  .opening .book{ font-family:var(--chrome); font-size:.7rem; letter-spacing:.46em; text-transform:uppercase; color:var(--rubric); padding-left:.5em; }
+  .opening .chap{ display:flex; align-items:flex-end; gap:.7rem; margin-top:.25rem; } .opening .chap .n{ font-family:var(--display); font-size:3.4rem; line-height:.82; font-weight:600; } .opening .chap .label{ font-family:var(--read); font-style:italic; color:var(--text-soft); font-size:.95rem; padding-bottom:.4rem; }
+  .opening .rule{ height:2px; margin:1rem 0 1.6rem; background:linear-gradient(90deg, var(--gilt) 0%, var(--gilt-hi) 38%, var(--hair) 100%); }
+  .versal{ float:left; font-family:var(--display); font-weight:600; font-size:4.2rem; line-height:.9; padding:.1em .14em; margin:.05em .5rem .05rem 0; color:var(--card); background:linear-gradient(150deg, var(--gilt-hi) 0%, var(--gilt) 52%, var(--gilt-lo) 100%); border-radius:6px; box-shadow:inset 0 1px 0 rgba(255,255,255,.45), 0 2px 5px rgba(75,58,18,.3); }
+
+  #vflow{ font-size:1.16rem; line-height:1.95; text-align:justify; hyphens:auto; transition:line-height .2s; }
+  .v{ position:relative; }
+  body.mode-continuous .v{ display:inline; } body.mode-versed .v{ display:block; margin:0 0 .35rem; }
+  body.mode-continuous.greek-on #vflow{ line-height:2.7; }
+  .vn{ font-family:var(--chrome); font-size:.6rem; font-weight:600; color:var(--rubric); vertical-align:.55em; margin:0 .26em 0 .14em; user-select:none; }
+  .chap-start::before{ content:attr(data-chap); position:absolute; left:-2.5rem; top:-.05em; font-family:var(--display); font-size:1.85rem; font-weight:600; color:var(--rubric); }
+  body.mode-continuous .chap-start{ display:block; margin-top:1.6rem; } body.mode-versed .chap-start{ margin-top:1.6rem; }
+
+  .cm{ background:color-mix(in srgb, var(--c) 38%, #fff); mix-blend-mode:multiply; border-bottom:2.5px solid var(--c); border-radius:3px 3px 1px 1px; padding:.05em .08em; -webkit-box-decoration-break:clone; box-decoration-break:clone; cursor:pointer; transition:background .15s, filter .15s; }
+  .cm:hover{ filter:saturate(1.2) brightness(.99); }
+  .cm.on{ box-shadow:0 0 0 2px color-mix(in srgb,var(--c) 60%,transparent); }
+  .cm.active{ outline:2px dashed var(--gilt); outline-offset:2px; }
+  body.has-sel .cm:not(.on){ background:color-mix(in srgb, var(--c) 11%, #fff); }
+  .al{ position:relative; } .al.pulse{ outline:2.5px solid var(--c); outline-offset:1px; border-radius:2px; animation:pofade 1s ease-out forwards; }
+  @keyframes pofade{ from{ outline-color:var(--c);} to{ outline-color:transparent;} }
+  .ruby{ display:none; position:absolute; left:50%; transform:translateX(-50%); bottom:100%; margin-bottom:3px; font-family:var(--chrome); font-size:.62rem; color:var(--text-soft); white-space:nowrap; line-height:1; mix-blend-mode:normal; cursor:pointer; }
+  .ruby .g{ font-family:var(--grc); font-size:.82rem; color:var(--text); } .ruby:hover{ color:var(--text); }
+  body.mode-continuous.greek-on .ruby{ display:block; }
+  .interlin{ display:none; gap:.4rem; flex-wrap:wrap; margin:.2rem 0; }
+  body.mode-versed.greek-on .v .interlin{ display:flex; }
+  .gk{ font-family:var(--chrome); font-size:.68rem; color:var(--text-soft); background:var(--card); border:1px solid var(--hair-soft); border-radius:6px; padding:.24rem .45rem; white-space:nowrap; cursor:pointer; } .gk:hover{ border-color:var(--gilt); color:var(--text); } .gk .grc{ font-family:var(--grc); color:var(--text); font-size:.9rem; }
+
+  /* selection popup */
+  .pop{ position:fixed; z-index:120; max-width:min(22rem,92vw); background:var(--card); border:1px solid var(--hair); border-radius:11px; box-shadow:0 8px 28px rgba(42,38,34,.22); padding:.35rem; font-family:var(--chrome); display:none; gap:.3rem; }
+  .pop.show{ display:flex; }
+  .pop button{ border:none; background:none; border-radius:8px; padding:.6rem .75rem; min-height:2.7rem; font-size:.86rem; color:var(--text); display:flex; align-items:center; gap:.4rem; white-space:nowrap; }
+  .pop button:hover{ background:var(--ground-2); } .pop .prim{ color:var(--rubric); font-weight:600; } .pop .cancel{ color:var(--faint); }
+  .swdot{ width:.8rem; height:.8rem; border-radius:50%; background:var(--neutral); box-shadow:inset 0 0 0 1px rgba(0,0,0,.15); }
+
+  /* resize handles — large finger/Pencil targets */
+  .handle{ position:fixed; width:34px; z-index:115; transform:translateX(-50%); touch-action:none; cursor:ew-resize; display:none;
+    background:linear-gradient(to right, transparent calc(50% - 1.25px), var(--gilt) calc(50% - 1.25px), var(--gilt) calc(50% + 1.25px), transparent calc(50% + 1.25px)); }
+  .handle.show{ display:block; }
+  .handle::before{ content:""; position:absolute; left:50%; width:22px; height:22px; border-radius:50%; background:var(--gilt); transform:translateX(-50%); box-shadow:0 2px 5px rgba(0,0,0,.35); border:2px solid var(--card); }
+  .handle.start::before{ top:-20px; } .handle.end::before{ bottom:-20px; }
+
+  /* apparatus */
+  .apparatus{ border-left:1px solid var(--hair); background:var(--panel); padding:1.5rem 1.3rem 4rem; font-family:var(--chrome); overflow-y:auto; min-height:0; }
+  .app-h{ font-size:.62rem; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); margin:0 0 .8rem; display:flex; justify-content:space-between; align-items:center; } .app-h .ct{ color:var(--rubric); font-weight:600; }
+  .clearbtn{ border:1px solid var(--hair); background:var(--card); color:var(--text-soft); border-radius:99px; padding:.28rem .7rem; font-size:.66rem; } .clearbtn:hover{ color:var(--text); border-color:var(--gilt); } .clearbtn[hidden]{ display:none; }
+  .csearch{ width:100%; padding:.5rem .65rem; border:1px solid var(--hair); border-radius:8px; background:var(--card); color:var(--text); font-size:.82rem; font-family:var(--chrome); margin-bottom:.75rem; } .csearch:focus{ outline:2px solid var(--gilt); outline-offset:1px; }
+  .clist{ display:flex; flex-direction:column; gap:.15rem; }
+  .citem{ display:flex; align-items:center; gap:.65rem; width:100%; text-align:left; border:none; background:none; padding:.5rem .55rem; border-radius:8px; color:var(--text); } .citem:hover{ background:var(--ground-2); } .citem.sel{ background:var(--card); box-shadow:inset 0 0 0 1px var(--hair); }
+  .siglum{ width:1.05rem; height:1.05rem; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); } .citem .nm{ font-family:var(--read); font-size:1.02rem; } .citem .pol{ margin-left:auto; font-size:.74rem; color:var(--faint); width:1.1em; text-align:center; } .citem .ct{ font-family:var(--chrome); font-size:.78rem; color:var(--text-soft); min-width:1.1rem; text-align:right; }
+  .addc{ margin-top:.8rem; width:100%; padding:.6rem; border:1px dashed var(--gilt); border-radius:9px; background:none; color:var(--gilt); font-weight:600; font-size:.8rem; } .addc:hover{ background:color-mix(in srgb,var(--gilt) 10%, transparent); }
+  .ctxlabel{ font-size:.74rem; color:var(--text-soft); line-height:1.5; margin:.1rem 0 .7rem; } .ctxlabel .ph{ font-family:var(--read); font-style:italic; color:var(--text); }
+  .detail{ background:var(--card); border:1px solid var(--hair); border-radius:11px; padding:1rem 1.05rem; margin-bottom:1.1rem; }
+  .detail .multi{ font-family:var(--chrome); font-size:.6rem; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin-bottom:.55rem; }
+  .detail .top{ display:flex; align-items:center; gap:.6rem; } .detail .swab{ width:1.5rem; height:1.5rem; border-radius:6px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.14); } .detail .nm{ font-family:var(--read); font-size:1.3rem; }
+  .detail .meta{ font-size:.74rem; color:var(--text-soft); margin:.55rem 0 0; line-height:1.6; } .detail .meta b{ color:var(--text); }
+  .detail .seclabel{ font-size:.58rem; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin:.9rem 0 .4rem; }
+  .detail .phrases{ display:flex; flex-direction:column; gap:.35rem; } .detail .ph{ font-family:var(--read); font-style:italic; font-size:.92rem; background:var(--ground); border:1px solid var(--hair-soft); border-radius:7px; padding:.4rem .55rem; }
+  .detail .ph .where{ font-style:normal; font-family:var(--chrome); font-size:.64rem; color:var(--faint); } .detail .ph .gloss{ display:block; font-style:normal; font-family:var(--chrome); font-size:.66rem; color:var(--text-soft); margin-top:.2rem; } .detail .ph .gloss .g{ font-family:var(--grc); color:var(--text); font-size:.86rem; }
+  .detail .occ{ font-size:.74rem; color:var(--text-soft); border-top:1px dashed var(--hair); padding-top:.6rem; margin-top:.7rem; } .detail .occ b{ font-family:var(--display); font-size:1.1rem; color:var(--text); }
+  .acts{ display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.8rem; } .acts button{ font-size:.74rem; padding:.45rem .6rem; min-height:2.4rem; border-radius:7px; border:1px solid var(--hair); background:var(--ground); color:var(--text); } .acts button:hover{ border-color:var(--gilt); } .acts .danger{ color:var(--rubric); }
+  .hnote{ font-size:.66rem; color:var(--faint); margin-top:.6rem; }
+  .editc{ background:var(--card); border:1px solid var(--hair); border-radius:11px; padding:1rem 1.05rem; margin-bottom:1.1rem; } .editc h3{ font-family:var(--chrome); font-size:.6rem; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin:0 0 .8rem; }
+  .pole{ border:1px solid var(--hair-soft); border-radius:9px; padding:.7rem .75rem; } .pole .poletag{ font-family:var(--chrome); font-size:.58rem; letter-spacing:.06em; text-transform:uppercase; } .pole.pos .poletag{ color:var(--c-life); } .pole.neg .poletag{ color:var(--rubric); }
+  .pole .lab{ font-size:.56rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:.5rem 0 .25rem; } .pole input[type=text]{ width:100%; font-family:var(--read); font-size:1.04rem; padding:.4rem .5rem; border:1px solid var(--hair); border-radius:7px; background:var(--ground); color:var(--text); }
+  .swatches{ display:flex; gap:.35rem; flex-wrap:wrap; } .swatch{ width:1.35rem; height:1.35rem; border-radius:50%; border:2px solid transparent; padding:0; cursor:pointer; } .swatch.sel{ border-color:var(--text); }
+  .axis{ text-align:center; color:var(--gilt); font-size:1.1rem; margin:.45rem 0; }
+  .polrow{ display:flex; gap:.3rem; margin-top:.1rem; } .pbtn{ flex:1; font-family:var(--chrome); font-size:.74rem; padding:.34rem; border-radius:6px; border:1px solid var(--hair); background:var(--ground); color:var(--text-soft); } .pbtn.on{ background:var(--text); color:var(--card); border-color:var(--text); }
+  .addopp{ width:100%; margin-top:.55rem; padding:.55rem; border:1px dashed var(--gilt); border-radius:9px; background:none; color:var(--gilt); font-size:.78rem; font-weight:600; } .addopp:hover{ background:color-mix(in srgb,var(--gilt) 10%, transparent); }
+  .rmopp{ border:none; background:none; color:var(--faint); font-size:.6rem; margin-left:.45rem; cursor:pointer; text-decoration:underline; }
+  .editc .save{ margin-top:.9rem; display:flex; gap:.5rem; } .editc .save .go{ flex:1; background:var(--rubric); color:#fff; border:none; padding:.55rem; border-radius:8px; font-weight:600; font-size:.85rem; } .editc .save .cancel{ background:none; border:1px solid var(--hair); color:var(--text-soft); padding:.55rem .8rem; border-radius:8px; font-size:.85rem; }
+
+  .footnote{ position:fixed; bottom:.7rem; left:1.2rem; font-family:var(--chrome); font-size:.56rem; letter-spacing:.13em; text-transform:uppercase; color:var(--gilt); opacity:.8; z-index:5; }
+  .hint{ position:fixed; bottom:1.1rem; left:50%; transform:translateX(-50%); font-family:var(--chrome); font-size:.76rem; color:var(--text-soft); background:color-mix(in srgb,var(--card) 92%,#fff); border:1px solid var(--hair); padding:.45rem .9rem; border-radius:99px; box-shadow:0 6px 20px rgba(42,38,34,.16); z-index:130; opacity:0; transition:opacity .3s; pointer-events:none; } .hint.show{ opacity:1; }
+
+  body.dev{ overflow:hidden; }
+  body.dev #frame{ display:flex; position:fixed; inset:0; z-index:300; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, #43403a, #211f1c); }
+  body.dev #device{ display:block; background:#0e0d0c; border-radius:38px; padding:16px; box-shadow:0 30px 80px rgba(0,0,0,.5), inset 0 0 0 2px #2a2723; }
+  body.dev #screen{ width:var(--dw,1032px); height:var(--dh,1376px); overflow:hidden; background:var(--ground); border-radius:22px; }
+  #devbar{ display:none; } body.dev #devbar{ display:flex; gap:.6rem; position:fixed; top:1rem; left:50%; transform:translateX(-50%); z-index:320; font-family:var(--chrome); } #devbar button{ border:1px solid #5a564e; background:#2a2723; color:#e9e1cf; border-radius:8px; padding:.5rem .9rem; font-size:.8rem; } #devbar button:hover{ border-color:var(--gilt-hi); }
+  #devcap{ display:none; } body.dev #devcap{ display:block; position:fixed; bottom:1rem; left:50%; transform:translateX(-50%); z-index:320; font-family:var(--chrome); font-size:.66rem; letter-spacing:.08em; color:#cdc4b0; }
+
+  @media (prefers-reduced-motion:no-preference){
+    .opening .book{ animation:rise .6s ease-out both; } .opening .chap{ animation:rise .6s .06s ease-out both; } .opening .rule{ transform-origin:left; animation:wipe .7s .18s ease-out both; } .versal{ animation:gild .7s .24s cubic-bezier(.2,.8,.2,1) both; }
+    @keyframes rise{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none;} } @keyframes wipe{ from{ transform:scaleX(0);} to{ transform:scaleX(1);} } @keyframes gild{ from{ opacity:0; transform:scale(.86) rotate(-2deg);} to{ opacity:1; transform:none;} }
+  }
+</style>
+
+<div id="frame"><div id="device"><div id="screen">
+<header class="masthead">
+  <div class="wordmark"><b>Scripture Pattern Lab</b><span>Reader</span></div>
+  <div class="ref">Romans <span class="dot">·</span> <span class="vselw"><select class="chapsel" id="chapSel" title="Chapter"></select></span></div>
+  <div class="grow"></div>
+  <div class="mtool">
+    <span class="vselw"><select class="vsel" id="verSel" title="Version"><option>King James Version</option><option>World English Bible</option><option>Berean Standard</option><option>American Standard 1901</option><option>Young's Literal</option></select></span>
+    <span class="seg" id="modeSeg"><button data-mode="versed" class="on">Versed</button><button data-mode="continuous">Continuous</button></span>
+    <button class="grk" id="grkBtn">Greek <span class="sw"></span></button>
+    <button class="ipad" id="ipadBtn">Preview on iPad</button>
+  </div>
+</header>
+<div class="stage">
+  <main class="reader" id="reader">
+    <div class="page">
+      <div class="opening"><div class="book">Romans</div><div class="chap"><span class="n">8</span><span class="label">Life in the Spirit</span></div><div class="rule"></div></div>
+      <div id="vflow"></div>
+    </div>
+  </main>
+  <aside class="apparatus">
+    <div id="detailHost"></div>
+    <h2 class="app-h"><span>In this chapter <span class="ct" id="ccount">6</span></span> <button id="clearSel" class="clearbtn" hidden>Clear</button></h2>
+    <input id="conceptSearch" class="csearch" placeholder="Search concepts…" autocomplete="off">
+    <div class="clist" id="clist"></div>
+    <button class="addc" id="addc">+ New concept</button>
+  </aside>
+</div>
+</div></div></div>
+
+<div class="pop" id="pop">
+  <button class="prim" id="popMark">✎ Mark as concept</button>
+  <button id="popPlain"><span class="swdot"></span> Just highlight</button>
+  <button class="cancel" id="popCancel">✕</button>
+</div>
+<div class="handle start" id="hStart"></div>
+<div class="handle end" id="hEnd"></div>
+<div class="hint" id="hint"></div>
+<div class="footnote">Design reference · study edition</div>
+<div id="devbar"><button id="rotateBtn">Rotate</button><button id="exitBtn">Exit preview</button></div>
+<div id="devcap">iPad Pro 13″ · 1032 × 1376 pt</div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(s,r){ return (r||document).querySelector(s); };
+  var $$=function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
+  function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  var PALETTE=["#2E8C99","#7B5EA7","#5E9A45","#56688C","#3F8FB5","#A85677","#9C6B3F","#B5862A","#557A8C","#8A8D3F"];
+  var CONCEPTS=[
+    {id:"spirit", name:"Spirit", color:"#2E8C99", pol:"+", opp:"Flesh", oppColor:"#7B5EA7", corpus:146},
+    {id:"flesh", name:"Flesh", color:"#7B5EA7", pol:"−", opp:"Spirit", oppColor:"#2E8C99", corpus:91},
+    {id:"life", name:"Life", color:"#5E9A45", pol:"+", opp:"Death", oppColor:"#56688C", corpus:88},
+    {id:"death", name:"Death", color:"#56688C", pol:"−", opp:"Life", oppColor:"#5E9A45", corpus:120},
+    {id:"peace", name:"Peace", color:"#3F8FB5", pol:"+", opp:"Enmity", oppColor:"#9C6B3F", corpus:92},
+    {id:"condemn", name:"Condemnation", color:"#A85677", pol:"−", opp:"Justification", oppColor:"#5E9A45", corpus:18}
+  ];
+  function C(id){ return CONCEPTS.find(function(c){return c.id===id;}); }
+
+  var VERSES=[
+    {v:1,chap:8,opening:true,t:"There is therefore now no condemnation to them which are in Christ Jesus, who walk not after the flesh, but after the Spirit."},
+    {v:2,chap:8,t:"For the law of the Spirit of life in Christ Jesus hath made me free from the law of sin and death."},
+    {v:3,chap:8,t:"For what the law could not do, in that it was weak through the flesh, God sending his own Son in the likeness of sinful flesh, and for sin, condemned sin in the flesh:"},
+    {v:4,chap:8,t:"That the righteousness of the law might be fulfilled in us, who walk not after the flesh, but after the Spirit."},
+    {v:5,chap:8,t:"For they that are after the flesh do mind the things of the flesh; but they that are after the Spirit the things of the Spirit."},
+    {v:6,chap:8,t:"For to be carnally minded is death; but to be spiritually minded is life and peace."},
+    {v:7,chap:8,t:"Because the carnal mind is enmity against God: for it is not subject to the law of God, neither indeed can be."},
+    {v:8,chap:8,t:"So then they that are in the flesh cannot please God."},
+    {v:9,chap:8,t:"But ye are not in the flesh, but in the Spirit, if so be that the Spirit of God dwell in you. Now if any man have not the Spirit of Christ, he is none of his."},
+    {v:10,chap:8,t:"And if Christ be in you, the body is dead because of sin; but the Spirit is life because of righteousness."},
+    {v:11,chap:8,t:"But if the Spirit of him that raised up Jesus from the dead dwell in you, he that raised up Christ from the dead shall also quicken your mortal bodies by his Spirit that dwelleth in you."},
+    {v:12,chap:8,t:"Therefore, brethren, we are debtors, not to the flesh, to live after the flesh."},
+    {v:13,chap:8,t:"For if ye live after the flesh, ye shall die: but if ye through the Spirit do mortify the deeds of the body, ye shall live."},
+    {v:1,chap:9,chapStart:true,t:"I say the truth in Christ, I lie not, my conscience also bearing me witness in the Holy Ghost,"},
+    {v:2,chap:9,t:"That I have great heaviness and continual sorrow in my heart."}
+  ];
+  var SEED=[
+    {v:1,chap:8,text:"no condemnation",cid:"condemn",al:[["condemnation","κατάκριμα","katákrima"]]},
+    {v:2,chap:8,text:"the Spirit of life",cid:"spirit",al:[["Spirit","πνεῦμα","pneûma"],["life","ζωή","zōḗ"]]},
+    {v:2,chap:8,text:"death",cid:"death",al:[["death","θάνατος","thánatos"]]},
+    {v:5,chap:8,text:"the things of the flesh",cid:"flesh",al:[["flesh","σάρξ","sárx"]]},
+    {v:6,chap:8,text:"death",cid:"death",al:[["death","θάνατος","thánatos"]]},
+    {v:6,chap:8,text:"life",cid:"life",al:[["life","ζωή","zōḗ"]]},
+    {v:6,chap:8,text:"peace",cid:"peace",al:[["peace","εἰρήνη","eirḗnē"]]},
+    {v:10,chap:8,text:"life",cid:"life",al:[["life","ζωή","zōḗ"]]}
+  ];
+  var seq=1;
+  VERSES.forEach(function(verse,i){ verse.idx=i; verse.marks=[]; });
+  function findVerse(v,chap){ return VERSES.find(function(x){ return x.v===v && x.chap===chap; }); }
+  SEED.forEach(function(s){
+    var verse=findVerse(s.v,s.chap); if(!verse) return;
+    var start=verse.t.indexOf(s.text); if(start<0) return; var end=start+s.text.length;
+    var aligns=(s.al||[]).map(function(a,k){ var w=a[0], i=verse.t.slice(start,end).indexOf(w); var as=i>=0?start+i:start; return { id:"a"+(seq)+"_"+k, s:as, e:as+w.length, grc:a[1], tl:a[2] }; });
+    verse.marks.push({ id:"m"+(seq++), cid:s.cid, start:start, end:end, aligns:aligns });
+  });
+
+  // ---------- render ----------
+  function renderMark(verse,m){
+    var t=verse.t, inner="", cur=m.start;
+    (m.aligns||[]).slice().sort(function(a,b){return a.s-b.s;}).forEach(function(a){
+      if(a.s<cur) return; inner+=esc(t.slice(cur,a.s));
+      inner+='<span class="al" data-alid="'+a.id+'">'+esc(t.slice(a.s,a.e))+'<span class="ruby"><span class="g">'+a.grc+'</span> '+a.tl+'</span></span>'; cur=a.e;
+    });
+    inner+=esc(t.slice(cur,m.end));
+    var c=m.cid?C(m.cid):null, color=c?c.color:"var(--neutral)";
+    return '<mark class="cm'+(m.id===activeMarkId?" active":"")+'" data-id="'+m.id+'" data-c="'+(m.cid||"")+'" style="--c:'+color+'">'+inner+'</mark>';
+  }
+  function renderVerse(verse){
+    var t=verse.t, marks=verse.marks.slice().sort(function(a,b){return a.start-b.start;}), out="", cur=0;
+    marks.forEach(function(m){ if(m.start<cur) return; out+=esc(t.slice(cur,m.start)); out+=renderMark(verse,m); cur=m.end; });
+    out+=esc(t.slice(cur));
+    if(verse.opening){ out='<span class="versal">'+out.charAt(0)+'</span>'+out.slice(1); }
+    var vn=verse.opening?"":'<span class="vn">'+verse.v+'</span>';
+    var als=[]; verse.marks.forEach(function(m){ (m.aligns||[]).forEach(function(a){ als.push(a); }); });
+    var il=als.length?'<span class="interlin">'+als.sort(function(a,b){return a.s-b.s;}).map(function(a){ return '<button type="button" class="gk" data-alid="'+a.id+'"><span class="grc">'+a.grc+'</span> '+a.tl+'</button>'; }).join("")+'</span>':"";
+    var cls="v"+(verse.chapStart?" chap-start":""); var chap=verse.chapStart?' data-chap="'+verse.chap+'"':"";
+    return '<span class="'+cls+'" data-idx="'+verse.idx+'"'+chap+'>'+vn+out+il+'</span> ';
+  }
+  function renderChapter(){ $("#vflow").innerHTML=VERSES.map(renderVerse).join(""); applyColors(); positionHandles(); }
+  function applyColors(){ $$(".cm").forEach(function(el){ var c=el.getAttribute("data-c")?C(el.getAttribute("data-c")):null; el.style.setProperty("--c", c?c.color:"var(--neutral)"); el.classList.toggle("on", selected.has(el.getAttribute("data-c"))); }); }
+
+  // ---------- offset mapping ----------
+  function plainOffset(verseEl, node, offset){
+    var w=document.createTreeWalker(verseEl, NodeFilter.SHOW_TEXT, { acceptNode:function(n){ var p=n.parentElement; return (p.closest(".vn")||p.closest(".ruby")||p.closest(".interlin"))?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT; } });
+    var total=0, tn; while((tn=w.nextNode())){ if(tn===node) return total+offset; total+=tn.nodeValue.length; }
+    return total;
+  }
+  function snapStart(t,o){ o=Math.max(0,Math.min(t.length,o)); while(o>0 && /\S/.test(t[o-1])) o--; return o; }
+  function snapEnd(t,o){ o=Math.max(0,Math.min(t.length,o)); while(o<t.length && /\S/.test(t[o])) o++; return o; }
+  function verseElOf(node){ var el=node.nodeType===3?node.parentElement:node; return el&&el.closest?el.closest(".v"):null; }
+  function verseFromEl(el){ return VERSES[+el.getAttribute("data-idx")]; }
+
+  // ---------- selection + popup ----------
+  var COARSE=!!(window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
+  var pendingSel=null, assignMode=false;
+  function getSelInfo(){
+    var sel=window.getSelection(); if(!sel||sel.isCollapsed) return null;
+    if(sel.toString().trim().length<2) return null;
+    var range=sel.getRangeAt(0), sv=verseElOf(range.startContainer), ev=verseElOf(range.endContainer);
+    if(!sv||sv!==ev) return null;
+    var verse=verseFromEl(sv);
+    var s=snapStart(verse.t, plainOffset(sv,range.startContainer,range.startOffset));
+    var e=snapEnd(verse.t, plainOffset(sv,range.endContainer,range.endOffset));
+    if(e<=s) return null;
+    return { verse:verse, s:s, e:e, rect:range.getBoundingClientRect() };
+  }
+  function onSelect(){
+    if(assignMode) return;
+    var info=getSelInfo();
+    if(!info){ return; }
+    pendingSel={ verse:info.verse, s:info.s, e:info.e };
+    showPopup(info.rect);
+  }
+  function showPopup(rect){
+    var pop=$("#pop"); pop.classList.add("show");
+    var pw=pop.offsetWidth||260, ph=pop.offsetHeight||48;
+    var left=rect.left, top=rect.bottom+8;
+    if(left+pw>window.innerWidth-12) left=window.innerWidth-pw-12; if(left<12) left=12;
+    if(top+ph>window.innerHeight-12) top=Math.max(12, rect.top-ph-8);
+    pop.style.left=left+"px"; pop.style.top=top+"px";
+  }
+  function hidePopup(){ $("#pop").classList.remove("show"); }
+  function clearPending(){ pendingSel=null; assignMode=false; hidePopup(); var s=window.getSelection(); if(s) s.removeAllRanges(); renderPanel(); }
+
+  function createMark(cid){
+    if(!pendingSel) return;
+    var verse=pendingSel.verse, id="m"+(seq++);
+    verse.marks.push({ id:id, cid:cid, start:pendingSel.s, end:pendingSel.e, aligns:[] });
+    activeMarkId=id; if(cid){ selected.add(cid); lastActive=cid; }
+    pendingSel=null; assignMode=false; hidePopup();
+    var s=window.getSelection(); if(s) s.removeAllRanges();
+    renderChapter(); refresh(); positionHandles();
+    flash(cid?("Marked as "+C(cid).name):"Highlighted — drag the gold handles to adjust");
+  }
+
+  // ---------- handles ----------
+  var activeMarkId=null;
+  function findMark(id){ for(var i=0;i<VERSES.length;i++){ var m=VERSES[i].marks.find(function(x){return x.id===id;}); if(m) return { mark:m, verse:VERSES[i] }; } return null; }
+  function positionHandles(){
+    var hs=$("#hStart"), he=$("#hEnd");
+    if(!activeMarkId){ hs.classList.remove("show"); he.classList.remove("show"); return; }
+    var el=$('.cm[data-id="'+activeMarkId+'"]'); if(!el){ hs.classList.remove("show"); he.classList.remove("show"); return; }
+    var rects=el.getClientRects(); if(!rects.length){ hs.classList.remove("show"); he.classList.remove("show"); return; }
+    var f=rects[0], l=rects[rects.length-1];
+    hs.classList.add("show"); hs.style.left=f.left+"px"; hs.style.top=f.top+"px"; hs.style.height=f.height+"px";
+    he.classList.add("show"); he.style.left=l.right+"px"; he.style.top=l.top+"px"; he.style.height=l.height+"px";
+  }
+  function caretInfo(x,y){ if(document.caretRangeFromPoint){ var r=document.caretRangeFromPoint(x,y); return r?{node:r.startContainer,offset:r.startOffset}:null; } if(document.caretPositionFromPoint){ var p=document.caretPositionFromPoint(x,y); return p?{node:p.offsetNode,offset:p.offset}:null; } return null; }
+  function dragHandle(which,x,y){
+    var fm=findMark(activeMarkId); if(!fm) return;
+    var vEl=$('.v[data-idx="'+fm.verse.idx+'"]'); if(!vEl) return;
+    var ci=caretInfo(x,y); if(!ci||!vEl.contains(ci.node)) return;
+    var off=plainOffset(vEl,ci.node,ci.offset), t=fm.verse.t;
+    if(which==="start"){ var ns=snapStart(t,off); if(ns<fm.mark.end) fm.mark.start=ns; }
+    else { var ne=snapEnd(t,off); if(ne>fm.mark.start) fm.mark.end=ne; }
+    renderChapter();
+  }
+  function bindHandle(el,which){
+    el.addEventListener("pointerdown",function(e){ e.preventDefault(); el.setPointerCapture(e.pointerId);
+      var mv=function(ev){ dragHandle(which,ev.clientX,ev.clientY); };
+      var up=function(){ try{el.releasePointerCapture(e.pointerId);}catch(_){} document.removeEventListener("pointermove",mv); document.removeEventListener("pointerup",up); };
+      document.addEventListener("pointermove",mv); document.addEventListener("pointerup",up);
+    });
+  }
+  bindHandle($("#hStart"),"start"); bindHandle($("#hEnd"),"end");
+
+  // ---------- concept highlight (③) + panel ----------
+  var selected=new Set(), lastActive=null, editing=false;
+  function clearActive(){ activeMarkId=null; positionHandles(); }
+  function refresh(){
+    document.body.classList.toggle("has-sel", selected.size>0 || !!activeMarkId);
+    applyColors();
+    renderList(); if(!editing) renderPanel();
+    var cs=$("#clearSel"); if(cs) cs.hidden = (selected.size===0 && !activeMarkId);
+  }
+  function toggleConcept(id){ if(selected.has(id)){ selected.delete(id); if(lastActive===id){ var a=Array.from(selected); lastActive=a.length?a[a.length-1]:null; } } else { selected.add(id); lastActive=id; } refresh(); }
+  function clearSel(){ selected.clear(); lastActive=null; clearActive(); refresh(); }
+  function phrasesFor(id){
+    var out=[]; VERSES.forEach(function(verse){ verse.marks.forEach(function(m){ if(m.cid===id){ out.push({ text:verse.t.slice(m.start,m.end), v:verse.v, chap:verse.chap, words:(m.aligns||[]).map(function(a){return {grc:a.grc,tl:a.tl};}) }); } }); }); return out;
+  }
+  function renderList(){
+    var box=$("#clist"); box.innerHTML="";
+    var q=(($("#conceptSearch")&&$("#conceptSearch").value)||"").toLowerCase();
+    var rows=CONCEPTS.filter(function(c){ return !q || c.name.toLowerCase().indexOf(q)>=0; });
+    if(!rows.length){ box.innerHTML='<div style="color:var(--faint);font-size:.8rem;padding:.4rem .55rem">No match for “'+esc(q)+'”.</div>'; return; }
+    rows.forEach(function(c){
+      var n=phrasesFor(c.id).length;
+      var b=document.createElement("button"); b.className="citem"+(selected.has(c.id)?" sel":"");
+      b.innerHTML='<span class="siglum" style="background:'+c.color+'"></span><span class="nm">'+esc(c.name)+'</span><span class="pol">'+c.pol+'</span><span class="ct">'+n+'</span>';
+      b.addEventListener("click",function(e){ e.stopPropagation(); toggleConcept(c.id); });
+      box.appendChild(b);
+    });
+  }
+  function renderPanel(){
+    var host=$("#detailHost");
+    if(assignMode && pendingSel){ renderAssign(host); return; }
+    if(activeMarkId){ var fm=findMark(activeMarkId); if(fm){ renderMarkCtx(host, fm); return; } }
+    if(selected.size && lastActive){ renderConcept(host, lastActive); return; }
+    host.innerHTML="";
+  }
+  function renderAssign(host){
+    var txt=pendingSel.verse.t.slice(pendingSel.s, pendingSel.e);
+    var q="";
+    host.innerHTML='<div class="detail"><div class="ctxlabel">Mark <span class="ph">“'+esc(txt)+'”</span> as:</div>'+
+      '<input class="csearch" id="assignSearch" placeholder="Find a concept…" autocomplete="off">'+
+      '<div class="clist" id="assignList"></div>'+
+      '<button class="addc" id="assignNew">+ Create new concept</button>'+
+      '<div class="acts"><button id="assignCancel">Cancel</button></div></div>';
+    function drawList(){
+      var qq=($("#assignSearch").value||"").toLowerCase();
+      var box=$("#assignList"); box.innerHTML="";
+      CONCEPTS.filter(function(c){return !qq||c.name.toLowerCase().indexOf(qq)>=0;}).forEach(function(c){
+        var b=document.createElement("button"); b.className="citem";
+        b.innerHTML='<span class="siglum" style="background:'+c.color+'"></span><span class="nm">'+esc(c.name)+'</span><span class="pol">'+c.pol+'</span>';
+        b.addEventListener("click",function(){ createMark(c.id); });
+        box.appendChild(b);
+      });
+    }
+    drawList();
+    $("#assignSearch").addEventListener("input",drawList);
+    setTimeout(function(){ var el=$("#assignSearch"); if(el) el.focus(); },20);
+    $("#assignNew").addEventListener("click",function(){ openEdit(null, true); });
+    $("#assignCancel").addEventListener("click",function(){ clearPending(); });
+  }
+  function renderMarkCtx(host, fm){
+    var m=fm.mark, txt=fm.verse.t.slice(m.start,m.end), c=m.cid?C(m.cid):null;
+    var head = c ? '<div class="top"><span class="swab" style="background:'+c.color+'"></span><span class="nm">'+esc(c.name)+'</span></div><div class="meta"><b>'+polLabel(c.pol)+'</b>'+(c.opp?' · opposite of <b>'+esc(c.opp)+'</b>':'')+'</div>' : '<div class="ctxlabel">Plain highlight — not tied to a concept.</div>';
+    host.innerHTML='<div class="detail">'+head+
+      '<div class="seclabel">Selected phrase</div><span class="ph" style="display:block;font-family:var(--read);font-style:italic">“'+esc(txt)+'”</span>'+
+      '<div class="acts">'+(c?'<button id="mEdit">✎ Edit concept</button>':'')+'<button id="mChange">'+(c?"Change concept":"Assign concept")+'</button><button class="danger" id="mRemove">Remove mark</button></div>'+
+      '<div class="hnote">Drag the gold handles in the text to resize this selection (snaps to whole words).</div></div>';
+    if(c) $("#mEdit").addEventListener("click",function(){ openEdit(m.cid); });
+    $("#mChange").addEventListener("click",function(){ pendingSel={verse:fm.verse,s:m.start,e:m.end}; assignMode=true; activeMarkId=null; renderPanel(); positionHandles(); });
+    $("#mRemove").addEventListener("click",function(){ fm.verse.marks=fm.verse.marks.filter(function(x){return x.id!==m.id;}); clearActive(); renderChapter(); refresh(); });
+  }
+  function renderConcept(host, id){
+    var c=C(id), ph=phrasesFor(id);
+    var multi=selected.size>1?'<div class="multi">'+selected.size+' concepts selected · showing '+esc(c.name)+'</div>':'';
+    host.innerHTML='<div class="detail">'+multi+'<div class="top"><span class="swab" style="background:'+c.color+'"></span><span class="nm">'+esc(c.name)+'</span></div>'+
+      '<div class="meta"><b>'+polLabel(c.pol)+'</b>'+(c.opp?' · opposite of <b>'+esc(c.opp)+'</b>':'')+'</div>'+
+      '<div class="seclabel">Marked here ('+ph.length+')</div><div class="phrases">'+
+      (ph.length?ph.map(function(p){ var gl=p.words.length?'<span class="gloss">'+p.words.map(function(w){return '<span class="g">'+w.grc+'</span> '+w.tl;}).join(" · ")+'</span>':''; return '<span class="ph">“'+esc(p.text)+'” <span class="where">'+p.chap+':'+p.v+'</span>'+gl+'</span>'; }).join(""):'<span class="ph" style="font-style:normal;color:var(--faint)">No marks here yet.</span>')+
+      '</div><div class="occ">Appears in <b>'+c.corpus+'</b> verses across the corpus <span style="color:var(--faint)">· illustrative</span></div>'+
+      '<div class="acts"><button id="dEdit">✎ Edit concept</button><button id="dDesel">Deselect</button></div></div>';
+    $("#dDesel").addEventListener("click",function(){ toggleConcept(id); });
+    $("#dEdit").addEventListener("click",function(){ openEdit(id); });
+  }
+
+  // ---------- edit concept + opposite ----------
+  function swatches(cur,cls){ return PALETTE.map(function(h){ return '<button type="button" class="swatch '+cls+(h.toLowerCase()===(cur||"").toLowerCase()?" sel":"")+'" data-h="'+h+'" style="background:'+h+'"></button>'; }).join(""); }
+  function openEdit(id, fromAssign){
+    editing=true; var host=$("#detailHost"), isNew=!id, c=isNew?null:C(id);
+    var f={ name:isNew?"":c.name, color:isNew?PALETTE[0]:c.color, pol:isNew?"+":(c.pol||"+"),
+            opp:isNew?"":(c.opp||""), oppColor:isNew?PALETTE[1]:(c.oppColor||PALETTE[1]), hasOpp:(!isNew && !!(c.opp&&c.opp.trim())) };
+    function polseg(){ return ["+","−","±"].map(function(p){ var lab=p==="+"?"Positive":p==="−"?"Negative":"Neutral"; return '<button type="button" class="pbtn'+(p===f.pol?" on":"")+'" data-p="'+p+'">'+lab+'</button>'; }).join(""); }
+    function draw(){
+      var opp = f.hasOpp
+        ? '<div class="axis">↕</div><div class="pole neg"><div class="poletag">Opposite <button type="button" class="rmopp" id="rmOpp">remove</button></div><div class="lab">Name</div><input type="text" class="onm" value="'+f.opp.replace(/"/g,"&quot;")+'" placeholder="e.g. Despair"><div class="lab">Color</div><div class="swatches">'+swatches(f.oppColor,"o")+'</div></div>'
+        : '<button type="button" class="addopp" id="addOpp">+ Add an opposite (optional)</button>';
+      host.innerHTML='<div class="editc"><h3>'+(isNew?"New concept":"Edit concept")+'</h3>'+
+        '<div class="pole pos"><div class="poletag">Concept</div><div class="lab">Name</div><input type="text" class="enm" value="'+f.name.replace(/"/g,"&quot;")+'" placeholder="e.g. Hope"><div class="lab">Color</div><div class="swatches">'+swatches(f.color,"c")+'</div><div class="lab">Polarity</div><div class="polrow">'+polseg()+'</div></div>'+
+        opp+
+        '<div class="save"><button class="go">'+(isNew?"Create concept":"Save")+'</button><button class="cancel">Cancel</button></div></div>';
+      $$(".swatch.c",host).forEach(function(b){ b.addEventListener("click",function(){ f.color=b.getAttribute("data-h"); draw(); }); });
+      $$(".swatch.o",host).forEach(function(b){ b.addEventListener("click",function(){ f.oppColor=b.getAttribute("data-h"); draw(); }); });
+      $$(".pbtn",host).forEach(function(b){ b.addEventListener("click",function(){ f.pol=b.getAttribute("data-p"); draw(); }); });
+      $(".enm",host).addEventListener("input",function(){ f.name=this.value; });
+      var onm=$(".onm",host); if(onm) onm.addEventListener("input",function(){ f.opp=this.value; });
+      var ao=$("#addOpp",host); if(ao) ao.addEventListener("click",function(){ f.hasOpp=true; draw(); });
+      var ro=$("#rmOpp",host); if(ro) ro.addEventListener("click",function(){ f.hasOpp=false; f.opp=""; draw(); });
+      $(".go",host).addEventListener("click",function(){ saveEdit(id,isNew,f,fromAssign); });
+      $(".cancel",host).addEventListener("click",function(){ editing=false; renderPanel(); });
+    }
+    draw();
+  }
+  function saveEdit(id,isNew,f,fromAssign){
+    var theId;
+    if(isNew){ theId="c"+(seq++)+"_"+(f.name||"x").toLowerCase().replace(/\W+/g,""); CONCEPTS.push({id:theId,name:f.name||"Untitled",color:f.color,pol:f.pol,opp:f.hasOpp?f.opp:"",oppColor:f.hasOpp?f.oppColor:null,corpus:0}); }
+    else { var c=C(id); c.name=f.name||c.name; c.color=f.color; c.pol=f.pol;
+      if(f.hasOpp){ c.opp=f.opp; c.oppColor=f.oppColor; var oc=CONCEPTS.find(function(x){return x.id!==id && x.name.toLowerCase()===(f.opp||"").toLowerCase();}); if(oc){ oc.color=f.oppColor; oc.opp=c.name; oc.oppColor=c.color; } }
+      else { c.opp=""; c.oppColor=null; } theId=id; }
+    editing=false;
+    if(fromAssign && pendingSel){ createMark(theId); }
+    else { renderChapter(); refresh(); }
+  }
+  function polLabel(p){ return p==="+"?"Positive":p==="−"?"Negative":"Neutral"; }
+
+  // ---------- delegated clicks in the text ----------
+  $("#vflow").addEventListener("click",function(e){
+    var chip=e.target.closest(".gk");
+    if(chip){ var al=$('.al[data-alid="'+chip.getAttribute("data-alid")+'"]'); if(al){ pulse(al); var mk=al.closest(".cm"); if(mk && mk.getAttribute("data-c")) addConcept(mk.getAttribute("data-c")); } return; }
+    var ruby=e.target.closest(".ruby");
+    if(ruby){ e.stopPropagation(); var al2=ruby.closest(".al"); if(al2){ pulse(al2); var mk2=al2.closest(".cm"); if(mk2 && mk2.getAttribute("data-c")) addConcept(mk2.getAttribute("data-c")); } return; }
+    var cm=e.target.closest(".cm");
+    if(cm){ e.stopPropagation(); activeMarkId=cm.getAttribute("data-id"); var cid=cm.getAttribute("data-c"); if(cid){ if(!selected.has(cid)){ selected.add(cid); } lastActive=cid; } renderChapter(); refresh(); positionHandles(); }
+  });
+  function pulse(al){ al.classList.remove("pulse"); void al.offsetWidth; al.classList.add("pulse"); if(al.scrollIntoView) al.scrollIntoView({block:"center",behavior:"smooth"}); setTimeout(function(){ al.classList.remove("pulse"); },1000); }
+  function addConcept(id){ selected.add(id); lastActive=id; refresh(); }
+
+  // ---------- popup buttons ----------
+  $("#popMark").addEventListener("click",function(e){ e.stopPropagation(); if(!pendingSel) return; assignMode=true; hidePopup(); renderPanel(); });
+  $("#popPlain").addEventListener("click",function(e){ e.stopPropagation(); createMark(null); });
+  $("#popCancel").addEventListener("click",function(e){ e.stopPropagation(); clearPending(); });
+
+  // ---------- selection triggers + dismissal ----------
+  if(COARSE){ var sct; document.addEventListener("selectionchange",function(){ clearTimeout(sct); sct=setTimeout(onSelect,360); }); }
+  document.addEventListener("mouseup",function(e){ if(COARSE) return; if(e.target.closest("#pop")||e.target.closest(".apparatus")) return; setTimeout(onSelect,1); });
+  // dismissal: click off the popup / off the selection clears it (state ①); also clears concept highlight (state ③)
+  document.addEventListener("mousedown",function(e){
+    if(e.target.closest("#pop")||e.target.closest(".apparatus")||e.target.closest(".masthead")||e.target.closest("#devbar")||e.target.closest(".handle")) return;
+    if(pendingSel && !assignMode && !e.target.closest("#vflow")){ clearPending(); }
+  });
+  document.addEventListener("click",function(e){
+    if(e.target.closest("#pop")||e.target.closest(".apparatus")||e.target.closest(".masthead")||e.target.closest("#devbar")||e.target.closest(".cm")||e.target.closest(".handle")) return;
+    if(selected.size||activeMarkId){ clearSel(); }
+  });
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(pendingSel){ clearPending(); } else if(selected.size||activeMarkId){ clearSel(); } else if(editing){ editing=false; renderPanel(); } } });
+
+  // ---------- hint ----------
+  var ht; function flash(msg){ var h=$("#hint"); h.textContent=msg; h.classList.add("show"); clearTimeout(ht); ht=setTimeout(function(){ h.classList.remove("show"); },2200); }
+
+  // ---------- controls ----------
+  $("#clearSel").addEventListener("click",function(e){ e.stopPropagation(); clearSel(); });
+  $("#conceptSearch").addEventListener("input", renderList);
+  $("#addc").addEventListener("click",function(){ clearActive(); selected.clear(); lastActive=null; openEdit(null); });
+  document.body.classList.add("mode-versed");
+  $$("#modeSeg button").forEach(function(b){ b.addEventListener("click",function(){ $$("#modeSeg button").forEach(function(x){x.classList.remove("on");}); b.classList.add("on"); document.body.classList.remove("mode-continuous","mode-versed"); document.body.classList.add("mode-"+b.getAttribute("data-mode")); positionHandles(); }); });
+  $("#grkBtn").addEventListener("click",function(){ var on=document.body.classList.toggle("greek-on"); this.classList.toggle("on",on); positionHandles(); });
+
+  (function(){ var sel=$("#chapSel"); for(var i=1;i<=16;i++){ var o=document.createElement("option"); o.value=i; o.textContent=i; if(i===8)o.selected=true; sel.appendChild(o); }
+    var rd=$("#reader");
+    sel.addEventListener("change",function(){ if(this.value==="9"){ var cs=$(".chap-start"); if(cs) cs.scrollIntoView({behavior:"smooth",block:"start"}); } else { rd.scrollTo({top:0,behavior:"smooth"}); } });
+    rd.addEventListener("scroll",function(){ var cs=$(".chap-start"), ch=8; if(cs && (cs.getBoundingClientRect().top - rd.getBoundingClientRect().top)<90) ch=9; if(sel.value!==String(ch)) sel.value=ch; positionHandles(); hidePopup(); });
+  })();
+
+  // ---------- iPad preview ----------
+  var orient="portrait";
+  function fitDevice(){ if(!document.body.classList.contains("dev")) return; var dw=orient==="portrait"?1032:1376, dh=orient==="portrait"?1376:1032; document.documentElement.style.setProperty("--dw",dw+"px"); document.documentElement.style.setProperty("--dh",dh+"px"); var dev=$("#device"); dev.style.transform="none"; var rect=dev.getBoundingClientRect(); var k=Math.min((window.innerWidth-48)/rect.width,(window.innerHeight-110)/rect.height,1); dev.style.transform="scale("+k+")"; }
+  $("#ipadBtn").addEventListener("click",function(){ document.body.classList.add("dev"); fitDevice(); });
+  $("#exitBtn").addEventListener("click",function(){ document.body.classList.remove("dev"); $("#device").style.transform="none"; });
+  $("#rotateBtn").addEventListener("click",function(){ orient=orient==="portrait"?"landscape":"portrait"; fitDevice(); });
+  window.addEventListener("resize",function(){ fitDevice(); positionHandles(); });
+
+  // ---------- init ----------
+  renderChapter(); refresh();
+  setTimeout(function(){ flash("Select any phrase to mark it · drag the gold handles to resize"); },500);
+})();
+</script>

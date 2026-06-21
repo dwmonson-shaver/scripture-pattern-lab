@@ -1726,3 +1726,21 @@
 - Confidence: High.
 - Made-by: Slice 1 orchestration 2026-06-20 [autopilot; low-stakes].
 - Cross-refs: DEC-142, web/THEME.md, DEC-081.
+
+## DEC-151 — "Opposite" is a relationship (a connection type), not a property of a concept
+- Status: Accepted (design); implementation OWED.
+- Question: When you create or edit a concept, is its "opposite" an intrinsic field of the concept, or a relationship between two concepts?
+- Decision: A concept is **standalone** (name, color, polarity). The **opposite is a relationship between two concepts** — specifically the `opposite` **connection type** (DEC-131), which earns an **axis** once it accrues evidence (DEC-133). Creating a concept NEVER auto-creates an opposite. The Slice-1 concept-edit screen offers an **optional "add opposite"** as the lightweight UX seed of that opposite-connection; it is a convenience, not a second source of truth, and must migrate into / stay consistent with the Slice-2 connection model.
+- Rationale: Keeps the node/edge model clean (concepts = nodes; opposite = edge); prevents forcing a standalone concept into a pair; aligns the Slice-1 seed with the Slice-2 connection/axis architecture.
+- Confidence: High.
+- Made-by: design conversation 2026-06-21 [human-directed].
+- Cross-refs: DEC-130, DEC-131, DEC-133.
+
+## DEC-152 — Study-edition parchment identity is the reader's visual spec (supersedes DEC-150's palette ruling)
+- Status: Accepted (design); implementation OWED (reader alignment).
+- Question: DEC-150 mapped the interaction grammar onto the dark Vuetify theme and kept the parchment palette out. After eight design-reference iterations the user explicitly approved the parchment "study edition" identity as the target for the real reader. Which wins?
+- Decision: Adopt the **study-edition identity** as the reader's theme — warm rag-paper ground (#EBE1CE family), oak-gall ink (#2B2722), manuscript rubric (#9C2A23) + gilt (#A07E2A) accents, a literary serif for scripture / sans for chrome, multiply-blend marker-stroke concept highlights, and the illuminated chapter opening. Redefine the reader's semantic theme tokens and `web/THEME.md` to this palette. The DEC-150 interaction grammar is unchanged; only its palette ruling is superseded. Per the precedence rule (user's explicit words > prior autonomous design decision), the user's repeated approval governs. Concept colors remain content (`authored_color`) layered over the parchment chrome.
+- Reference: `docs/design/reader-reference.html` — the approved visual + interaction spec (v8 of the design reference).
+- Confidence: High.
+- Made-by: design conversation 2026-06-21 [human-directed].
+- Cross-refs: DEC-150 (superseded re palette), DEC-142, DEC-149, web/THEME.md.
