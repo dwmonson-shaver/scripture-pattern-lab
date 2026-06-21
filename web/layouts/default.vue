@@ -12,7 +12,7 @@ const { isDark, toggle } = useThemeToggle()
         <v-btn
           variant="text"
           :icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
-          :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+          :aria-label="isDark ? 'Switch to parchment mode' : 'Switch to dark mode'"
           @click="toggle"
         />
       </template>

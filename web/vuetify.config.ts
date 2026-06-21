@@ -1,12 +1,47 @@
 import { defineVuetifyConfiguration } from 'vuetify-nuxt-module/custom-configuration'
 
-// Dark-default palette derived from pattern-mapping template. Slice J1 keeps
-// this as-is; a scripture-research-appropriate rebrand is deferred to a
-// follow-on polish slice (tracked in design-slice-j1 OQ-J1-5).
+// Study-edition parchment identity (DEC-152). The reader's visual spec is
+// docs/design/reader-reference.html (v8, approved). Semantic tokens are kept;
+// their VALUES are redefined to the parchment palette:
+//   ground  #EBE1CE  · ground-2 #E2D6BD · panel #F3ECDB · card #FBF6EA
+//   ink     #2B2722  · rubric   #9C2A23 · gilt  #A07E2A · hairline #C9BC9F
+// Concept colors stay CONTENT (authored_color, inline) — never theme tokens.
+// The dark theme is retained for the accessibility toggle / the rest of the
+// app, but parchment is the default and the reader's identity.
 export default defineVuetifyConfiguration({
   theme: {
-    defaultTheme: 'dark',
+    defaultTheme: 'parchment',
     themes: {
+      // --- Reader identity: warm rag-paper study edition (default) ---
+      parchment: {
+        dark: false,
+        colors: {
+          background: '#EBE1CE', // rag-paper ground
+          surface: '#FBF6EA', // card / illuminated leaf
+          'surface-bright': '#FBF6EA',
+          'surface-light': '#F3ECDB',
+          'surface-variant': '#F3ECDB', // apparatus panel
+          primary: '#9C2A23', // manuscript rubric red — verse nums, book label, primary actions
+          secondary: '#A07E2A', // gilt — rules, handles, accents
+          accent: '#A07E2A',
+          error: '#9C2A23', // rubric doubles as danger
+          info: '#557A8C',
+          success: '#5E9A45',
+          warning: '#A07E2A',
+          'on-background': '#2B2722', // oak-gall ink
+          'on-surface': '#2B2722',
+          'on-surface-variant': '#6B6152', // soft ink for secondary text
+          'on-primary': '#FBF6EA',
+          'on-secondary': '#2B2722',
+        },
+        variables: {
+          'border-color': '#C9BC9F', // hairline
+          'border-opacity': 1,
+          'high-emphasis-opacity': 1,
+          'medium-emphasis-opacity': 0.74,
+        },
+      },
+      // --- Retained dark theme for the toggle / rest of the app ---
       dark: {
         dark: true,
         colors: {
@@ -26,25 +61,6 @@ export default defineVuetifyConfiguration({
           'on-surface': '#e8edf5',
           'on-primary': '#ffffff',
           'on-secondary': '#0a1628',
-        },
-      },
-      light: {
-        dark: false,
-        colors: {
-          background: '#fafafa',
-          surface: '#ffffff',
-          'surface-bright': '#f4f6fb',
-          'surface-light': '#f4f6fb',
-          'surface-variant': '#e6ecf5',
-          primary: '#1d6dff',
-          secondary: '#5b6b85',
-          accent: '#8b5cf6',
-          error: '#dc2626',
-          info: '#3b82f6',
-          success: '#16a34a',
-          warning: '#d97706',
-          'on-background': '#0a1628',
-          'on-surface': '#0a1628',
         },
       },
     },

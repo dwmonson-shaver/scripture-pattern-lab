@@ -20,3 +20,26 @@
 .text-grc {
   font-family: 'SBL Greek', 'Times New Roman', serif;
 }
+
+/* Study-edition reader identity (DEC-152). These families are the scripture
+ * serif / display / Greek faces the reader uses BEYOND Vuetify's chrome sans.
+ * They are constant across the light/dark toggle — the scripture face does
+ * not change with the accessibility theme. Concept colors stay inline content;
+ * these are typography only. */
+:root {
+  --font-read: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Hoefler Text', Georgia, serif;
+  --font-display: 'Hoefler Text', 'Big Caslon', 'Iowan Old Style', Palatino, Georgia, serif;
+  --font-grc: 'SBL Greek', 'Palatino Linotype', Palatino, 'Times New Roman', serif;
+  --reader-measure: 34rem;
+}
+
+/* Parchment grain ground. Applied only under the parchment theme so the dark
+ * theme keeps a flat background. Vuetify sets the theme class on the <html>
+ * element (v-theme--parchment). The radial highlight + monochrome turbulence
+ * SVG matches the approved reference's paper texture. */
+.v-theme--parchment {
+  background-image:
+    radial-gradient(130% 90% at 50% -15%, rgba(255, 251, 240, 0.7), transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-attachment: fixed;
+}

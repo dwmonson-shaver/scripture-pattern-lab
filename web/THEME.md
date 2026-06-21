@@ -1,191 +1,143 @@
 # Theme + color guide
 
-This project uses Vuetify 3's theme system. Every UI **must** work in both light and dark mode without manual styling per theme. This file is the canonical reference for the color classes / props / CSS variables to use.
+This project uses Vuetify 3's theme system. Two named themes ship:
 
-The short version lives in `CLAUDE.md`. This doc has the worked examples.
+- **`parchment`** — the reader's study-edition identity and the **default** theme
+  (DEC-152). Warm rag-paper ground, oak-gall ink, manuscript rubric + gilt accents,
+  a literary serif for scripture and a sans for chrome.
+- **`dark`** — the retained alternate (accessibility toggle / the rest of the app).
+
+Every UI **must** work in both themes without manual styling per theme. This file is the
+canonical reference for the color classes / props / CSS variables to use. The short
+version lives in `CLAUDE.md`. This doc has the worked examples.
 
 ---
 
-## How Vuetify theming works (~30s read)
+## The study-edition palette (DEC-152)
 
-- Two named themes (`light` + `dark`) are defined in `vuetify.config.ts`.
-- Each theme defines named colors: `primary`, `secondary`, `surface`, `surface-variant`, `error`, `success`, `warning`, `info`, plus auto-computed `on-X` colors (the contrasting text/icon color for each background).
-- Vuetify exposes those as:
-  - **Props on Vuetify components**: `<v-card color="primary">`, `<v-btn color="success">`
-  - **Utility classes**: `bg-primary`, `text-primary`, `text-on-primary`, `bg-surface-variant`, etc.
-  - **CSS variables**: `--v-theme-primary`, `--v-theme-on-primary`, etc.
-- The runtime active theme is picked by `useTheme().global.name.value` (toggled via the `useThemeToggle()` composable that's wired into the app's default layout).
+The approved visual spec is `docs/design/reader-reference.html` (v8). The reader's identity
+is the **parchment** theme. Its semantic tokens map to the manuscript palette:
+
+| Token | Parchment value | Meaning |
+|---|---|---|
+| `background` | `#EBE1CE` | rag-paper ground |
+| `surface` | `#FBF6EA` | card / illuminated leaf |
+| `surface-variant` | `#F3ECDB` | apparatus panel |
+| `surface-light` | `#F3ECDB` | secondary panel |
+| `on-surface` / `on-background` | `#2B2722` | oak-gall ink (body text) |
+| `on-surface-variant` | `#6B6152` | soft ink (secondary text) |
+| `primary` | `#9C2A23` | manuscript **rubric** red — verse numbers, book label, primary actions, danger |
+| `secondary` / `accent` | `#A07E2A` | **gilt** — the gilt rule, resize handles, accents |
+| `border-color` (variable) | `#C9BC9F` | hairline rules / dividers |
+
+**Rule of thumb:** in the reader, `primary` = rubric red and `secondary` = gilt. Use the
+semantic token, never the hex.
+
+### Typography: serif for scripture, sans for chrome
+
+Scripture text is set in a **literary serif**; all chrome (toolbar, panel labels, buttons)
+stays in the Vuetify **sans**. Three CSS custom properties are declared in
+`assets/styles/globals.css` (constant across both themes — the scripture face does not
+change with the accessibility toggle):
+
+```css
+font-family: var(--font-read);     /* scripture body — Iowan Old Style / Palatino / Georgia */
+font-family: var(--font-display);  /* chapter numeral, versal — Hoefler Text / Big Caslon */
+font-family: var(--font-grc);      /* Greek beside the SBL face — Palatino */
+```
+
+Polytonic Greek still uses `.text-grc` / `<GreekText>` (SBL Greek woff2). Use the
+`var(--font-grc)` stack only where SBL is paired with a Palatino fallback in the interlinear.
+
+### The grain ground
+
+`.v-theme--parchment` carries the paper texture (a radial highlight + a monochrome
+turbulence SVG, `background-attachment: fixed`). It is keyed off the theme class so the
+`dark` theme stays flat. Do not re-declare it per component.
+
+---
+
+## Concept colors are CONTENT, not chrome (DEC-146 / DEC-150 / DEC-152)
+
+A concept's `authored_color` is **user data**, not a theme token. It is the ONE place a raw
+hex renders — applied inline (`:style="{ '--c': c.authored_color }"` or
+`backgroundColor`), with a semantic-token fallback (`rgb(var(--v-theme-secondary))`) when a
+concept has no color. Concept marks blend over the parchment with **multiply**:
+
+```css
+.concept-mark {
+  background: color-mix(in srgb, var(--c) 38%, #fff);
+  mix-blend-mode: multiply;
+  border-bottom: 2.5px solid var(--c);
+}
+```
+
+Never promote `authored_color` to a theme token; never read it as evidence (DEC-146).
 
 ---
 
 ## Picking the right text color
 
-### Rule 1: Plain text on the default page background
+### Rule 1: Plain text on the page background
 
-Use no class. The default text color is theme-aware (`on-surface`).
-
-```vue
-<v-container>
-  <h2>Heading</h2>
-  <p>Paragraph text.</p>
-</v-container>
-```
-
-For lower-emphasis text:
-
-```vue
-<p class="text-medium-emphasis">Subtle helper text</p>
-<p class="text-disabled">Disabled text</p>
-```
+Use no class. The default text color is theme-aware (`on-surface` = oak-gall ink under
+parchment). For lower-emphasis text use `text-medium-emphasis`; for disabled, `text-disabled`.
 
 ### Rule 2: Text inside a colored container
 
-When the container has an explicit `color` prop, use the matching `text-on-X` class for any *manually-classed* text inside:
-
-```vue
-<v-card color="primary" class="pa-4">
-  <h3 class="text-on-primary">Title</h3>
-  <p class="text-on-primary">Body — contrasts with primary in BOTH themes.</p>
-</v-card>
-```
-
-Vuetify already applies `on-primary` as the default text color for content inside `<v-card color="primary">`, so usually you can skip the class:
-
-```vue
-<v-card color="primary" class="pa-4">
-  <h3>Title</h3>
-  <p>Body</p>
-</v-card>
-```
-
-The `text-on-primary` class is needed when:
-- You're styling a child manually via `class` or `style`
-- The child is a non-Vuetify element (`<div>`, `<span>`, custom component) that doesn't inherit the colorized context
+When a container has an explicit `color` prop, use the matching `text-on-X` class for any
+manually-classed text inside (`text-on-primary` inside `<v-card color="primary">`). Vuetify
+applies `on-primary` as the default content color, so you can usually skip the class.
 
 ### Rule 3: Backgrounds on plain elements
 
-If you must use a `<div>` (no Vuetify component fits), pair `bg-X` with `text-on-X`:
-
-```vue
-<div class="bg-surface-variant text-on-surface-variant pa-3 rounded">
-  This div looks right in both themes.
-</div>
-```
+Pair `bg-X` with `text-on-X`:
 
 | Use case | Background class | Text class |
 |---|---|---|
 | Default content panel | `bg-surface` | `text-on-surface` |
 | Elevated / secondary panel | `bg-surface-variant` | `text-on-surface-variant` |
-| Brand / call-to-action | `bg-primary` | `text-on-primary` |
-| Success state | `bg-success` | `text-on-success` |
-| Error state | `bg-error` | `text-on-error` |
-| Warning / caution | `bg-warning` | `text-on-warning` |
-| Info / neutral | `bg-info` | `text-on-info` |
+| Rubric / call-to-action | `bg-primary` | `text-on-primary` |
 
 ### Rule 4: Custom CSS (scoped styles)
 
-Use Vuetify's CSS variables. They update reactively when the theme changes.
-
-```vue
-<style scoped>
-.my-callout {
-  background: rgb(var(--v-theme-surface-variant));
-  color: rgb(var(--v-theme-on-surface-variant));
-  border: 1px solid rgb(var(--v-border-color));
-  border-radius: 8px;
-  padding: 16px;
-}
-.my-callout--primary {
-  background: rgb(var(--v-theme-primary));
-  color: rgb(var(--v-theme-on-primary));
-}
-</style>
-```
-
-Available variables:
-
-| Variable | Purpose |
-|---|---|
-| `--v-theme-primary` / `--v-theme-on-primary` | Brand color + contrasting text |
-| `--v-theme-secondary` / `--v-theme-on-secondary` | Secondary accent |
-| `--v-theme-surface` / `--v-theme-on-surface` | Default page background + text |
-| `--v-theme-surface-variant` / `--v-theme-on-surface-variant` | Elevated panel + text |
-| `--v-theme-success` / `--v-theme-on-success` | Success state |
-| `--v-theme-error` / `--v-theme-on-error` | Error state |
-| `--v-theme-warning` / `--v-theme-on-warning` | Warning state |
-| `--v-theme-info` / `--v-theme-on-info` | Info / neutral state |
-| `--v-border-color` | Hairline borders, dividers (semi-transparent) |
-
-For alpha-modulated colors: use the comma form so you can layer opacity:
+Use Vuetify's CSS variables — they update reactively with the theme:
 
 ```css
-.muted-overlay { background: rgba(var(--v-theme-primary), 0.1); }
+.my-rule {
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
+  border: 1px solid rgb(var(--v-border-color));
+}
+.gilt-rule { background: rgb(var(--v-theme-secondary)); }   /* gilt */
+.rubric    { color: rgb(var(--v-theme-primary)); }          /* rubric red */
 ```
+
+For alpha, use the comma form: `rgba(var(--v-theme-primary), 0.1)`.
 
 ---
 
 ## Anti-patterns — DO NOT USE
 
-### `text-white` / `text-black`
-
-These render the same color in BOTH themes — they don't adapt. White text on a light background = invisible.
-
-### Hardcoded colors in inline styles
-
-```vue
-<!-- WRONG: doesn't adapt -->
-<div style="background: white; color: black;">
-
-<!-- RIGHT -->
-<v-card>...</v-card>
-<!-- or -->
-<div class="bg-surface text-on-surface" style="border: 1px solid rgb(var(--v-border-color))">
-```
-
-### Hex colors in scoped CSS
-
-```css
-/* WRONG */
-.banner { background: #f3f4f6; color: #1f2937; }
-
-/* RIGHT */
-.banner {
-  background: rgb(var(--v-theme-surface-variant));
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-```
-
-### Tailwind-style classes
-
-Vuetify does NOT ship Tailwind. `text-gray-500`, `bg-red-100`, etc. resolve to nothing.
-
-### Setting `bg-X` without `text-on-X`
-
-```vue
-<!-- WRONG: text color drift in some theme -->
-<div class="bg-primary"><span>Hello</span></div>
-
-<!-- RIGHT -->
-<div class="bg-primary text-on-primary"><span>Hello</span></div>
-```
+- **`text-white` / `text-black`** — render the same in both themes; they don't adapt.
+- **Hardcoded hex in chrome** (inline styles or scoped CSS) — the ONLY sanctioned raw hex is
+  a concept's `authored_color` (content) and the parchment grain data-URI in `globals.css`.
+- **Tailwind classes** (`text-gray-500`, `bg-red-100`) — Vuetify ships no Tailwind.
+- **`bg-X` without `text-on-X`**.
 
 ---
 
 ## Source-language text
 
-Polytonic Greek text in citations uses the `.text-grc` class, which applies the self-hosted `SBL Greek` font:
-
-```vue
-<p>The flagship sequence is <span class="text-grc">πίστις > ἐλπίς > ἀγάπη</span>.</p>
-```
-
-The `<GreekText>` component wraps this idiom — prefer it for consistency:
+Polytonic Greek uses the `.text-grc` class (self-hosted SBL Greek), wrapped by `<GreekText>`:
 
 ```vue
 <p>The flagship sequence is <GreekText>πίστις > ἐλπίς > ἀγάπη</GreekText>.</p>
 ```
 
-A `.text-heb` class is declared in `assets/styles/globals.css` with `direction: rtl` and a system-font fallback. No Hebrew font ships in S1 (NT-only corpus); the hook exists so a future slice can drop in `SBLHebrew.woff2` without restructuring.
+`.text-heb` is declared with `direction: rtl` and a system fallback; no Hebrew font ships at
+S1 (NT-only corpus) — the hook lets a future slice drop in `SBLHebrew.woff2` without
+restructuring.
 
 ---
 
@@ -193,9 +145,10 @@ A `.text-heb` class is declared in `assets/styles/globals.css` with `direction: 
 
 Before considering a UI change complete:
 
-1. **Toggle the theme.** Click the light/dark toggle in the app header.
-2. **Scan every piece of text.** Check that contrast is adequate.
-3. **Scan every border / divider.** Should be visible but not loud.
-4. **Look for hard-coded colors** in the diff: `text-white`, `text-black`, `#hex`, `rgb()` literals, `bg-white`, named CSS colors. Replace them with the theme-aware equivalents above.
-
-If any test fails, the change isn't done — the fix is always one of the patterns in "Rule 1–4" above.
+1. **Toggle the theme** (sun/moon button in the header) — verify the change reads correctly
+   under both `parchment` and `dark`.
+2. **Scan every piece of text** for adequate contrast.
+3. **Scan every border / divider** — visible but not loud (hairline `--v-border-color`).
+4. **Grep the diff for hard-coded colors** — `text-white`, `text-black`, `#hex`, `rgb()`
+   literals, Tailwind classes. The only allowed raw color is concept `authored_color`
+   (content). Everything else uses the patterns in Rules 1–4.
