@@ -24,9 +24,10 @@ uv run uvicorn src.app.main:app --host 127.0.0.1 --port 8000 &
 BACK=$!
 trap 'echo; echo "Stopping servers..."; kill "$BACK" 2>/dev/null || true' EXIT INT TERM
 
-# Wait for the backend to answer /health (up to ~30s on a cold start).
+# Wait for the backend to come up (up to ~30s). Probe /openapi.json, which is
+# exempt from bearer auth (DEC-092) — /health is token-gated and would 401.
 for _ in $(seq 1 30); do
-  if curl -sf http://localhost:8000/health >/dev/null 2>&1; then break; fi
+  if curl -sf http://localhost:8000/openapi.json >/dev/null 2>&1; then break; fi
   sleep 1
 done
 
