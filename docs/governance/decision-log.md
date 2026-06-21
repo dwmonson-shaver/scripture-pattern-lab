@@ -1737,10 +1737,27 @@
 - Cross-refs: DEC-130, DEC-131, DEC-133.
 
 ## DEC-152 — Study-edition parchment identity is the reader's visual spec (supersedes DEC-150's palette ruling)
-- Status: Accepted (design); implementation OWED (reader alignment).
+- Status: Accepted + implemented (reader alignment, 2026-06-21; see DEC-153).
 - Question: DEC-150 mapped the interaction grammar onto the dark Vuetify theme and kept the parchment palette out. After eight design-reference iterations the user explicitly approved the parchment "study edition" identity as the target for the real reader. Which wins?
 - Decision: Adopt the **study-edition identity** as the reader's theme — warm rag-paper ground (#EBE1CE family), oak-gall ink (#2B2722), manuscript rubric (#9C2A23) + gilt (#A07E2A) accents, a literary serif for scripture / sans for chrome, multiply-blend marker-stroke concept highlights, and the illuminated chapter opening. Redefine the reader's semantic theme tokens and `web/THEME.md` to this palette. The DEC-150 interaction grammar is unchanged; only its palette ruling is superseded. Per the precedence rule (user's explicit words > prior autonomous design decision), the user's repeated approval governs. Concept colors remain content (`authored_color`) layered over the parchment chrome.
 - Reference: `docs/design/reader-reference.html` — the approved visual + interaction spec (v8 of the design reference).
 - Confidence: High.
 - Made-by: design conversation 2026-06-21 [human-directed].
 - Cross-refs: DEC-150 (superseded re palette), DEC-142, DEC-149, web/THEME.md.
+
+## DEC-153 — Reader alignment: parchment theme realization + scroll-spy partial + alignment-honesty + reader layout
+- Status: Accepted + implemented (reader alignment, 2026-06-21 — full web DoD green: lint:check + typecheck + vitest 189/189 + check:no-llm-sdk).
+- Question: How is DEC-152's study-edition identity realized against the existing dark-Vuetify Slice-1 reader without breaking the project's semantic-token discipline, and how are the spec interactions the current reader lacks (Versed/Continuous, scroll-spy chapter dropdown, multi-select highlight) implemented honestly given the read endpoint is verse-level only?
+- Decision (bundle of load-bearing realization calls, all autopilot per the orchestrator's build authorization):
+  (a) **Theme realization** — redefine the Vuetify theme VALUES to parchment and add a `parchment` theme as the DEFAULT (retain `dark` for the toggle); components keep styling via `rgb(var(--v-theme-*))`, so the token swap flips chrome for free. The study-edition extras tokens can't express — paper grain, scripture serif/display/Greek faces, the gilt ramp — live as `.v-theme--parchment` grain + `--font-read/--font-display/--font-grc` + `--gilt-hi/--gilt-lo` CSS custom properties in `globals.css`. `useThemeToggle` swaps `parchment↔dark`; the old `'light'` localStorage value falls through to the parchment default.
+  (b) **Concept marks** — the spec `.cm` multiply-blend marker stroke keyed off a `--c` custom property; `authored_color` renders inline as `--c` (the sole sanctioned raw-color render, DEC-146/150/152), the CSS does the tint + underline.
+  (c) **Alignment honesty** (charter) — the read endpoint returns verse-level `greek_tokens` only; the spec's "ruby above the exact aligned English word / tap-Greek→flash-the-exact-English-word" is NOT faithfully positionable, so the interlinear renders the corpus's verse tokens as chips and the tap-flash stays the approximate stem-match (`flashGloss`), explicitly labeled with `TODO(DEC-align)`. Per-word alignment is NOT fabricated; it awaits the BSB alignment slice (Bucket-RA-1 for a visible UI cue).
+  (d) **Scroll-spy partial** — ChapterView observes chapter-opening anchors (IntersectionObserver) and emits `chapter-in-view`; the page reflects it in the dropdown via a chapter sentinel (`spyTarget`) + `lastLoaded` scope check that suppresses the reload ONLY for a pure-chapter spy update. Slice-1 loads one chapter at a time so the spy is a structural no-op today; multi-chapter continuous book scroll is flagged (Bucket-RA-2) — the read API is per-chapter; not faked.
+  (e) **Reader layout** — a dedicated `reader` Nuxt layout (`<v-app>` + padding-stripped full-height `<v-main>`) gives the reader the app-shell where only the text column + panel scroll (spec #screen), with a small fixed parchment/dark theme toggle in the masthead corner.
+  (f) **Concept-edit entry** — the library-row gesture is repurposed to multi-select highlight (spec dim-others); the concept-update path is reached via MarkDetail's "Edit concept" (`@edit`).
+  (g) **Cross-verse resize** — implemented within-verse; cross-verse is the known open hard case (DEC-143), flagged in MarkDetail rather than faked.
+- Rationale: honors the project's "design system wins / semantic tokens / no raw chrome hex" discipline and the "the system must say when it cannot do something" charter while delivering the approved v8 visual + interaction spec. Independent review (claude-fallback, Codex blocked) returned CLEAN — no P0/P1/P2; three P3s fixed inline.
+- Confidence: High.
+- Made-by: reader-alignment orchestration 2026-06-21 [autopilot; low-stakes realization of the human-directed DEC-152].
+- Sources: `docs/reviews/review-claude-fallback-reader-alignment-2026-06-21.md`.
+- Cross-refs: DEC-152, DEC-150, DEC-151, DEC-149, DEC-146, DEC-143, DEC-142, DEC-081, web/THEME.md.
