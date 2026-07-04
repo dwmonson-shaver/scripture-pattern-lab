@@ -177,6 +177,15 @@ const origLang = computed(() => CORPUS_META[corpus.value]?.origLang ?? null)
   top: 0;
   z-index: 5;
   border-bottom: 1px solid rgb(var(--v-border-color));
+  /* Vuetify pins the toolbar to a fixed height (inline style on __content).
+   * The controls flex-wrap at narrower widths; without these overrides the
+   * wrapped second row is clipped and overlapped by the reading pane. */
+  height: auto !important;
+}
+.reader-bar :deep(.v-toolbar__content) {
+  height: auto !important;
+  min-height: 56px;
+  padding-block: 6px;
 }
 .mode-toggle {
   margin-right: 0.5rem;
