@@ -30,6 +30,7 @@ from src.ontology.concept_editor import (
     ConceptExists,
     ConceptNotFound,
     create_concept,
+    delete_concept,
     update_concept,
 )
 from src.ontology.concept_grouping import (
@@ -116,6 +117,31 @@ def update_concept_route(
             ).model_dump(),
         ) from exc
     return ConceptWriteResponse(**concept.model_dump())
+
+
+@router.delete("/api/v1/concepts/{name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_concept_route(
+    name: str,
+    engine: Engine = Depends(get_engine),
+) -> None:
+    """Delete a concept (Slice 1 follow-up, 2026-07-04).
+
+    Deleting a registry entry deletes a PRIOR; the corpus is untouched.
+    Dependent rows (lemma links, claims, document, grouping promotions,
+    mark-concept links) go via the schema's ON DELETE CASCADE; marks survive
+    as plain highlights. 404 if the concept does not exist.
+    """
+    try:
+        delete_concept(engine, name)
+    except ConceptNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="concept_not_found",
+                message=str(exc),
+                details={"name": name},
+            ).model_dump(),
+        ) from exc
 
 
 @router.get(

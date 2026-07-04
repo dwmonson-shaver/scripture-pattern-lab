@@ -16,6 +16,7 @@ from src.ontology.concept_editor import (
     ConceptExists,
     ConceptNotFound,
     create_concept,
+    delete_concept,
     update_concept,
 )
 
@@ -131,3 +132,20 @@ class TestUpdateConcept:
         # No-field update issues a SELECT, not an UPDATE.
         assert any(s.startswith("select") for s in engine.connection.statements)
         _assert_no_claim_writes(engine.connection)
+
+
+class TestDeleteConcept:
+    def test_delete_issues_single_delete_on_concepts(self) -> None:
+        engine = _FakeEngine([_Row(name="Hope")])
+        delete_concept(engine, "Hope")  # type: ignore[arg-type]
+        statements = engine.connection.statements
+        assert len(statements) == 1
+        assert statements[0].startswith("delete from concepts")
+        # Dependent cleanup is the schema's ON DELETE CASCADE, not extra SQL —
+        # and the evidence tables are never addressed directly (DEC-146).
+        _assert_no_claim_writes(engine.connection)
+
+    def test_delete_missing_raises_not_found(self) -> None:
+        engine = _FakeEngine([None])
+        with pytest.raises(ConceptNotFound):
+            delete_concept(engine, "Nope")  # type: ignore[arg-type]

@@ -107,3 +107,30 @@ class TestUpdateRoute:
         resp = client.patch("/api/v1/concepts/Nope", json={"description": "x"})
         assert resp.status_code == 404
         assert resp.json()["detail"]["error"] == "concept_not_found"
+
+
+class TestDeleteConcept:
+    def test_delete_returns_204(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _delete(_engine: object, name: str) -> None:
+            captured["name"] = name
+
+        monkeypatch.setattr("src.app.routes.concepts.delete_concept", _delete)
+        resp = client.delete("/api/v1/concepts/Hope")
+        assert resp.status_code == 204
+        assert resp.content == b""
+        assert captured["name"] == "Hope"
+
+    def test_delete_missing_returns_404(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_a: object, **_k: object) -> None:
+            raise ConceptNotFound("concept 'Nope' does not exist")
+
+        monkeypatch.setattr("src.app.routes.concepts.delete_concept", _raise)
+        resp = client.delete("/api/v1/concepts/Nope")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"] == "concept_not_found"

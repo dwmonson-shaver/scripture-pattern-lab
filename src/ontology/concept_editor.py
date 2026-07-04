@@ -14,7 +14,7 @@ evidence-grounded layer and must not be fed by authored UI input (DEC-146).
 
 from __future__ import annotations
 
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.ontology.registry import Concept, Polarity, concepts_table
@@ -142,3 +142,24 @@ def update_concept(
         if row is None:
             raise ConceptNotFound(f"concept {name!r} does not exist")
         return _row_to_concept(row)
+
+
+def delete_concept(engine: Engine, name: str) -> None:
+    """Delete a concept by name.
+
+    Removal of a registry entry is removal of a PRIOR — the corpus is
+    untouched, and a lexicon-sourced concept can be auto-recreated on demand
+    (Slice N). Dependent rows are cleaned by the schema's ``ON DELETE CASCADE``
+    FKs: concept_lemmas, polarity/inverse claims, the concept document,
+    grouping promotions, and mark_concepts links. Marks themselves survive as
+    plain highlights (the mark row is user work; only its concept association
+    goes). Raises ``ConceptNotFound`` if no concept named ``name`` exists.
+    """
+    with engine.begin() as connection:
+        row = connection.execute(
+            delete(concepts_table)
+            .where(concepts_table.c.name == name)
+            .returning(concepts_table.c.id)
+        ).first()
+        if row is None:
+            raise ConceptNotFound(f"concept {name!r} does not exist")
