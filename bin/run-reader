@@ -34,11 +34,12 @@ done
 cd web
 if [ ! -d node_modules ]; then echo "Installing web deps (first run only)..."; npm install; fi
 
-# Point the Nuxt proxy at the local backend (server-side; never shipped to the browser).
-cat > .env.local <<EOF
-NUXT_BACKEND_URL=http://localhost:8000
-NUXT_BACKEND_TOKEN=${SPL_BEARER_TOKEN}
-EOF
+# Point the Nuxt proxy at the local backend (server-side; never shipped to the
+# browser). Export into the environment so Nuxt's runtimeConfig picks them up at
+# server runtime — Nuxt's dev server only auto-loads `.env` (NOT `.env.local`),
+# so exporting is the reliable path regardless of which dotenv file exists.
+export NUXT_BACKEND_URL=http://localhost:8000
+export NUXT_BACKEND_TOKEN="${SPL_BEARER_TOKEN}"
 
 IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo localhost)"
 echo
