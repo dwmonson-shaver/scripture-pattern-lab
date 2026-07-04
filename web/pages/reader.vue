@@ -69,12 +69,21 @@ async function reloadAll(): Promise<void> {
   lastLoaded.version = version.value
 }
 
-// Initial load — useAsyncData so it runs once under SSR and on the client.
-await useAsyncData('reader-init', async () => {
-  await Promise.all([loadVersions(), conceptStore.load()])
-  await reloadAll()
-  return true
-})
+// Initial load — client-only (`server: false`). The reader's state lives in
+// composable refs, which do NOT transfer from SSR to the client; letting this
+// run on the server renders a full chapter into the HTML, then the client
+// hydrates against empty refs — a hydration mismatch that breaks the chrome
+// and strands the page on "No chapter loaded" (prod bug, 2026-07-03). With
+// server:false both sides start empty and the client fetches after mount.
+await useAsyncData(
+  'reader-init',
+  async () => {
+    await Promise.all([loadVersions(), conceptStore.load()])
+    await reloadAll()
+    return true
+  },
+  { server: false },
+)
 
 // Sentinel: the chapter value that a scroll-spy event set (already loaded) —
 // suppress its reload, but ONLY when the change is purely that chapter (a real
