@@ -11,13 +11,49 @@ An AI-assisted original-language hypothesis exploration platform for Judeo-Chris
 - The corpus is ground truth; user hypotheses and registry entries are priors. The system's job is to test priors, not confirm them.
 - No slop. Read and own every line of code generated.
 
+## Why Rigor Exists Here (read this before applying process)
+This is a personal study tool built to TEST a specific hypothesis — not to confirm
+it. The owner's stated risk: accidentally building a machine that reinforces his own
+biases. The evidence the tool produces must stand up to scrutiny by someone using
+the same tool to try to DISPROVE the same claims. That is what the heavy process
+protects. It does not need to protect theming, tooling, deploy scripts, or UI chrome.
+
+## Rigor Tiers (adopted 2026-07-03; supersedes uniform application of the workflow below)
+
+**Tier E — epistemic core: full methodology.** Applies to any change touching:
+- `src/ontology` (registry, verification lifecycle, promotion paths)
+- evidence computation in `src/retrieval`, and all of `src/scoring`
+- match-type labeling, evidence grading, citation integrity, the honesty protocol,
+  lens/absence reporting (DEC-081, DEC-102, DEC-135, DEC-136, DEC-138, DEC-141)
+- anything that changes what the system presents as evidence or how claims advance
+
+Full workflow applies: research → design (human review) → structure → implement →
+independent review before close. Adversarial design review required when
+promotion or evidence semantics change.
+
+**Tier L — everything else: lightweight loop.** UI, theming, infra, deploy,
+tooling, ingestion mechanics, docs:
+- A short design note (a few paragraphs, inline in conversation or a small file)
+  only when the change is genuinely novel — no template, no artifact ceremony
+- Implement with tests; commit when green; developer reads every line (unchanged)
+- No per-step `/close-step`; one wrap-up at natural stopping points
+- Independent review optional — invoke it when a change is large or surprising,
+  not by default
+
+**Straddling changes** (e.g. UI that displays evidence): the epistemic part gets
+Tier E treatment; the surrounding surface gets Tier L. When unsure which tier
+applies, ask — the answer is usually obvious once stated.
+
 ## Quality Gates
-- Every feature must have a design discussion artifact before implementation begins
-- Every non-trivial change must have a structure outline before writing code
+Universal (both tiers):
 - Build vertically (mock → wire → test → next slice), never horizontally (all DB, then all services, then all API)
 - Each implementation phase must be testable independently
 - No code is complete until tests pass and the developer has read every line
-- Independent code review at slice-close (typically Codex via `/codex:rescue`) before declaring closure — artifact in `docs/reviews/`, indexed and triaged in `docs/governance/reviews-log.md`. P0/P1/P2 findings (or design `high` findings) must close before the slice closes
+
+Tier E only:
+- Design discussion artifact before implementation begins
+- Structure outline before writing code
+- Independent code review before declaring closure (typically Codex via `/codex:rescue`) — artifact in `docs/reviews/`, indexed and triaged in `docs/governance/reviews-log.md`. P0/P1/P2 findings (or design `high` findings) must close before the slice closes
 
 ## Coding Conventions
 - Language: Python 3.12+
@@ -39,8 +75,9 @@ An AI-assisted original-language hypothesis exploration platform for Judeo-Chris
 - `src/scoring/` — Scoring and ranking logic
 - `src/validation/` — Capability validator (deterministic, no AI)
 
-## Workflow: Before Writing Code
-For any feature or non-trivial change:
+## Workflow: Before Writing Code (Tier E)
+For Tier-E changes (see Rigor Tiers above). Tier-L work skips straight to
+implement-with-tests, with at most a short inline design note first.
 
 1. **Research** — Gather objective facts about the current codebase. Do not include the goal in the research prompt. Output: factual notes about relevant code paths, patterns, and types.
 
@@ -54,7 +91,7 @@ For any feature or non-trivial change:
 
 6. **Slice close (independent review)** — At the end of a complete slice (multiple phases together), run an independent code review (typically Codex via `/codex:rescue` or by spawning the `codex:codex-rescue` subagent) on the cumulative slice diff. Save the artifact to `docs/reviews/review-codex-{flavor}-{slice-id}-{YYYY-MM-DD}.md`, add a row to `docs/governance/reviews-log.md` recording verdict + findings + closure SHAs, and ensure P0/P1/P2 (or design `high`) findings have closed. P3 / info findings either land inline or join a named bucket tracked in `project_status.md`. See `docs/governance/reviews-log.md` for the full process and severity language.
 
-### Phase Discipline (Context Hygiene)
+### Phase Discipline (Context Hygiene — Tier E)
 
 Each of `/research`, `/design`, `/structure`, `/implement` is meant to run with
 a clean context. The artifacts on disk (`design-*.md`, `structure-*.md`,
@@ -66,11 +103,13 @@ not chat history.
 - Within one phase, keep context until the phase is done.
 - The assistant drives this without being asked. The user should never have to re-explain the methodology.
 
-### Slice Boundaries (Bucket Triage)
+### Slice Boundaries (Bucket Triage — Tier E findings only)
 
 Independent reviews surface findings; some get fixed inline, others get
 deferred to **named buckets** with a stated trigger condition (see
-`docs/governance/reviews-log.md`). To prevent buckets from drifting indefinitely,
+`docs/governance/reviews-log.md`). Buckets are reserved for Tier-E findings;
+Tier-L follow-ups go to `ROADMAP_NEXT_STEPS.md` or get fixed inline — no triage
+ceremony. To prevent buckets from drifting indefinitely,
 both ends of a slice get an explicit triage step:
 
 - **At slice close** (Workflow step 6): every finding from the slice's review pass gets one of three dispositions — *fixed* (with SHA), *deferred to a tracked bucket* (with trigger AND written rationale), or *rejected* (with reason). "Filed and forgotten" is not allowed.
@@ -103,6 +142,12 @@ When the user opens a session and asks "what's next?":
 | `/review` | Extract decisions, check spec divergence, update governance |
 | `/coverage` | Audit spec-to-code-to-test coverage against REQ markers |
 | `/close-step` | Close out a step/phase: confirm clean state, update memory, prep for `/clear` |
+
+## Governance Hygiene
+- DEC numbers are reserved for decisions that **constrain future work**.
+  Realizations, observations, and routine implementation choices do not get DECs.
+- The decision log, spec-coverage, and reviews-log are maintained for Tier-E work.
+  Tier-L work is recorded by its commits and CHANGELOG entries.
 
 ## Commit Conventions
 - Commit after each implementation phase, not at the end
