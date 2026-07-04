@@ -92,4 +92,41 @@ describe('useConcepts', () => {
     expect(result).toBeNull()
     expect(c.error.value?.body.detail.error).toBe('concept_exists')
   })
+
+  it('remove deletes the named concept then reloads', async () => {
+    fetchStub
+      .mockResolvedValueOnce(null) // DELETE (204, empty)
+      .mockResolvedValueOnce({ concepts: [] }) // reload
+    const c = useConcepts()
+    const ok = await c.remove('Hope')
+    expect(ok).toBe(true)
+    expect(fetchStub).toHaveBeenNthCalledWith(
+      1,
+      '/api/sp/concepts/Hope',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+    expect(c.concepts.value).toEqual([])
+  })
+
+  it('remove url-encodes the concept name', async () => {
+    fetchStub.mockResolvedValueOnce(null).mockResolvedValueOnce({ concepts: [] })
+    const c = useConcepts()
+    await c.remove('living water')
+    expect(fetchStub).toHaveBeenNthCalledWith(
+      1,
+      '/api/sp/concepts/living%20water',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('remove surfaces a 404 as ProxyErrorShape and reports failure', async () => {
+    fetchStub.mockRejectedValue({
+      status: 404,
+      data: { detail: { error: 'concept_not_found', message: 'missing', details: null } },
+    })
+    const c = useConcepts()
+    const ok = await c.remove('Nope')
+    expect(ok).toBe(false)
+    expect(c.error.value?.body.detail.error).toBe('concept_not_found')
+  })
 })

@@ -36,3 +36,19 @@ if (!globalScope.useState) {
 if (!globalScope.useRuntimeConfig) {
   globalScope.useRuntimeConfig = () => ({ public: { appName: 'Scripture Pattern Lab (test)' } })
 }
+
+// visualViewport — Vuetify's VOverlay location strategy reads it; happy-dom
+// doesn't implement it. A minimal EventTarget-shaped stub is enough for
+// dialog/overlay components (VDialog in ConceptLibrary's delete confirm).
+if (!globalScope.visualViewport) {
+  globalScope.visualViewport = {
+    width: 1280,
+    height: 800,
+    offsetLeft: 0,
+    offsetTop: 0,
+    scale: 1,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  }
+}

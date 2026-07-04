@@ -29,6 +29,7 @@ const emit = defineEmits<{
   'toggle-concept': [name: string]
   'new-concept': [prefillName: string]
   'pick-concept': [name: string]
+  'remove-concept': [name: string]
   'save-concept': [
     payload:
       | { mode: 'create'; req: ConceptCreateRequest }
@@ -73,6 +74,7 @@ const emit = defineEmits<{
       @toggle="emit('toggle-concept', $event)"
       @pick="emit('pick-concept', $event)"
       @create="emit('new-concept', $event)"
+      @remove="emit('remove-concept', $event)"
     />
   </div>
 </template>

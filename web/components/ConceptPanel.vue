@@ -42,6 +42,7 @@ const emit = defineEmits<{
   // library
   'toggle-concept': [name: string]
   'new-concept': [prefillName: string]
+  'remove-concept': [name: string]
   // clear the multi-select highlight
   'clear-highlight': []
   // search / associate
@@ -130,6 +131,7 @@ const title = computed(() => {
         @toggle-concept="emit('toggle-concept', $event)"
         @new-concept="emit('new-concept', $event)"
         @pick-concept="emit('pick-concept', $event)"
+        @remove-concept="emit('remove-concept', $event)"
         @save-concept="emit('save-concept', $event)"
         @cancel-edit="emit('cancel-edit')"
         @mark-back="emit('mark-back')"
@@ -168,6 +170,7 @@ const title = computed(() => {
       @toggle-concept="emit('toggle-concept', $event)"
       @new-concept="emit('new-concept', $event)"
       @pick-concept="emit('pick-concept', $event)"
+      @remove-concept="emit('remove-concept', $event)"
       @save-concept="emit('save-concept', $event)"
       @cancel-edit="emit('cancel-edit')"
       @mark-back="emit('mark-back')"

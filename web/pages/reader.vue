@@ -366,6 +366,17 @@ function onCancelEdit(): void {
   editingConceptName.value = null
 }
 
+// Delete a concept (the library's are-you-sure dialog already confirmed).
+// Marks keep their highlight but lose the association (backend cascade), so
+// the chapter's marks are reloaded to reflect that; the deleted name also
+// leaves the multi-select highlight set.
+async function onRemoveConcept(name: string): Promise<void> {
+  const ok = await conceptStore.remove(name)
+  if (!ok) return
+  if (conceptHighlight.isSelected(name)) conceptHighlight.toggle(name)
+  await markStore.loadForChapter(chapterScope.value)
+}
+
 // pick a concept in associate-search
 async function onPickConcept(name: string): Promise<void> {
   await applyAssociation(name)
@@ -527,6 +538,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
         @clear-highlight="clearHighlight"
         @new-concept="onNewConcept"
         @pick-concept="onPickConcept"
+        @remove-concept="onRemoveConcept"
         @save-concept="onSaveConcept"
         @cancel-edit="onCancelEdit"
         @mark-back="onMarkBack"

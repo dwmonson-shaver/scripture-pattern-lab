@@ -28,9 +28,26 @@ const emit = defineEmits<{
   pick: [name: string]
   /** Start creating a new concept; carries the current search text. */
   create: [prefillName: string]
+  /** Delete a concept — emitted only after the are-you-sure dialog confirms. */
+  remove: [name: string]
 }>()
 
 const query = ref('')
+
+// Delete flow: the trash affordance opens a confirm dialog (deliberate
+// friction — deletion must never be one tap). The component owns the dialog
+// as pure UI state and emits `remove` only on explicit confirmation; the
+// page owns the actual delete call.
+const deleteTarget = ref<string | null>(null)
+
+function askDelete(name: string): void {
+  deleteTarget.value = name
+}
+
+function confirmDelete(): void {
+  if (deleteTarget.value) emit('remove', deleteTarget.value)
+  deleteTarget.value = null
+}
 
 const filtered = computed<ConceptSummary[]>(() => {
   const f = query.value.trim().toLowerCase()
@@ -78,11 +95,11 @@ function onRow(name: string): void {
       data-testid="concept-search"
     />
 
-    <v-list lines="two" density="comfortable" class="bg-transparent">
+    <v-list lines="one" density="compact" class="bg-transparent py-0">
       <v-list-item
         v-for="c in filtered"
         :key="c.name"
-        class="px-2 mb-1 rounded"
+        class="px-2 rounded concept-row"
         :class="{ 'concept-row--sel': !isAssociate && selectedSet.has(c.name) }"
         :active="!isAssociate && selectedSet.has(c.name)"
         :data-concept="c.name"
@@ -92,13 +109,13 @@ function onRow(name: string): void {
       >
         <template #prepend>
           <span
-            class="library-swatch mr-3"
+            class="library-swatch mr-2"
             :style="{ backgroundColor: c.authored_color || 'rgb(var(--v-theme-secondary))' }"
             aria-hidden="true"
           />
         </template>
-        <v-list-item-title>{{ c.name }}</v-list-item-title>
-        <v-list-item-subtitle class="d-flex align-center ga-2">
+        <v-list-item-title class="d-flex align-center ga-2">
+          <span class="text-truncate">{{ c.name }}</span>
           <v-chip
             v-if="c.authored_polarity"
             size="x-small"
@@ -107,10 +124,21 @@ function onRow(name: string): void {
           >
             {{ POLARITY_LABEL[c.authored_polarity] ?? c.authored_polarity }}
           </v-chip>
-          <span class="text-caption text-medium-emphasis">{{
+          <span class="text-caption text-medium-emphasis text-no-wrap">{{
             stateLabel(c.verification_state)
           }}</span>
-        </v-list-item-subtitle>
+        </v-list-item-title>
+        <template v-if="!isAssociate" #append>
+          <v-btn
+            icon="mdi-delete-outline"
+            size="x-small"
+            variant="text"
+            class="concept-delete"
+            :aria-label="`Delete ${c.name}`"
+            data-testid="concept-delete"
+            @click.stop="askDelete(c.name)"
+          />
+        </template>
       </v-list-item>
 
       <v-list-item v-if="!filtered.length" data-testid="concept-empty">
@@ -119,6 +147,35 @@ function onRow(name: string): void {
         </v-list-item-subtitle>
       </v-list-item>
     </v-list>
+
+    <v-dialog
+      :model-value="deleteTarget !== null"
+      max-width="22rem"
+      data-testid="concept-delete-dialog"
+      @update:model-value="deleteTarget = null"
+    >
+      <v-card v-if="deleteTarget">
+        <v-card-title class="text-h6">Delete “{{ deleteTarget }}”?</v-card-title>
+        <v-card-text class="text-body-2">
+          This removes the concept from your library. Passages you marked with
+          it keep their highlight but lose the concept.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" data-testid="concept-delete-cancel" @click="deleteTarget = null">
+            Cancel
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            data-testid="concept-delete-confirm"
+            @click="confirmDelete"
+          >
+            Yes, delete it
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <v-btn
       variant="outlined"
@@ -141,5 +198,16 @@ function onRow(name: string): void {
   height: 1.35rem;
   border-radius: 5px;
   box-shadow: inset 0 0 0 1px rgba(var(--v-theme-on-surface), 0.12);
+}
+.concept-row {
+  min-height: 2.25rem;
+}
+/* Quiet by default so the list stays calm; full strength on row hover. */
+.concept-delete {
+  opacity: 0.55;
+}
+.concept-row:hover .concept-delete,
+.concept-delete:focus-visible {
+  opacity: 1;
 }
 </style>

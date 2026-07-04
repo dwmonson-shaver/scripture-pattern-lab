@@ -84,6 +84,23 @@ export const useConcepts = () => {
   }
 
   /**
+   * Delete a concept (behind the library's are-you-sure dialog). Dependent
+   * rows cascade on the backend; marks survive as plain highlights. Reloads
+   * the list on success so the library reflects the removal immediately.
+   */
+  const remove = async (name: string): Promise<boolean> => {
+    error.value = null
+    try {
+      await $fetch(`/api/sp/concepts/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      await load()
+      return true
+    } catch (err) {
+      error.value = toProxyError(err)
+      return false
+    }
+  }
+
+  /**
    * Case-insensitive name filter — the search-as-you-type helper the library
    * and the associate-concept search both use. Pure; does not touch state.
    */
@@ -93,5 +110,5 @@ export const useConcepts = () => {
     return concepts.value.filter((c) => c.name.toLowerCase().includes(f))
   }
 
-  return { concepts, pending, error, load, create, update, search }
+  return { concepts, pending, error, load, create, update, remove, search }
 }
