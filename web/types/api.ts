@@ -187,3 +187,35 @@ export interface MarkUpdateRequest {
   char_end?: number | null
   concept_names?: string[] | null
 }
+
+// Slice 2 — typed connections between concepts (2026-07-05). Interim
+// hand-written until gen:types picks the backend schema up on next redeploy.
+
+/** The connection claim-type vocabulary; mirrors 08_connections.sql CHECK. */
+export type ConnectionType =
+  | 'opposite'
+  | 'prerequisite'
+  | 'produces'
+  | 'sequence'
+  | 'compound'
+  | 'association'
+  | 'interchange'
+  | 'unknown'
+
+export interface ConnectionOut {
+  id: number
+  note: string | null
+  actor: string
+  members: string[] // concept names, in position order
+  types: ConnectionType[]
+}
+
+export interface ConnectionsResponse {
+  connections: ConnectionOut[]
+}
+
+export interface ConnectionCreateRequest {
+  member_names: string[]
+  types: ConnectionType[]
+  note?: string | null
+}

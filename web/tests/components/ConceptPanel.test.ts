@@ -31,6 +31,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     drawer: false,
     view: 'library',
     concepts,
+    connections: [],
     activeMark: null,
     activeMarkPhrase: '',
     editingConcept: null,

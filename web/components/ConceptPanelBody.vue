@@ -3,19 +3,22 @@ import type {
   ConceptCreateRequest,
   ConceptSummary,
   ConceptUpdateRequest,
+  ConnectionOut,
+  ConnectionType,
   MarkOut,
 } from '~~/types/api'
 
 /**
  * The view-router body shared by `ConceptPanel`'s drawer and aside hosts.
- * Pulled out so the four-way switch (library / search / edit / mark) is
+ * Pulled out so the switch (library / search / edit / mark / connections) is
  * written once. Pure presentational glue — forwards every event up.
  */
-type PanelView = 'library' | 'search' | 'edit' | 'mark'
+type PanelView = 'library' | 'search' | 'edit' | 'mark' | 'connections'
 
 defineProps<{
   view: PanelView
   concepts: ConceptSummary[]
+  connections: ConnectionOut[]
   activeMark: MarkOut | null
   activeMarkPhrase: string
   editingConcept: ConceptSummary | null
@@ -30,6 +33,12 @@ const emit = defineEmits<{
   'new-concept': [prefillName: string]
   'pick-concept': [name: string]
   'remove-concept': [name: string]
+  'open-connections': []
+  'connections-back': []
+  'create-connection': [
+    req: { member_names: string[]; types: ConnectionType[]; note: string | null },
+  ]
+  'remove-connection': [id: number]
   'save-concept': [
     payload:
       | { mode: 'create'; req: ConceptCreateRequest }
@@ -66,6 +75,15 @@ const emit = defineEmits<{
       @edit="emit('mark-edit', $event)"
     />
 
+    <ConnectionsView
+      v-else-if="view === 'connections'"
+      :concepts="concepts"
+      :connections="connections"
+      @back="emit('connections-back')"
+      @create="emit('create-connection', $event)"
+      @remove="emit('remove-connection', $event)"
+    />
+
     <ConceptLibrary
       v-else
       :concepts="concepts"
@@ -75,6 +93,7 @@ const emit = defineEmits<{
       @pick="emit('pick-concept', $event)"
       @create="emit('new-concept', $event)"
       @remove="emit('remove-concept', $event)"
+      @open-connections="emit('open-connections')"
     />
   </div>
 </template>

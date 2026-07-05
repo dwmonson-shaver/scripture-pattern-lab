@@ -4,6 +4,8 @@ import type {
   ConceptCreateRequest,
   ConceptSummary,
   ConceptUpdateRequest,
+  ConnectionOut,
+  ConnectionType,
   MarkOut,
 } from '~~/types/api'
 
@@ -17,13 +19,14 @@ import type {
  * The panel is presentational glue — it owns no data, only forwards events up
  * to the page (which owns reader/concept/mark state). Chrome only.
  */
-type PanelView = 'library' | 'search' | 'edit' | 'mark'
+type PanelView = 'library' | 'search' | 'edit' | 'mark' | 'connections'
 
 const drawer = defineModel<boolean>('drawer', { default: false })
 
 const props = defineProps<{
   view: PanelView
   concepts: ConceptSummary[]
+  connections: ConnectionOut[]
   /** The mark shown in mark-detail / targeted by search-associate. */
   activeMark: MarkOut | null
   /** Resolved text of the active mark, for mark-detail. */
@@ -47,6 +50,13 @@ const emit = defineEmits<{
   'clear-highlight': []
   // search / associate
   'pick-concept': [name: string]
+  // connections
+  'open-connections': []
+  'connections-back': []
+  'create-connection': [
+    req: { member_names: string[]; types: ConnectionType[]; note: string | null },
+  ]
+  'remove-connection': [id: number]
   // edit form
   'save-concept': [
     payload:
@@ -122,6 +132,7 @@ const title = computed(() => {
       <ConceptPanelBody
         :view="view"
         :concepts="concepts"
+        :connections="connections"
         :active-mark="activeMark"
         :active-mark-phrase="activeMarkPhrase"
         :editing-concept="editingConcept"
@@ -132,6 +143,10 @@ const title = computed(() => {
         @new-concept="emit('new-concept', $event)"
         @pick-concept="emit('pick-concept', $event)"
         @remove-concept="emit('remove-concept', $event)"
+        @open-connections="emit('open-connections')"
+        @connections-back="emit('connections-back')"
+        @create-connection="emit('create-connection', $event)"
+        @remove-connection="emit('remove-connection', $event)"
         @save-concept="emit('save-concept', $event)"
         @cancel-edit="emit('cancel-edit')"
         @mark-back="emit('mark-back')"
@@ -161,6 +176,7 @@ const title = computed(() => {
     <ConceptPanelBody
       :view="view"
       :concepts="concepts"
+      :connections="connections"
       :active-mark="activeMark"
       :active-mark-phrase="activeMarkPhrase"
       :editing-concept="editingConcept"
@@ -171,6 +187,10 @@ const title = computed(() => {
       @new-concept="emit('new-concept', $event)"
       @pick-concept="emit('pick-concept', $event)"
       @remove-concept="emit('remove-concept', $event)"
+      @open-connections="emit('open-connections')"
+      @connections-back="emit('connections-back')"
+      @create-connection="emit('create-connection', $event)"
+      @remove-connection="emit('remove-connection', $event)"
       @save-concept="emit('save-concept', $event)"
       @cancel-edit="emit('cancel-edit')"
       @mark-back="emit('mark-back')"

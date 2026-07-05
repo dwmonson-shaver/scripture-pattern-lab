@@ -3,6 +3,7 @@ import { useDisplay } from 'vuetify'
 import type {
   ConceptCreateRequest,
   ConceptUpdateRequest,
+  ConnectionType,
   GreekTokenOut,
   MarkCreateRequest,
 } from '~~/types/api'
@@ -40,6 +41,7 @@ const {
 
 const conceptStore = useConcepts()
 const markStore = useMarks()
+const connectionStore = useConnections()
 const { notify } = useToast()
 
 // Layout mode (spec): Versed (default) ↔ Continuous. Page-local; no reload.
@@ -79,7 +81,7 @@ async function reloadAll(): Promise<void> {
 await useAsyncData(
   'reader-init',
   async () => {
-    await Promise.all([loadVersions(), conceptStore.load()])
+    await Promise.all([loadVersions(), conceptStore.load(), connectionStore.load()])
     await reloadAll()
     return true
   },
@@ -122,7 +124,7 @@ function onChapterInView(ch: number): void {
 }
 
 // --- panel state ------------------------------------------------------------
-type PanelView = 'library' | 'search' | 'edit' | 'mark'
+type PanelView = 'library' | 'search' | 'edit' | 'mark' | 'connections'
 const panelView = ref<PanelView>('library')
 const drawer = ref(false)
 const activeMarkId = ref<number | null>(null)
@@ -389,6 +391,33 @@ async function onRemoveConcept(name: string): Promise<void> {
   notify(`Deleted “${name}”`)
 }
 
+// --- connections ------------------------------------------------------------
+function onOpenConnections(): void {
+  panelView.value = 'connections'
+}
+
+function onConnectionsBack(): void {
+  panelView.value = 'library'
+}
+
+async function onCreateConnection(req: {
+  member_names: string[]
+  types: ConnectionType[]
+  note: string | null
+}): Promise<void> {
+  const created = await connectionStore.create(req)
+  if (!created) {
+    notify(connectionStore.error.value?.body.detail.message ?? 'Could not create the connection.', 'error')
+    return
+  }
+  notify(`Connected ${created.members.join(' → ')}`)
+}
+
+async function onRemoveConnection(id: number): Promise<void> {
+  const ok = await connectionStore.remove(id)
+  notify(ok ? 'Connection deleted' : (connectionStore.error.value?.body.detail.message ?? 'Could not delete the connection.'), ok ? 'success' : 'error')
+}
+
 // pick a concept in associate-search
 async function onPickConcept(name: string): Promise<void> {
   await applyAssociation(name)
@@ -540,6 +569,7 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
         v-model:drawer="drawer"
         :view="panelView"
         :concepts="conceptStore.concepts.value"
+        :connections="connectionStore.connections.value"
         :active-mark="activeMark"
         :active-mark-phrase="activeMarkPhrase"
         :editing-concept="editingConcept"
@@ -551,6 +581,10 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
         @new-concept="onNewConcept"
         @pick-concept="onPickConcept"
         @remove-concept="onRemoveConcept"
+        @open-connections="onOpenConnections"
+        @connections-back="onConnectionsBack"
+        @create-connection="onCreateConnection"
+        @remove-connection="onRemoveConnection"
         @save-concept="onSaveConcept"
         @cancel-edit="onCancelEdit"
         @mark-back="onMarkBack"

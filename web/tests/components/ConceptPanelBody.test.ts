@@ -41,6 +41,7 @@ function props(view: string, extra: Record<string, unknown> = {}) {
   return {
     view,
     concepts,
+    connections: [],
     activeMark: null,
     activeMarkPhrase: '',
     editingConcept: null,

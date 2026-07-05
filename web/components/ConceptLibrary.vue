@@ -30,6 +30,8 @@ const emit = defineEmits<{
   create: [prefillName: string]
   /** Delete a concept — emitted only after the are-you-sure dialog confirms. */
   remove: [name: string]
+  /** Switch the panel to the connections view. */
+  'open-connections': []
 }>()
 
 const query = ref('')
@@ -187,6 +189,18 @@ function onRow(name: string): void {
       @click="emit('create', query.trim())"
     >
       {{ query.trim() ? `Create “${query.trim()}”` : 'New concept' }}
+    </v-btn>
+
+    <v-btn
+      v-if="!isAssociate"
+      variant="text"
+      block
+      prepend-icon="mdi-vector-polyline"
+      class="mt-2"
+      data-testid="open-connections"
+      @click="emit('open-connections')"
+    >
+      Connections
     </v-btn>
   </div>
 </template>
