@@ -37,6 +37,14 @@ const current = computed(() => bySlug(slug.value))
       <v-col cols="12" md="4" lg="3">
         <v-card variant="outlined" data-testid="docs-nav">
           <v-list density="compact" nav>
+            <v-list-subheader class="text-overline">Prototypes</v-list-subheader>
+            <v-list-item
+              to="/docs/connection-prototypes"
+              title="Connection visualizations"
+              prepend-icon="mdi-vector-polyline"
+              data-testid="docs-nav-prototypes"
+            />
+            <v-divider class="my-1" />
             <template v-for="group in groups" :key="group.key">
               <v-list-subheader class="text-overline">{{ group.label }}</v-list-subheader>
               <v-list-item
