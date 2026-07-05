@@ -40,6 +40,7 @@ const {
 
 const conceptStore = useConcepts()
 const markStore = useMarks()
+const { notify } = useToast()
 
 // Layout mode (spec): Versed (default) ↔ Continuous. Page-local; no reload.
 const mode = ref<'versed' | 'continuous'>('versed')
@@ -350,7 +351,14 @@ async function onSaveConcept(
     payload.mode === 'create'
       ? await conceptStore.create(payload.req)
       : await conceptStore.update(payload.name, payload.req)
-  if (!result) return
+  if (!result) {
+    // Surface the failure instead of silently doing nothing — the common case
+    // is a duplicate name (409) when a concept by that name already exists.
+    const msg = conceptStore.error.value?.body.detail.message
+    notify(msg ?? 'Could not save the concept.', 'error')
+    return
+  }
+  notify(payload.mode === 'create' ? `Created “${result.name}”` : `Saved “${result.name}”`)
   // If we were in the middle of associating a concept to a selection/mark,
   // finish that association with the just-created/edited concept.
   if (associate.value) {
@@ -372,9 +380,13 @@ function onCancelEdit(): void {
 // leaves the multi-select highlight set.
 async function onRemoveConcept(name: string): Promise<void> {
   const ok = await conceptStore.remove(name)
-  if (!ok) return
+  if (!ok) {
+    notify(conceptStore.error.value?.body.detail.message ?? 'Could not delete the concept.', 'error')
+    return
+  }
   if (conceptHighlight.isSelected(name)) conceptHighlight.toggle(name)
   await markStore.loadForChapter(chapterScope.value)
+  notify(`Deleted “${name}”`)
 }
 
 // pick a concept in associate-search

@@ -27,9 +27,15 @@ if (!globalScope.$fetch) {
   })
 }
 
-// useState — Nuxt's SSR-safe shared state. For unit tests, plain ref().
+// useState — Nuxt's SSR-safe shared state: keyed singleton, so two calls with
+// the same key return the SAME ref (as in the real runtime). A per-call ref
+// would make composables that rely on shared state (useToast) untestable.
 if (!globalScope.useState) {
-  globalScope.useState = <T>(_key: string, init?: () => T) => ref(init ? init() : (null as T))
+  const stateCache = new Map<string, unknown>()
+  globalScope.useState = <T>(key: string, init?: () => T) => {
+    if (!stateCache.has(key)) stateCache.set(key, ref(init ? init() : (null as T)))
+    return stateCache.get(key)
+  }
 }
 
 // useRuntimeConfig — read-only stub returning a public.appName.

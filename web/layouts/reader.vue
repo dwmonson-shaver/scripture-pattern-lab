@@ -5,6 +5,7 @@
 // reader's own masthead area; this layout keeps just the <v-app> root that
 // Vuetify needs for theming + the navigation-drawer layout context.
 const { isDark, toggle } = useThemeToggle()
+const { toast } = useToast()
 </script>
 
 <template>
@@ -20,6 +21,15 @@ const { isDark, toggle } = useThemeToggle()
         <v-icon :icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'" size="small" />
       </button>
       <slot />
+      <v-snackbar
+        v-model="toast.show"
+        :color="toast.color"
+        :timeout="2600"
+        location="bottom right"
+        data-testid="app-toast"
+      >
+        {{ toast.text }}
+      </v-snackbar>
     </v-main>
   </v-app>
 </template>
