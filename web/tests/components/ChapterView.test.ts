@@ -88,12 +88,18 @@ describe('ChapterView', () => {
     expect(style).toContain('--c: #E0A12E')
   })
 
-  it('emits mark-click with the mark id', async () => {
+  it('emits mark-click with the mark id and an anchor rect', async () => {
     const wrapper = mountWithVuetify(ChapterView, {
       props: { chapter, marks: [mark], concepts, greekOn: false, activeMarkId: null },
     })
     await wrapper.get('[data-testid="concept-mark"]').trigger('click')
-    expect(wrapper.emitted('mark-click')?.[0]).toEqual([11])
+    const payload = wrapper.emitted('mark-click')?.[0]?.[0] as { id: number; rect: unknown }
+    expect(payload.id).toBe(11)
+    expect(payload.rect).toMatchObject({
+      left: expect.any(Number),
+      top: expect.any(Number),
+      bottom: expect.any(Number),
+    })
   })
 
   it('hides interlinear chips when greekOn is false', () => {

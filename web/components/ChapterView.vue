@@ -48,7 +48,7 @@ const emit = defineEmits<{
       rect: { left: number; top: number; bottom: number }
     },
   ]
-  'mark-click': [id: number]
+  'mark-click': [payload: { id: number; rect: { left: number; top: number; bottom: number } }]
   'chip-tap': [payload: { verse: number; token: GreekTokenOut }]
   /** Scroll-spy: the chapter whose opening is currently in view. */
   'chapter-in-view': [chapter: number]
@@ -240,8 +240,15 @@ function flashGloss(verse: number, token: GreekTokenOut): void {
   }
 }
 
-function onMarkClick(id: number): void {
-  emit('mark-click', id)
+function onMarkClick(id: number, event: Event): void {
+  // Carry the clicked span's viewport rect so the reader can anchor the
+  // selection popup on the mark (LDS-style quick actions on a committed mark).
+  const el = event.currentTarget as HTMLElement | null
+  const r = el?.getBoundingClientRect()
+  const rect = r
+    ? { left: r.left, top: r.top, bottom: r.bottom }
+    : { left: 0, top: 0, bottom: 0 }
+  emit('mark-click', { id, rect })
 }
 
 /** The first verse of the chapter gets the illuminated gilt versal. */
@@ -332,8 +339,8 @@ onBeforeUnmount(() => observer?.disconnect())
                 :data-mark="seg.mark.id"
                 data-testid="concept-mark"
                 tabindex="0"
-                @click.stop="onMarkClick(seg.mark.id)"
-                @keydown.enter.stop="onMarkClick(seg.mark.id)"
+                @click.stop="onMarkClick(seg.mark.id, $event)"
+                @keydown.enter.stop="onMarkClick(seg.mark.id, $event)"
                 >{{ seg.text
                 }}<sup v-if="seg.mark.concept_names.length > 1" class="mark-multi text-primary">{{
                   seg.mark.concept_names.length

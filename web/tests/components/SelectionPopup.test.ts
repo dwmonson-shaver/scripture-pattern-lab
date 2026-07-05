@@ -51,4 +51,39 @@ describe('SelectionPopup', () => {
     })
     expect(wrapper.find('[data-testid="selection-popup"]').exists()).toBe(false)
   })
+
+  it('enables Copy only when there is selected text, and emits copy', async () => {
+    const noText = mountWithVuetify(SelectionPopup, {
+      props: { modelValue: true, anchor, selectedText: '' },
+    })
+    expect(noText.get('[data-testid="popup-copy"]').attributes('disabled')).toBeDefined()
+
+    const wrapper = mountWithVuetify(SelectionPopup, {
+      props: { modelValue: true, anchor, selectedText: 'When thou hast' },
+    })
+    const copy = wrapper.get('[data-testid="popup-copy"]')
+    expect(copy.attributes('disabled')).toBeUndefined()
+    await copy.trigger('click')
+    expect(wrapper.emitted('copy')).toBeTruthy()
+  })
+
+  it('disables Remove on a fresh selection (LDS: greyed until marked)', () => {
+    const wrapper = mountWithVuetify(SelectionPopup, {
+      props: { modelValue: true, anchor, selectedText: 'x', canRemove: false },
+    })
+    expect(wrapper.get('[data-testid="popup-remove"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('committed-mark mode: hides Mark/Highlight, enables Remove, emits remove', async () => {
+    const wrapper = mountWithVuetify(SelectionPopup, {
+      props: { modelValue: true, anchor, selectedText: 'When thou hast', canRemove: true },
+    })
+    // Concept/highlight actions are hidden for a committed mark.
+    expect(wrapper.find('[data-testid="popup-concept"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="popup-highlight"]').exists()).toBe(false)
+    const remove = wrapper.get('[data-testid="popup-remove"]')
+    expect(remove.attributes('disabled')).toBeUndefined()
+    await remove.trigger('click')
+    expect(wrapper.emitted('remove')).toBeTruthy()
+  })
 })

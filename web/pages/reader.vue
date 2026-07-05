@@ -173,6 +173,15 @@ function markPhrase(): string {
 }
 const activeMarkPhrase = computed(markPhrase)
 
+// The popup serves two states: a live selection (pendingSelection set) and a
+// committed mark (activeMarkId set, no pending). Copy uses whichever text is
+// current; Remove is enabled only for a committed mark (LDS: greyed on a fresh
+// selection, active on a mark).
+const popupSelectedText = computed(() =>
+  pendingSelection.value ? pendingPhrase.value : activeMarkPhrase.value,
+)
+const popupCanRemove = computed(() => !pendingSelection.value && activeMarkId.value !== null)
+
 const associateLabel = computed(() => {
   if (!associate.value) return null
   if (associate.value.kind === 'pending') {
@@ -327,15 +336,50 @@ async function onPopupHighlight(): Promise<void> {
 }
 
 // --- panel actions ----------------------------------------------------------
-function onMarkClick(id: number): void {
+function onMarkClick(payload: {
+  id: number
+  rect: { left: number; top: number; bottom: number }
+}): void {
+  const { id, rect } = payload
   activeMarkId.value = id
   editingConceptName.value = null
   associate.value = null
+  pendingSelection.value = null
   panelView.value = 'mark'
   // Activating a mark highlights its concept(s) (spec state ②→③ link).
   const m = markStore.marks.value.find((mk) => mk.id === id)
   for (const name of m?.concept_names ?? []) conceptHighlight.add(name)
+  // LDS-style: show the quick-action popup anchored on the mark (Copy / Remove
+  // enabled) alongside the detail panel; single-verse marks also get handles.
+  popupAnchor.value = rect
+  popupOpen.value = true
   if (mobile.value) drawer.value = true
+}
+
+async function onPopupCopy(): Promise<void> {
+  const text = popupSelectedText.value
+  if (!text || !import.meta.client) return
+  try {
+    await navigator.clipboard.writeText(text)
+    notify('Copied')
+  } catch {
+    notify('Could not copy to the clipboard.', 'error')
+  }
+}
+
+async function onPopupRemove(): Promise<void> {
+  const m = activeMark.value
+  if (!m) return
+  const ok = await markStore.remove(m.id)
+  closePopup()
+  if (!ok) {
+    notify(markStore.error.value?.body.detail.message ?? 'Could not remove the mark.', 'error')
+    return
+  }
+  activeMarkId.value = null
+  conceptHighlight.clear()
+  if (panelView.value === 'mark') panelView.value = 'library'
+  notify('Mark removed')
 }
 
 function onNewConcept(prefill: string): void {
@@ -598,8 +642,12 @@ function onChipTap(_payload: { verse: number; token: GreekTokenOut }): void {
     <SelectionPopup
       v-model="popupOpen"
       :anchor="popupAnchor"
+      :selected-text="popupSelectedText"
+      :can-remove="popupCanRemove"
       @concept="onPopupConcept"
       @highlight="onPopupHighlight"
+      @copy="onPopupCopy"
+      @remove="onPopupRemove"
       @cancel="dismissLiveSelection"
     />
 
