@@ -148,16 +148,16 @@ function arcPath(from: number, to: number, bandWidth: number): string {
           <svg class="bracket-band" :height="readerHeight" width="150" :viewBox="`0 0 150 ${readerHeight}`">
             <g v-for="(c, idx) in connections" :key="idx" :style="{ color: TYPES[c.type].color }">
               <path
-                :d="`M 4 ${lineCenter(c.from)} L ${10 + idx * 8} ${lineCenter(c.from)} L ${10 + idx * 8} ${lineCenter(c.to)} L 4 ${lineCenter(c.to)}`"
+                :d="`M 4 ${lineCenter(c.from)} L ${12 + idx * 16} ${lineCenter(c.from)} L ${12 + idx * 16} ${lineCenter(c.to)} L 4 ${lineCenter(c.to)}`"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
               />
               <circle v-if="TYPES[c.type].directional" :cx="4" :cy="lineCenter(c.to)" r="3.5" fill="currentColor" />
               <text
-                :x="16 + idx * 8"
+                :x="18 + idx * 16"
                 :y="(lineCenter(c.from) + lineCenter(c.to)) / 2 + 4"
-                font-size="12"
+                font-size="11.5"
                 fill="currentColor"
               >
                 {{ TYPES[c.type].label }}
@@ -342,8 +342,11 @@ function arcPath(from: number, to: number, bandWidth: number): string {
   min-width: 320px;
 }
 .rline {
-  display: flex;
-  align-items: center;
+  /* NOT flex — a flex container drops the whitespace between the text runs and
+   * the <mark> items ("by faith" → "byfaith"). Block + line-height centers the
+   * single line within the fixed row height while preserving inline spacing. */
+  display: block;
+  line-height: 40px;
   font-size: 1.02rem;
   white-space: nowrap;
 }
