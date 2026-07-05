@@ -463,6 +463,42 @@ class MarksResponse(BaseModel):
     marks: list[MarkOut]
 
 
+class ConnectionCreateRequest(BaseModel):
+    """POST /api/v1/connections body.
+
+    A human-authored typed connection between concepts. ``member_names`` is
+    ordered (position 0, 1, ...); order carries direction for directional claim
+    types. ``types`` is the set of typed claims on the edge (at least one). The
+    concept names must already exist in the registry.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    member_names: list[str] = Field(min_length=2)
+    types: list[str] = Field(min_length=1)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ConnectionOut(BaseModel):
+    """One typed connection with its ordered members."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    note: str | None
+    actor: str
+    members: list[str]
+    types: list[str]
+
+
+class ConnectionsResponse(BaseModel):
+    """GET /api/v1/connections body."""
+
+    model_config = ConfigDict(frozen=True)
+
+    connections: list[ConnectionOut]
+
+
 class ErrorResponse(BaseModel):
     """Error envelope returned via `HTTPException(detail=...)`.
 
