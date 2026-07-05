@@ -8,6 +8,9 @@ node_modules/
 # Wrangler local state
 .wrangler/
 
+# Generated docs bundle (built by scripts/collect-docs.mjs via predev/prebuild)
+public/docs.json
+
 # Test-deploy script scratch dirs
 .test-deploy/
 .dryrun-out/

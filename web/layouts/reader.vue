@@ -11,6 +11,14 @@ const { toast } = useToast()
 <template>
   <v-app>
     <v-main class="reader-main-shell">
+      <NuxtLink
+        to="/docs"
+        class="masthead-link"
+        aria-label="Project docs"
+        data-testid="reader-docs-link"
+      >
+        <v-icon icon="mdi-file-document-multiple-outline" size="small" />
+      </NuxtLink>
       <button
         class="theme-toggle"
         type="button"
@@ -65,6 +73,26 @@ const { toast } = useToast()
   cursor: pointer;
 }
 .theme-toggle:hover {
+  border-color: rgb(var(--v-theme-secondary));
+}
+/* Docs link — same pill treatment as the theme toggle, sat just left of it. */
+.masthead-link {
+  position: fixed;
+  top: 0.55rem;
+  right: 3.05rem;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid rgb(var(--v-border-color));
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
+  text-decoration: none;
+}
+.masthead-link:hover {
   border-color: rgb(var(--v-theme-secondary));
 }
 </style>
